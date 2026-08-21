@@ -65,6 +65,11 @@ class StateTests(unittest.TestCase):
         self.assertIn("35%", tip)
         self.assertIn("+5", tip)
 
+    def test_tooltip_includes_rarity(self):
+        row = {"slot": 0, "type": 757, "stack": 1, "damage": 85, "rare": 8,
+               "pick": 0, "tile_boost": 0, "auto_reuse": 1, "use_time": 15}
+        self.assertIn("Rarity 8", invgrid.tooltip(row, "Terra Blade"))
+
     def test_tooltip_hides_inapplicable_fields(self):
         # An accessory-like item: no damage, no pick power, no reach.
         row = {"slot": 20, "type": 100, "stack": 1, "damage": -1,
@@ -73,6 +78,25 @@ class StateTests(unittest.TestCase):
         self.assertNotIn("Damage", tip)
         self.assertNotIn("Pickaxe power", tip)
         self.assertNotIn("Placement reach", tip)
+
+
+class RarityColorTests(unittest.TestCase):
+    def test_known_rarities_have_distinct_colors(self):
+        self.assertEqual(invgrid.rarity_rgb(0), (200, 200, 200))    # white/common
+        self.assertEqual(invgrid.rarity_rgb(-1), (130, 130, 130))   # gray/junk
+        self.assertNotEqual(invgrid.rarity_rgb(1), invgrid.rarity_rgb(2))
+        self.assertEqual(invgrid.rarity_rgb(10), (255, 40, 100))    # red
+
+    def test_unknown_rarity_falls_back(self):
+        self.assertEqual(invgrid.rarity_rgb(999), (200, 200, 200))
+
+    def test_cell_colors_are_dark_bg_bright_border(self):
+        bg, border = invgrid.cell_colors(10)   # red
+        # background is a dark tint (all channels well below full), border brighter
+        self.assertTrue(all(c <= 120 for c in bg))
+        self.assertTrue(sum(border) > sum(bg))
+        # channels stay in-range
+        self.assertTrue(all(0 <= c <= 255 for c in bg + border))
 
 
 if __name__ == "__main__":

@@ -52,6 +52,42 @@ def stack_badge(stack: int) -> str:
     return str(stack) if stack and stack > 1 else ""
 
 
+# Terraria's canonical item-rarity name colours (the tooltip-name colour).
+RARITY_RGB: dict[int, tuple[int, int, int]] = {
+    -13: (255, 60, 60),   # Master
+    -12: (200, 160, 255),  # Expert (rainbow in-game; static approximation)
+    -11: (255, 175, 0),   # Quest / Amber
+    -1: (130, 130, 130),  # Gray (junk)
+    0: (200, 200, 200),   # White (common)
+    1: (150, 150, 255),   # Blue
+    2: (150, 255, 150),   # Green
+    3: (255, 200, 150),   # Orange
+    4: (255, 150, 150),   # Light red
+    5: (255, 150, 255),   # Pink
+    6: (210, 160, 255),   # Light purple
+    7: (150, 255, 10),    # Lime
+    8: (255, 255, 10),    # Yellow
+    9: (5, 200, 255),     # Cyan
+    10: (255, 40, 100),   # Red
+    11: (180, 40, 255),   # Purple
+}
+_DEFAULT_RGB = (200, 200, 200)
+
+
+def rarity_rgb(rare: int) -> tuple[int, int, int]:
+    """Canonical bright colour for a rarity tier."""
+    return RARITY_RGB.get(rare, _DEFAULT_RGB)
+
+
+def cell_colors(rare: int) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """(background, border) RGB for a slot tinted by rarity. The background is a
+    dark tint so light cell text stays readable; the border is brighter."""
+    r, g, b = rarity_rgb(rare)
+    bg = (r * 20 // 100 + 20, g * 20 // 100 + 20, b * 20 // 100 + 20)
+    border = (r * 55 // 100 + 45, g * 55 // 100 + 45, b * 55 // 100 + 45)
+    return bg, border
+
+
 def is_empty(row: dict) -> bool:
     return not row or row.get("type", 0) == 0
 
@@ -69,6 +105,8 @@ def tooltip(row: dict, name: str) -> str:
         lines.append(f"Pickaxe power {row['pick']}%")
     if row.get("tile_boost", 0) > 0:
         lines.append(f"Placement reach +{row['tile_boost']}")
+    if "rare" in row:
+        lines.append(f"Rarity {row['rare']}")
     lines.append("Auto-reuse " + ("on" if row.get("auto_reuse") else "off"))
     lines.append(f"Use time {row.get('use_time')}")
     return "\n".join(lines)

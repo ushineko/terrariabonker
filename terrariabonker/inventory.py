@@ -35,6 +35,7 @@ ITEM_HAMMER = 0x98      # hammer power %
 ITEM_DAMAGE = 0xAC      # weapon/tool damage (-1 for non-damaging items)
 ITEM_CONSUMABLE = 0xBD  # byte bool; if set, the item is used up on use (careful!)
 ITEM_AUTOREUSE = 0xBE   # byte bool; auto-swing while the button is held
+ITEM_RARE = 0xF8        # rarity tier (int): -1 gray .. 0 white .. 10 red .. 11 purple
 
 
 @dataclass
@@ -49,6 +50,7 @@ class Slot:
     tile_boost: int
     damage: int
     auto_reuse: int
+    rare: int
 
     @property
     def empty(self) -> bool:
@@ -92,6 +94,7 @@ class Inventory:
             tile_boost=self.mem.read_i32(addr + ITEM_TILEBOOST),
             damage=self.mem.read_i32(addr + ITEM_DAMAGE),
             auto_reuse=self.mem.read(addr + ITEM_AUTOREUSE, 1)[0] if addr else 0,
+            rare=self.mem.read_i32(addr + ITEM_RARE),
         )
 
     def slots(self) -> list[Slot]:

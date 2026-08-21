@@ -189,7 +189,9 @@ class MainWindow(QWidget):
         """Code-patch cheats, embedded in the Trainer tab. No Cheat Engine at
         runtime — these are byte patches applied through /proc; a game restart
         clears them. (The 'CE' tab is reserved for real CE instrumentation.)"""
-        box = QGroupBox("Code patches (no CE needed — via /proc; cleared on game restart)")
+        box = QGroupBox("Code patches")
+        box.setToolTip("Byte patches applied via /proc — no Cheat Engine needed at "
+                       "runtime. A game restart clears them.")
         g = QGridLayout(box)
         for row, (name, cheat) in enumerate(CHEATS.items()):
             cb = QCheckBox(cheat.label)
@@ -373,7 +375,11 @@ class MainWindow(QWidget):
         badge = invgrid.stack_badge(row.get("stack", 0))
         cell.setText(invgrid.abbrev(name) + (f"\n×{badge}" if badge else ""))
         cell.setToolTip(invgrid.tooltip(row, name))
-        cell.setStyleSheet("")
+        bg, border = invgrid.cell_colors(row.get("rare", 0))
+        cell.setStyleSheet(
+            f"QPushButton {{ background-color: rgb{bg};"
+            f" border: 1px solid rgb{border}; border-radius: 4px;"
+            " color: #f0f0f0; }")
 
     def _row_for(self, slot: int) -> dict:
         return next((r for r in self._all_rows if r["slot"] == slot),

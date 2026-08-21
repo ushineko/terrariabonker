@@ -60,6 +60,7 @@ class ItemSlot:
     pick: int
     tile_boost: int
     use_anim: int
+    rare: int
 
 
 @dataclass(frozen=True)
@@ -200,7 +201,7 @@ class Service:
     @staticmethod
     def _to_slot(s: Slot) -> ItemSlot:
         return ItemSlot(s.index, s.type, s.stack, s.damage, s.auto_reuse,
-                        s.use_time, s.pick, s.tile_boost, s.use_anim)
+                        s.use_time, s.pick, s.tile_boost, s.use_anim, s.rare)
 
     def inventory(self) -> list[ItemSlot]:
         return [self._to_slot(s) for s in self._live_inventory().slots()]

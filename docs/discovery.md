@@ -90,6 +90,24 @@ second, four times per game frame. It is not a code patch, so a single hit large
 than current HP could still register death within a frame before the next
 rewrite; raise permanent max HP (`set-max-hp`) for margin against big hits.
 
+## Item field offsets by template diff (e.g. `rare` = 0xF8)
+
+`Item` field offsets are found by comparing pristine template items. The game keeps
+one template `Item` per type in `ContentSamples`; `service._template_block` locates it
+by scanning for an object whose `+0x6C` equals the wanted type and whose `+0x00`
+equals the shared `Item` vtable. To locate a field, read the templates of several
+items whose value for that field is known and find the single offset that matches all
+of them.
+
+`Item.rare` (rarity tier, int) was pinned to **0xF8** this way: templates of Dirt
+Block (0), Aglet (1), Muramasa (2), Excalibur (5) and Terra Blade (8) share exactly
+one int offset carrying those values, and it validated across the spectrum — Old Shoe
+−1 (gray), commons 0 (white), Shackle/Aglet 1 (blue), Meowmere/Zenith 10 (red). Small
+integer fields are ambiguous alone (many offsets hold a `2`), so use four or more
+items with *distinct* known values; the intersection is unique. Bright rarity values
+outside the templated `[0x1C, 0x140)` block are found by resolving each template's base
+address and reading a wider window.
+
 ## Re-deriving after an update
 
 `version.py` gates the trainer on the exact build (`1.4.5.7`, Steam buildid

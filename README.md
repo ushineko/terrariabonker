@@ -131,8 +131,9 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   with tunable value spinboxes for mining and reach. No Cheat Engine at runtime;
   a game restart clears them.
 - **Inventory** tab — a grid mirroring the in-game inventory (Hotbar / Inventory /
-  Coins / Ammo). Each cell shows an abbreviated name and stack, with a full-detail
-  tooltip. Click a filled cell to edit it in a dialog, or an empty cell to place a
+  Coins / Ammo). Each cell shows an abbreviated name and stack, is tinted by the
+  item's **rarity** (Terraria's own tooltip colours), and has a full-detail tooltip.
+  Click a filled cell to edit it in a dialog, or an empty cell to place a
   fully-statted item (item field autocompletes over all item names); the dialog can
   also clear a slot.
 
