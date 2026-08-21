@@ -78,9 +78,22 @@ pass Terraria's own invariants and are confirmed by a real name string:
 Against ~1.6 GB this returns only the player's own copies (usually the live one
 plus one or two load-time snapshots sharing the name) in about a second. The
 snapshots are inert: writes to them persist without reverting and do not affect
-gameplay, so freezing every match is safe. `pick_live` guesses the live copy for
-display by sampling for activity, and falls back to the copy whose HP is below
-max; freezing does not depend on the guess being right.
+gameplay, so freezing every match is safe.
+
+Picking the *live* copy for reads (inventory/status display) is done by ground
+truth, not a heuristic: `resolve_local_player` resolves `Main.player[Main.myPlayer]`.
+It AOB-finds `Main.get_LocalPlayer` — whose JIT tail
+`cmp [eax+0C],ecx; jbe; lea eax,[eax+ecx*4+10]; mov eax,[eax]; ret`
+(`39 48 0C 0F 86 07 00 00 00 8D 44 88 10 8B 00 C3`) is preceded by two
+`mov reg,[abs]` that load the `Main.player` and `Main.myPlayer` statics — reads those
+two addresses out of the instruction operands, indexes the `Player[]` szarray
+(`arr + myPlayer*4 + 0x10`), and adds `Player.statLife`'s object offset (`0x738`).
+This works even while the game is paused, which the activity heuristic (`pick_live`)
+cannot: the trainer is normally used while its window has focus, so Terraria's
+pause-on-focus-loss freezes every copy and the heuristic's "richest inventory"
+fallback can pick a stale snapshot that outnumbers the live player's items.
+`pick_live` remains only as a fallback if the `get_LocalPlayer` pattern is missing
+(e.g. after a game update). Freezing still acts on every matched copy regardless.
 
 ## Godmode
 

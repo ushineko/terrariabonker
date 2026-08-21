@@ -20,7 +20,7 @@ import numpy as np
 
 from terrariabonker import version as ver
 from terrariabonker.inventory import INVENTORY_SLOTS, ITEM_TYPE, Inventory, Slot
-from terrariabonker.locate import find_players, pick_live
+from terrariabonker.locate import find_players, pick_live, resolve_local_player
 from terrariabonker.player import Player
 from terrariabonker.proc import Mem, ProcError, find_pid
 
@@ -111,14 +111,23 @@ class Service:
             raise ServiceError("no player found. Load into a world first.")
         return blocks
 
-    def live_block(self):
-        """The live player copy: activity-picked, else richest inventory."""
-        blocks = self.players()
+    def _select_live(self, blocks):
+        """Pick the live player copy. Ground truth first (Main.player[myPlayer], works
+        even while paused); fall back to the activity heuristic, then richest inventory.
+        The heuristic's max-inventory fallback is unreliable — a frozen snapshot can
+        hold more items than the live player — so ground truth is strongly preferred."""
+        live = resolve_local_player(self.mem)
+        if live is not None:
+            return live
         live = pick_live(self.mem, blocks)
         if live is None:
             live = max(blocks,
                        key=lambda b: Inventory(self.mem, b.life_addr).nonempty_count())
         return live
+
+    def live_block(self):
+        """The live player copy (see _select_live)."""
+        return self._select_live(self.players())
 
     def _all_targets(self):
         """Every player copy as a Player handle (stat writes hit all; snapshots inert)."""
@@ -188,10 +197,7 @@ class Service:
         player = inv_slots = None
         inv_slots = []
         if blocks:
-            live = pick_live(self.mem, blocks)
-            if live is None:
-                live = max(blocks,
-                           key=lambda b: Inventory(self.mem, b.life_addr).nonempty_count())
+            live = self._select_live(blocks)
             player = PlayerState(live.name, live.stat_life, live.stat_life_max,
                                  live.stat_mana, live.stat_mana_max)
             if with_inventory:
