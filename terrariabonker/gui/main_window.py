@@ -16,7 +16,7 @@ import os
 import sys
 
 from PyQt6.QtCore import QProcess, Qt, QTimer
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QDoubleSpinBox,
                              QGridLayout, QGroupBox, QHBoxLayout, QLabel,
                              QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
@@ -31,6 +31,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 ENTRY = os.path.join(_ROOT, "terrariabonker.py")
 ICON = os.path.join(_ROOT, "assets", "terrariabonker.svg")
 APPID = "105600"        # Terraria on Steam; launched via steam://rungameid/
+CELL_W, CELL_H = 66, 46  # inventory grid cell size
+CELL_PT = 8              # cell font point size — small enough that names don't clip
 
 
 def _cli_args(sub_args: list[str]) -> tuple[str, list[str]]:
@@ -144,6 +146,7 @@ class MainWindow(QWidget):
 
         area = QScrollArea()
         area.setWidgetResizable(True)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         inner = QWidget()
         col = QVBoxLayout(inner)
         for title, rng, cols in invgrid.SECTIONS:
@@ -157,12 +160,21 @@ class MainWindow(QWidget):
             col.addWidget(box)
         col.addStretch()
         area.setWidget(inner)
+        # The grid's natural size governs the window minimum, so the full 10-column
+        # layout shows without a horizontal scrollbar and without hand-resizing.
+        inner.adjustSize()
+        sh = inner.sizeHint()
+        area.setMinimumWidth(sh.width() + 6)
+        area.setMinimumHeight(sh.height() + 6)
         ov.addWidget(area, 1)
         return outer
 
     def _make_cell(self, slot: int) -> QPushButton:
         b = QPushButton("")
-        b.setFixedSize(64, 46)
+        b.setFixedSize(CELL_W, CELL_H)
+        f = QFont(b.font())
+        f.setPointSize(CELL_PT)             # a QFont, not a stylesheet, so cell
+        b.setFont(f)                        # recolouring in _render_cell keeps it
         b.clicked.connect(lambda _=False, s=slot: self._on_cell_clicked(s))
         return b
 
@@ -410,6 +422,8 @@ def run() -> int:
     if os.path.exists(ICON):
         app.setWindowIcon(QIcon(ICON))
     w = MainWindow()
-    w.resize(560, 620)
+    # Open at the natural minimum (the inventory grid drives it) so the full grid
+    # is visible immediately; the Inventory tab is the widest/tallest.
+    w.resize(w.sizeHint())
     w.show()
     return app.exec()

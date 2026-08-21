@@ -28,7 +28,7 @@ def section_of(index: int) -> str | None:
     return None
 
 
-def abbrev(name: str, width: int = 9) -> str:
+def abbrev(name: str, width: int = 8) -> str:
     """A short cell label for an item name; the tooltip carries the full name.
 
     Short names pass through. Multi-word names collapse to dot-joined prefixes
