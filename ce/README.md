@@ -97,6 +97,8 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
 - `poc_grabitems.lua` — dump `Player.GrabItems` to find the pickup-range hook site: a
   call returns the grab range in eax, then `mov [ebp-54],eax`; injecting `imul eax,N`
   before that store scales the pickup radius (ported from the FearLess ReGrind table).
+- `poc_main_craft.lua` / `poc_craftingui.lua` / `poc_gridtoggle.lua` — the (shelved)
+  crafting-window hotkey investigation; write-up in `CRAFTING_WINDOW_FINDINGS.md`.
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 
