@@ -38,25 +38,30 @@ holds no state; stopping it ends every effect.*
 - **Long reach** — extends placement distance on all items.
 - **Give items by name** — a searchable browser over all 6,195 item names,
   extracted from the game's own `Terraria.exe` for the exact 1.4.5.7 build.
+- **Code-patch cheats** — global mining speed, item-independent placement reach, and
+  fast placement: things a value-write can't hold, applied by patching the game's JIT
+  code through `/proc` (derived with Cheat Engine, but no CE needed at runtime).
 
-## The persistent/frame-reset split
+## Two kinds of cheat: value edits and code patches
 
-An external trainer can only hold values the game keeps frame-to-frame. Terraria
-recomputes some player fields every frame in `ResetEffects` and reads them within
-that same frame, so an external `/proc` write always loses the race (the same
-reason a single lethal hit can kill through a health freeze). This draws a hard line:
+Terraria recomputes some player fields every frame in `ResetEffects` and reads them
+within that same frame, so a plain `/proc` value-write loses the race (the same
+reason a single lethal hit can kill through a health freeze). Those need a **code
+patch** — remove the reset (or force a constant at the read site) so the value holds.
 
-| Reachable externally (persistent) | Needs Cheat Engine (frame-reset code) |
+Crucially, applying a patch is *also* just a `/proc` byte-write, so this trainer does
+both — no Cheat Engine at runtime:
+
+| Value edits (persistent fields) | Code patches (frame-reset fields) |
 | :--- | :--- |
-| HP, mana, godmode-by-freeze | true damage-immunity (patch the death check) |
-| Item stack / type / damage / auto-reuse | — |
-| Mining / placing / attack **speed** (`Item.useTime`) | global `pickSpeed` multiplier |
-| Placement **distance** (`Item.tileBoost`) | base tile reach (`tileRangeX/Y`) |
-| Pickaxe power (`Item.pick`) | pickup range (`itemGrabRange`) |
+| HP, mana, godmode-by-freeze, max stats | **Global mining speed** (`pickSpeed`) |
+| Item stack / type / damage / auto-reuse | **Placement reach** (`blockRange`, item-independent) |
+| Per-item use-speed (`Item.useTime`), pick power | **Fast placement** (`ApplyItemTime` timing) |
+| Placement distance per item (`Item.tileBoost`) | *(planned: true damage-immunity, pickup range)* |
 
-The externally-reachable half is this trainer. The frame-reset half is planned as
-a companion `tables/Terraria.CT` Cheat Engine table (see the Megabonk.CT sibling),
-which patches the reset code the way a tModLoader mod does from inside the frame.
+The code-patch sites were **derived with Cheat Engine's mono dissector** (see
+`ce/README.md`), but the trainer locates them by AOB and patches them itself. CE is
+only needed to re-derive the patterns after a game update.
 
 ## Requirements
 
@@ -95,6 +100,11 @@ terrariabonker set-stack 40 9999   # set a slot's quantity
 terrariabonker set-item 0 3507 --damage 200 --auto-reuse 1   # edit a slot
 terrariabonker fast-mining         # speed + power on all pickaxes
 terrariabonker long-reach --tiles 25
+
+terrariabonker patch status                 # code-patch cheats: on/off
+terrariabonker patch enable mining          # global mining speed (pickSpeed)
+terrariabonker patch enable reach           # placement reach (blockRange)
+terrariabonker patch disable fast_place     # fast placement (ApplyItemTime)
 ```
 
 Every memory-touching command elevates through sudo first and is gated on the
@@ -110,6 +120,8 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   pick); double-click Stack / ID / Dmg / Auto to edit in place. **Give item**
   takes an item name (autocompleted) or an ItemID and drops it into the first
   empty slot, warning if the inventory is full.
+- **CE Patches** tab — checkboxes for the code-patch cheats (global mining speed,
+  placement reach, fast placement); a game restart clears them.
 
 The window runs unprivileged and runs each action as a short `sudo` CLI call, so
 Qt never runs as root.
@@ -149,6 +161,8 @@ terrariabonker/
 │   ├── player.py               player stat offsets and a read/write handle
 │   ├── inventory.py            inventory array + Item field editor
 │   ├── trainer.py              the freeze engine (godmode, infinite mana)
+│   ├── patcher.py              code-patch cheats (AOB resolve + patch via /proc)
+│   ├── service.py              view-neutral core shared by CLI and GUI
 │   ├── version.py              build detection and the compatibility gate
 │   ├── names.py                ItemID -> name lookup for the item browser
 │   ├── data/items.json         ItemID name map (extracted from Terraria.exe)
@@ -156,6 +170,7 @@ terrariabonker/
 │   ├── cli.py                  argparse front end
 │   └── gui/main_window.py      PyQt6 control panel
 ├── docs/discovery.md           how the offsets were derived and how to rebuild them
+├── ce/                         Cheat Engine spike: how the code-patch sites were found
 ├── specs/                      feature specs
 └── tests/                      unittest suite (headless, no game, no root)
 ```

@@ -265,6 +265,11 @@ class Service:
             inv.set_stack(empty, stack)
         return empty
 
+    def patcher(self):
+        """A Patcher bound to this game process (the code-patch cheats)."""
+        from terrariabonker.patcher import Patcher
+        return Patcher(self.mem)
+
     def fast_mining(self, use_time: int = 8, use_anim: int = 13, pick: int = 200) -> list[int]:
         hit = []
         for inv in self._all_inventories():

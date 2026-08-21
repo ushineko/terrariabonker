@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComple
 
 from terrariabonker import names
 from terrariabonker.gui import client
+from terrariabonker.patcher import CHEATS
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ENTRY = os.path.join(_ROOT, "terrariabonker.py")
@@ -46,6 +47,8 @@ class MainWindow(QWidget):
         self._procs: set[QProcess] = set()   # keep refs so none is GC'd mid-run
         self._status_busy = False
         self._filling = False                # suppress cell-edit signals during fill
+        self._patch_filling = False          # suppress patch-checkbox signals during refresh
+        self._patch_cbs: dict = {}           # cheat name -> checkbox
         self._rows: list[dict] = []          # rows currently shown in the table
         self._all_rows: list[dict] = []      # every slot (incl. empty), for slot-finding
         self._build()
@@ -65,8 +68,8 @@ class MainWindow(QWidget):
         tabs = QTabWidget()
         tabs.addTab(self._trainer_tab(), "Trainer")
         tabs.addTab(self._inventory_tab(), "Inventory")
-        tabs.currentChanged.connect(
-            lambda i: self.refresh_inventory() if i == 1 else None)
+        tabs.addTab(self._patches_tab(), "CE Patches")
+        tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(tabs, 1)
 
         self.log = QPlainTextEdit(readOnly=True)
@@ -161,6 +164,51 @@ class MainWindow(QWidget):
         col.addWidget(QLabel("<i>Double-click ID / Stack / Dmg / Auto / useTime to edit. "
                              "Auto: 1 = auto-swing; lower useTime = faster.</i>"))
         return w
+
+    def _on_tab_changed(self, i: int):
+        if i == 1:
+            self.refresh_inventory()
+        elif i == 2:
+            self.refresh_patches()
+
+    def _patches_tab(self) -> QWidget:
+        w = QWidget()
+        col = QVBoxLayout(w)
+        box = QGroupBox("Code patches (frame-reset cheats — need patching, not just editing)")
+        bl = QVBoxLayout(box)
+        for name, cheat in CHEATS.items():
+            cb = QCheckBox(cheat.label)
+            cb.setToolTip(cheat.note)
+            cb.toggled.connect(lambda on, n=name: self._on_patch_toggled(n, on))
+            self._patch_cbs[name] = cb
+            bl.addWidget(cb)
+        col.addWidget(box)
+        col.addWidget(self._btn2("Refresh", self.refresh_patches))
+        col.addWidget(QLabel(
+            "<i>These patch the game's code (via /proc) so a value holds against the "
+            "per-frame reset — the cheats a value-write alone can't do. A game restart "
+            "clears them. Offsets are for 1.4.5.7; re-derive with the ce/ tools after an "
+            "update.</i>"))
+        col.addStretch()
+        return w
+
+    def _on_patch_toggled(self, name: str, on: bool):
+        if self._patch_filling:
+            return
+        self._run(client.patch_set_argv(name, on))
+        QTimer.singleShot(500, self.refresh_patches)
+
+    def refresh_patches(self):
+        self._spawn(client.patch_status_argv(), on_output=self._render_patches)
+
+    def _render_patches(self, raw: str):
+        st = client.parse_patch_status(raw)
+        if st is None:
+            return
+        self._patch_filling = True
+        for name, cb in self._patch_cbs.items():
+            cb.setChecked(bool(st.get(name)))
+        self._patch_filling = False
 
     def _spin(self, lo, hi, val):
         s = QSpinBox()

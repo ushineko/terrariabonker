@@ -86,6 +86,21 @@ def long_reach_argv(tiles: int) -> list[str]:
     return ["long-reach", "--tiles", str(tiles)]
 
 
+def patch_status_argv() -> list[str]:
+    return ["patch", "status", "--json"]
+
+
+def parse_patch_status(raw: str) -> dict | None:
+    try:
+        return json.loads(raw.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def patch_set_argv(cheat: str, on: bool) -> list[str]:
+    return ["patch", "enable" if on else "disable", cheat]
+
+
 def freeze_argv(godmode: bool, mana: bool) -> list[str]:
     argv = ["freeze"]
     if godmode:
@@ -99,7 +114,7 @@ def freeze_argv(godmode: bool, mana: bool) -> list[str]:
 # real subcommand of the CLI parser (and that --json reads are supported).
 COMMANDS: set[str] = {
     "status", "inventory", "set-hp", "set-mana", "set-max-hp", "set-max-mana",
-    "set-stack", "set-item", "give", "fast-mining", "long-reach", "freeze",
+    "set-stack", "set-item", "give", "fast-mining", "long-reach", "freeze", "patch",
 }
 
 # argv samples exercised by the parity test to prove they parse cleanly.
@@ -110,4 +125,5 @@ SAMPLE_ARGVS: list[list[str]] = [
     set_item_argv(0, 3507, stack=1, damage=200, auto_reuse=1, use_time=8),
     give_argv(2, 999), fast_mining_argv(), long_reach_argv(25),
     freeze_argv(True, True),
+    patch_status_argv(), patch_set_argv("mining", True), patch_set_argv("reach", False),
 ]

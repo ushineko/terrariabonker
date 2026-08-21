@@ -13,6 +13,7 @@ import json
 import sys
 from dataclasses import asdict
 
+from terrariabonker.patcher import CHEATS, PatchError
 from terrariabonker.proc import elevate
 from terrariabonker.service import Service, ServiceError
 from terrariabonker.trainer import Freezer
@@ -172,6 +173,29 @@ def cmd_freeze(args) -> int:
     return 0
 
 
+def cmd_patch(args) -> int:
+    svc = _svc(guard=True, force=args.force)
+    p = svc.patcher()
+    try:
+        if args.action == "status":
+            st = p.status()
+            if args.json:
+                print(json.dumps(st))
+                return 0
+            for name, on in st.items():
+                print(f"  [{'x' if on else ' '}] {name:<11} {CHEATS[name].label}")
+        elif args.action in ("enable", "on"):
+            p.enable(args.cheat)
+            print(f"[OK] enabled {args.cheat}")
+        elif args.action in ("disable", "off"):
+            p.disable(args.cheat)
+            print(f"[OK] disabled {args.cheat}")
+    except PatchError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_gui(args) -> int:
     try:
         from terrariabonker.gui.main_window import run
@@ -276,6 +300,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tiles", type=int, default=20, help="extra tiles of reach (default 20)")
     force_flag(p)
     p.set_defaults(func=cmd_long_reach)
+
+    p = sub.add_parser("patch", help="code-patch cheats (mining/reach/placement)")
+    p.add_argument("action", choices=["status", "enable", "disable", "on", "off"])
+    p.add_argument("cheat", nargs="?", choices=list(CHEATS))
+    p.add_argument("--json", action="store_true", help="machine-readable status")
+    force_flag(p)
+    p.set_defaults(func=cmd_patch)
 
     p = sub.add_parser("freeze", help="hold values against the game (godmode etc.)")
     p.add_argument("--godmode", action="store_true", help="pin HP to max")
