@@ -1,10 +1,12 @@
 """Terraria ItemID <-> display-name lookup for the inventory browser.
 
-Backed by ``data/items.json`` (id -> name), generated from a Terraria ``ItemID.cs``.
-The bundled map is 1.4.4.1 (5452 items, Count 5453), which covers the running
-1.4.5.7 build; only a handful of 1.4.5-only ids (above ~5453) may be missing and
-fall back to ``#<id>`` in the UI. Regenerate ``items.json`` from a matching
-``ItemID.cs`` if a future update adds items.
+Backed by ``data/items.json`` (id -> name), extracted directly from the game's own
+``Terraria.exe`` (build 1.4.5.7: 6195 items) by ``tools/extract_item_names`` — it
+joins the ``ItemID`` constant fields (internal-name -> id) with the embedded
+``en-US.Items.json`` localization resource (internal-name -> display name). This is
+authoritative and complete for the exact build, and was the only way to name items
+on a release so new that no community ``ItemID.cs`` existed yet. Regenerate with the
+tool after a game update; unknown ids fall back to ``#<id>`` in the UI.
 """
 
 from __future__ import annotations

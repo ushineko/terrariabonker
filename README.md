@@ -36,7 +36,8 @@ holds no state; stopping it ends every effect.*
   speed), **pickaxe power**, and **placement reach** (`tileBoost`).
 - **Fast mining** — sets every pickaxe to Picksaw-tier speed and power in one click.
 - **Long reach** — extends placement distance on all items.
-- **Give items by name** — a searchable browser over 3,900+ item names.
+- **Give items by name** — a searchable browser over all 6,195 item names,
+  extracted from the game's own `Terraria.exe` for the exact 1.4.5.7 build.
 
 ## The persistent/frame-reset split
 
@@ -150,7 +151,8 @@ terrariabonker/
 │   ├── trainer.py              the freeze engine (godmode, infinite mana)
 │   ├── version.py              build detection and the compatibility gate
 │   ├── names.py                ItemID -> name lookup for the item browser
-│   ├── data/items.json         bundled ItemID name map
+│   ├── data/items.json         ItemID name map (extracted from Terraria.exe)
+├── tools/extract_item_names/   dotnet tool that regenerates items.json from the exe
 │   ├── cli.py                  argparse front end
 │   └── gui/main_window.py      PyQt6 control panel
 ├── docs/discovery.md           how the offsets were derived and how to rebuild them
