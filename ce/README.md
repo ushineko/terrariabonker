@@ -90,6 +90,10 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
 - `poc_item_fields.lua` — dump `Terraria.Item` field offsets (mono metadata). Used to
   pin `prefix` = 0x15C (a byte; not template-diffable since every template has prefix
   0) and to cross-check `defense` = 0xD4 / `rare` = 0xF8 against the /proc offsets.
+- `poc_player_reach.lua` / `poc_getranges.lua` / `poc_mingetranges.lua` — the tile-reach
+  investigation: Player reach-field offsets, the 2-out `TileReachCheckSettings.GetRanges`
+  (the hook target for unified mining+interaction reach), and the mining chain proving
+  the 4-out overload calls the 2-out. Full write-up in `REACH_FINDINGS.md`.
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 
