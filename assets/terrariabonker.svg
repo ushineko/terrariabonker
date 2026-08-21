@@ -1,31 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 16 16" shape-rendering="crispEdges">
-  <!-- terrariabonker icon: a pixel grass-topped dirt block with a small pickaxe.
-       Original pixel art; not a game asset. -->
-  <rect width="16" height="16" fill="#3b6ea5"/>            <!-- sky -->
-  <!-- dirt body -->
-  <rect x="2" y="5" width="12" height="9" fill="#7a4a24"/>
-  <rect x="2" y="5" width="12" height="9" fill="none" stroke="#5c3617" stroke-width="0.5"/>
-  <!-- dirt speckles (darker/lighter pixels) -->
-  <rect x="4"  y="7"  width="1" height="1" fill="#5c3617"/>
-  <rect x="8"  y="8"  width="1" height="1" fill="#5c3617"/>
-  <rect x="11" y="10" width="1" height="1" fill="#5c3617"/>
-  <rect x="5"  y="11" width="1" height="1" fill="#5c3617"/>
-  <rect x="9"  y="11" width="1" height="1" fill="#8f5a2c"/>
-  <rect x="3"  y="9"  width="1" height="1" fill="#8f5a2c"/>
-  <!-- grass top -->
-  <rect x="2" y="3" width="12" height="2" fill="#3f9d3a"/>
-  <rect x="2" y="3" width="12" height="1" fill="#57c04d"/>
-  <!-- grass blades -->
-  <rect x="3"  y="2" width="1" height="1" fill="#57c04d"/>
-  <rect x="7"  y="1" width="1" height="2" fill="#57c04d"/>
-  <rect x="11" y="2" width="1" height="1" fill="#57c04d"/>
-  <!-- pickaxe: wooden handle + stone head, diagonal -->
-  <rect x="9"  y="6"  width="1" height="1" fill="#c9a24b"/>
-  <rect x="10" y="7"  width="1" height="1" fill="#c9a24b"/>
-  <rect x="11" y="8"  width="1" height="1" fill="#a9812f"/>
-  <rect x="12" y="9"  width="1" height="1" fill="#a9812f"/>
-  <rect x="8"  y="5"  width="1" height="1" fill="#b7bfc6"/>
-  <rect x="9"  y="4"  width="1" height="1" fill="#dfe6ec"/>
-  <rect x="10" y="4"  width="2" height="1" fill="#b7bfc6"/>
-  <rect x="12" y="5"  width="1" height="1" fill="#8f979e"/>
+  <!-- terrariabonker icon: the iconic grass-topped dirt block, full-bleed pixel art.
+       Simplified (no pickaxe) so it reads at small sizes. Original art; not a game asset. -->
+
+  <!-- dirt body fills the tile -->
+  <rect width="16" height="16" fill="#7a4a24"/>
+
+  <!-- dirt shading: darker toward the bottom for a little depth -->
+  <rect y="12" width="16" height="4" fill="#6b3f1e"/>
+
+  <!-- dirt speckles -->
+  <rect x="3"  y="7"  width="1" height="1" fill="#5c3617"/>
+  <rect x="9"  y="8"  width="1" height="1" fill="#5c3617"/>
+  <rect x="12" y="10" width="1" height="1" fill="#5c3617"/>
+  <rect x="6"  y="13" width="1" height="1" fill="#4d2c12"/>
+  <rect x="2"  y="10" width="1" height="1" fill="#96602f"/>
+  <rect x="7"  y="6"  width="1" height="1" fill="#96602f"/>
+  <rect x="11" y="7"  width="1" height="1" fill="#96602f"/>
+  <rect x="10" y="13" width="1" height="1" fill="#96602f"/>
+
+  <!-- grass band on top -->
+  <rect width="16" height="4" fill="#3f9d3a"/>
+  <rect width="16" height="2" fill="#5fc94f"/>
+
+  <!-- grass overhang dripping into the dirt -->
+  <rect x="1"  y="4" width="1" height="1" fill="#3f9d3a"/>
+  <rect x="5"  y="4" width="1" height="2" fill="#3f9d3a"/>
+  <rect x="8"  y="4" width="1" height="1" fill="#3f9d3a"/>
+  <rect x="11" y="4" width="1" height="2" fill="#3f9d3a"/>
+  <rect x="14" y="4" width="1" height="1" fill="#3f9d3a"/>
 </svg>
