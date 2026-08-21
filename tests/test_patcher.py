@@ -22,8 +22,8 @@ def game(tmp_path, monkeypatch):
     m.plant_mono_string(NAME_AT, "hero")
     m.plant_player(LIFE, [100, 100, 80, 20, 20, 20], NAME_AT)
     # plant the anchors at known spots in the "code" region
-    m.write(CODE + 0x100, ANCHORS["reset_block"])
-    m.write(CODE + 0x400, ANCHORS["place"])
+    m.write(CODE + 0x100, ANCHORS["reset_block"].raw)
+    m.write(CODE + 0x400, ANCHORS["place"].raw)
     p = Patcher(m)
     p._exec_regions = lambda: [(CODE, CODE + 0x1000)]   # only scan the planted region
     return m, p
@@ -31,7 +31,26 @@ def game(tmp_path, monkeypatch):
 
 def test_status_all_off_initially(game):
     _, p = game
-    assert p.status() == {"mining": False, "reach": False, "fast_place": False}
+    assert p.status() == {"mining": False, "reach": False,
+                          "fast_place": False, "tool_reach": False}
+
+
+def test_tool_reach_injection_roundtrip(game):
+    m, p = game
+    m.write(CODE + 0x700, ANCHORS["getranges"].raw)     # plant the method prologue
+    inj = P.INJECTIONS["tool_reach"]
+    inject = CODE + 0x700 + inj.inject_off
+    m.write(inject, inj.overwrite)                        # original bytes at the site
+    p.enable("tool_reach", value=40)
+    assert m.read(inject, 1) == b"\xe9"                   # jmp to the cave installed
+    assert p.is_enabled("tool_reach")
+    rec = p._inj["tool_reach"]
+    # the cave holds the stub: mov [esi],40 ; mov [edi],40 ; <overwrite> ; jmp back
+    assert m.read(rec["cave"], 2) == b"\xc7\x06"
+    assert struct.unpack("<i", m.read(rec["cave"] + 2, 4))[0] == 40
+    p.disable("tool_reach")
+    assert m.read(inject, 5) == inj.overwrite            # site restored
+    assert not p.is_enabled("tool_reach")
 
 
 def test_enable_disable_fast_place(game):

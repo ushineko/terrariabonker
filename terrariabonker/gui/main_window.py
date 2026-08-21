@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QDoubleSpinBox,
 from terrariabonker import names
 from terrariabonker.gui import client, invgrid
 from terrariabonker.gui.item_dialog import ItemEditDialog
-from terrariabonker.patcher import CHEATS
+from terrariabonker.patcher import PATCH_CATALOG
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ENTRY = os.path.join(_ROOT, "terrariabonker.py")
@@ -182,45 +182,43 @@ class MainWindow(QWidget):
         if i == 1:
             self.refresh_inventory()
 
-    # units shown beside a valued code-patch spinbox
-    _PATCH_UNIT = {"mining": "pickSpeed · lower = faster", "reach": "extra tiles"}
-
     def _patches_group(self) -> QGroupBox:
         """Code-patch cheats, embedded in the Trainer tab. No Cheat Engine at
-        runtime — these are byte patches applied through /proc; a game restart
-        clears them. (The 'CE' tab is reserved for real CE instrumentation.)"""
+        runtime — these are byte patches (and one code-cave injection) applied through
+        /proc; a game restart clears them. (The 'CE' tab is reserved for real CE
+        instrumentation.)"""
         box = QGroupBox("Code patches")
         box.setToolTip("Byte patches applied via /proc — no Cheat Engine needed at "
                        "runtime. A game restart clears them.")
         g = QGridLayout(box)
-        for row, (name, cheat) in enumerate(CHEATS.items()):
-            cb = QCheckBox(cheat.label)
-            cb.setToolTip(cheat.note)
+        for row, (name, info) in enumerate(PATCH_CATALOG.items()):
+            cb = QCheckBox(info.label)
+            cb.setToolTip(info.note)
             cb.toggled.connect(lambda on, n=name: self._on_patch_toggled(n, on))
             self._patch_cbs[name] = cb
             g.addWidget(cb, row, 0)
-            if cheat.value_off is not None:
-                spin = self._value_spin(cheat)
+            if info.value is not None:
+                spin = self._value_spin(info.value)
                 spin.valueChanged.connect(lambda _v, n=name: self._on_patch_value(n))
                 self._patch_vals[name] = spin
                 g.addWidget(spin, row, 1)
-                unit = QLabel(self._PATCH_UNIT.get(name, ""))
+                unit = QLabel(info.value.unit)
                 unit.setStyleSheet("color: gray")
                 g.addWidget(unit, row, 2)
         g.setColumnStretch(0, 1)
         return box
 
-    def _value_spin(self, cheat) -> QWidget:
-        if cheat.value_kind == "f32":
+    def _value_spin(self, spec) -> QWidget:
+        if spec.kind == "f32":
             s = QDoubleSpinBox()
-            s.setRange(0.05, 2.0)
+            s.setRange(float(spec.lo), float(spec.hi))
             s.setSingleStep(0.05)
             s.setDecimals(2)
-            s.setValue(float(cheat.on_value))
+            s.setValue(float(spec.default))
         else:
             s = QSpinBox()
-            s.setRange(0, 100)
-            s.setValue(int(cheat.on_value))
+            s.setRange(int(spec.lo), int(spec.hi))
+            s.setValue(int(spec.default))
         return s
 
     def _patch_value(self, name: str):

@@ -13,7 +13,7 @@ import json
 import sys
 from dataclasses import asdict
 
-from terrariabonker.patcher import CHEATS, PatchError
+from terrariabonker.patcher import PATCH_CATALOG, PatchError
 from terrariabonker.proc import elevate
 from terrariabonker.service import Service, ServiceError
 from terrariabonker.trainer import Freezer
@@ -184,7 +184,7 @@ def cmd_patch(args) -> int:
                 print(json.dumps(st))
                 return 0
             for name, on in st.items():
-                print(f"  [{'x' if on else ' '}] {name:<11} {CHEATS[name].label}")
+                print(f"  [{'x' if on else ' '}] {name:<11} {PATCH_CATALOG[name].label}")
         elif args.action in ("enable", "on"):
             p.enable(args.cheat, value=args.value)
             shown = f" (value {args.value})" if args.value is not None else ""
@@ -308,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("patch", help="code-patch cheats (mining/reach/placement)")
     p.add_argument("action", choices=["status", "enable", "disable", "on", "off"])
-    p.add_argument("cheat", nargs="?", choices=list(CHEATS))
+    p.add_argument("cheat", nargs="?", choices=list(PATCH_CATALOG))
     p.add_argument("--value", type=float, default=None,
                    help="override the enabled value (mining pickSpeed, reach tiles)")
     p.add_argument("--json", action="store_true", help="machine-readable status")

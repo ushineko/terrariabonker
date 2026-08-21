@@ -44,9 +44,11 @@ holds no state; stopping it ends every effect.*
 - **Give items by name** — the editor dialog's item field autocompletes over all
   6,195 item names, extracted from the game's own `Terraria.exe` for the exact
   1.4.5.7 build.
-- **Code-patch cheats** — global mining speed, item-independent placement reach, and
-  fast placement: things a value-write can't hold, applied by patching the game's JIT
-  code through `/proc` (derived with Cheat Engine, but no CE needed at runtime).
+- **Code-patch cheats** — global mining speed, item-independent placement reach,
+  fast placement, and **unified tool/interaction reach** (mining, tool use, chests,
+  signs, and crafting-station range all extend together): things a value-write can't
+  hold, applied by patching the game's JIT code through `/proc` — including a code-cave
+  injection for the reach hook (derived with Cheat Engine, but no CE needed at runtime).
 
 ## Two kinds of cheat: value edits and code patches
 
@@ -58,12 +60,12 @@ patch** — remove the reset (or force a constant at the read site) so the value
 Crucially, applying a patch is *also* just a `/proc` byte-write, so this trainer does
 both — no Cheat Engine at runtime:
 
-| Value edits (persistent fields) | Code patches (frame-reset fields) |
+| Value edits (persistent fields) | Code patches (frame-reset / clamped) |
 | :--- | :--- |
 | HP, mana, godmode-by-freeze, max stats | **Global mining speed** (`pickSpeed`) |
 | Item stack / type / damage / auto-reuse | **Placement reach** (`blockRange`, item-independent) |
 | Per-item use-speed (`Item.useTime`), pick power | **Fast placement** (`ApplyItemTime` timing) |
-| Placement distance per item (`Item.tileBoost`) | *(planned: true damage-immunity, pickup range)* |
+| Placement distance per item (`Item.tileBoost`) | **Tool + interaction reach** (`GetRanges`, code cave) |
 
 The code-patch sites were **derived with Cheat Engine's mono dissector** (see
 `ce/README.md`), but the trainer locates them by AOB and patches them itself. CE is
@@ -110,6 +112,7 @@ terrariabonker long-reach --tiles 25
 terrariabonker patch status                 # code-patch cheats: on/off
 terrariabonker patch enable mining --value 0.15   # global mining speed (pickSpeed; lower = faster)
 terrariabonker patch enable reach --value 30      # placement reach (extra tiles)
+terrariabonker patch enable tool_reach --value 40 # unified mining/interaction/crafting reach
 terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
 ```
 
