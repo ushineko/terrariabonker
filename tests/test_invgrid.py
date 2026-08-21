@@ -65,10 +65,10 @@ class StateTests(unittest.TestCase):
         self.assertIn("35%", tip)
         self.assertIn("+5", tip)
 
-    def test_tooltip_includes_rarity(self):
+    def test_tooltip_includes_rarity_name(self):
         row = {"slot": 0, "type": 757, "stack": 1, "damage": 85, "rare": 8,
                "pick": 0, "tile_boost": 0, "auto_reuse": 1, "use_time": 15}
-        self.assertIn("Rarity 8", invgrid.tooltip(row, "Terra Blade"))
+        self.assertIn("Rarity: Yellow (8)", invgrid.tooltip(row, "Terra Blade"))
 
     def test_tooltip_hides_inapplicable_fields(self):
         # An accessory-like item: no damage, no pick power, no reach.
@@ -89,6 +89,12 @@ class RarityColorTests(unittest.TestCase):
 
     def test_unknown_rarity_falls_back(self):
         self.assertEqual(invgrid.rarity_rgb(999), (200, 200, 200))
+
+    def test_rarity_names(self):
+        self.assertEqual(invgrid.rarity_name(0), "White")
+        self.assertEqual(invgrid.rarity_name(8), "Yellow")
+        self.assertEqual(invgrid.rarity_name(-11), "Quest")
+        self.assertEqual(invgrid.rarity_name(999), "999")   # unknown -> bare number
 
     def test_cell_colors_are_dark_bg_bright_border(self):
         bg, border = invgrid.cell_colors(10)   # red

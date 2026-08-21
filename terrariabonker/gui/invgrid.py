@@ -73,10 +73,23 @@ RARITY_RGB: dict[int, tuple[int, int, int]] = {
 }
 _DEFAULT_RGB = (200, 200, 200)
 
+# Terraria's canonical rarity-tier names (the ItemRarityID constants).
+RARITY_NAME: dict[int, str] = {
+    -13: "Master", -12: "Expert", -11: "Quest", -1: "Gray",
+    0: "White", 1: "Blue", 2: "Green", 3: "Orange", 4: "Light Red",
+    5: "Pink", 6: "Light Purple", 7: "Lime", 8: "Yellow", 9: "Cyan",
+    10: "Red", 11: "Purple",
+}
+
 
 def rarity_rgb(rare: int) -> tuple[int, int, int]:
     """Canonical bright colour for a rarity tier."""
     return RARITY_RGB.get(rare, _DEFAULT_RGB)
+
+
+def rarity_name(rare: int) -> str:
+    """Canonical name for a rarity tier, or the bare number if unknown."""
+    return RARITY_NAME.get(rare, str(rare))
 
 
 def cell_colors(rare: int) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
@@ -106,7 +119,7 @@ def tooltip(row: dict, name: str) -> str:
     if row.get("tile_boost", 0) > 0:
         lines.append(f"Placement reach +{row['tile_boost']}")
     if "rare" in row:
-        lines.append(f"Rarity {row['rare']}")
+        lines.append(f"Rarity: {rarity_name(row['rare'])} ({row['rare']})")
     lines.append("Auto-reuse " + ("on" if row.get("auto_reuse") else "off"))
     lines.append(f"Use time {row.get('use_time')}")
     return "\n".join(lines)
