@@ -56,16 +56,22 @@ Not every frame-reset field behaves the same — this is the main extended findi
   accessory, e.g. Mining Potion) also nudges it — patch that too or re-apply.
 - **`blockRange` (placement reach) — CLEAN.** Single reset (`mov …,0`); NOP it and a
   set value holds. Item-independent extended reach, confirmed in-game.
-- **`tileSpeed` / `wallSpeed` (placement speed) — ENTANGLED, deferred.** Opposite
-  direction from pickSpeed (**higher = faster**). But they're written by *multiple*
-  per-frame paths (a single set value won't settle — "all over the place"), and their
-  per-frame reset is **load-bearing for autoplacement** — neutralizing it breaks
-  auto-place. Placement speed needs a different tactic (patch the actual placement-
-  timing code, or keep using the per-item `useTime` edit the `/proc` trainer already
-  does), not a reset-NOP. Reverted during the spike.
+- **Placement speed (via `tileSpeed`/`wallSpeed`) — SOLVED, by a different tactic.**
+  Neutralizing their reset does NOT work: they're written by *multiple* per-frame
+  paths (value won't settle — "all over the place"), their reset is load-bearing for
+  autoplacement (removing it breaks auto-place), and the value is clamped up to `3.0`
+  by accessories. The right target is where the value is **read**: placement timing
+  funnels through `Player.ApplyItemTime(Item, float)`, computing
+  `itemTime = max(1, (int)(useTime * tileSpeed))`. Overwrite that `max(edi,1)` block
+  (`B8 01000000 3B F8 0F4C F8`, 10 bytes; `edi` = the computed time) with `mov edi, N`
+  (`BF 0N 000000`) + NOP×5 — forcing `itemTime` to a small constant regardless of
+  tileSpeed. Confirmed: fast, consistent placement, autoplacement intact (`N=4` places
+  about as fast as you can move).
 
-Takeaway for the build: a field is a good reset-NOP candidate only if its reset is
-the *sole* per-frame writer and nothing else depends on the reset running.
+Takeaway for the build: a **single-reset** field (pickSpeed, blockRange) is patched by
+NOPing its reset; an **entangled** field (tileSpeed/wallSpeed) is patched at its
+**read/use site** (the timing math), not where it's reset. Both are CE-resolved →
+byte-patch, so both fit the `/proc`-applies model.
 
 ## Architecture takeaway
 
