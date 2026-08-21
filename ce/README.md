@@ -46,10 +46,26 @@ game restart re-JITs). `edi = this`:
 x87 stack balanced) + NOP padding — a blind NOP leaks the pushed value and overflows
 the FPU stack. `blockRange` is a plain `mov` → straight NOP.
 
-Caveat found: after patching pickSpeed, the value drifted `0.20 → 0.30`, so a
-**second writer** (a buff/accessory path, e.g. Mining Potion) also touches it. The
-build must map/patch that too, or periodically re-apply the value (now cheap, since
-the dominant per-frame reset is gone).
+## Per-field results (which resets are cleanly patchable)
+
+Not every frame-reset field behaves the same — this is the main extended finding:
+
+- **`pickSpeed` (mining speed) — CLEAN.** Single reset; neutralize it and a set
+  value holds. Confirmed fast mining, stock swing. Note it's a *time* multiplier:
+  **lower = faster.** Minor drift (`0.20 → 0.30`) means a second writer (buff/
+  accessory, e.g. Mining Potion) also nudges it — patch that too or re-apply.
+- **`blockRange` (placement reach) — CLEAN.** Single reset (`mov …,0`); NOP it and a
+  set value holds. Item-independent extended reach, confirmed in-game.
+- **`tileSpeed` / `wallSpeed` (placement speed) — ENTANGLED, deferred.** Opposite
+  direction from pickSpeed (**higher = faster**). But they're written by *multiple*
+  per-frame paths (a single set value won't settle — "all over the place"), and their
+  per-frame reset is **load-bearing for autoplacement** — neutralizing it breaks
+  auto-place. Placement speed needs a different tactic (patch the actual placement-
+  timing code, or keep using the per-item `useTime` edit the `/proc` trainer already
+  does), not a reset-NOP. Reverted during the spike.
+
+Takeaway for the build: a field is a good reset-NOP candidate only if its reset is
+the *sole* per-frame writer and nothing else depends on the reset running.
 
 ## Architecture takeaway
 
