@@ -146,5 +146,5 @@ SAMPLE_ARGVS: list[list[str]] = [
     freeze_argv(True, True),
     patch_status_argv(), patch_set_argv("mining", True, value=0.2),
     patch_set_argv("reach", False), patch_set_argv("fast_place", True),
-    patch_set_argv("tool_reach", True, value=40),
+    patch_set_argv("tool_reach", True, value=40), patch_set_argv("pickup", True, value=50),
 ]

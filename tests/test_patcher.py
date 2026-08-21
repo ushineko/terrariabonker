@@ -31,8 +31,8 @@ def game(tmp_path, monkeypatch):
 
 def test_status_all_off_initially(game):
     _, p = game
-    assert p.status() == {"mining": False, "reach": False,
-                          "fast_place": False, "tool_reach": False}
+    assert p.status() == {"mining": False, "reach": False, "fast_place": False,
+                          "tool_reach": False, "pickup": False}
 
 
 def test_tool_reach_injection_roundtrip(game):
@@ -51,6 +51,23 @@ def test_tool_reach_injection_roundtrip(game):
     p.disable("tool_reach")
     assert m.read(inject, 5) == inj.overwrite            # site restored
     assert not p.is_enabled("tool_reach")
+
+
+def test_pickup_injection_uses_imul_stub(game):
+    m, p = game
+    m.write(CODE + 0x900, ANCHORS["grabitems"].raw)      # plant the grab-range site
+    inj = P.INJECTIONS["pickup"]
+    inject = CODE + 0x900 + inj.inject_off
+    m.write(inject, inj.overwrite)
+    p.enable("pickup", value=50)
+    assert m.read(inject, 1) == b"\xe9"                   # jmp installed
+    rec = p._inj["pickup"]
+    # stub begins with imul eax,eax,50 (6B C0 32), then the 6 overwritten bytes
+    assert m.read(rec["cave"], 3) == b"\x6b\xc0\x32"
+    assert m.read(rec["cave"] + 3, 6) == inj.overwrite
+    p.disable("pickup")
+    assert m.read(inject, 6) == inj.overwrite
+    assert not p.is_enabled("pickup")
 
 
 def test_enable_disable_fast_place(game):

@@ -45,10 +45,11 @@ holds no state; stopping it ends every effect.*
   6,195 item names, extracted from the game's own `Terraria.exe` for the exact
   1.4.5.7 build.
 - **Code-patch cheats** — global mining speed, item-independent placement reach,
-  fast placement, and **unified tool/interaction reach** (mining, tool use, chests,
-  signs, and crafting-station range all extend together): things a value-write can't
-  hold, applied by patching the game's JIT code through `/proc` — including a code-cave
-  injection for the reach hook (derived with Cheat Engine, but no CE needed at runtime).
+  fast placement, **unified tool/interaction reach** (mining, tool use, chests,
+  signs, and crafting-station range all extend together), and **item pickup range**
+  (grab items from far off-screen): things a value-write can't hold, applied by
+  patching the game's JIT code through `/proc` — including code-cave injections for the
+  reach and pickup hooks (derived with Cheat Engine, but no CE needed at runtime).
 
 ## Two kinds of cheat: value edits and code patches
 
@@ -66,6 +67,7 @@ both — no Cheat Engine at runtime:
 | Item stack / type / damage / auto-reuse | **Placement reach** (`blockRange`, item-independent) |
 | Per-item use-speed (`Item.useTime`), pick power | **Fast placement** (`ApplyItemTime` timing) |
 | Placement distance per item (`Item.tileBoost`) | **Tool + interaction reach** (`GetRanges`, code cave) |
+| | **Item pickup range** (`GrabItems`, code cave) |
 
 The code-patch sites were **derived with Cheat Engine's mono dissector** (see
 `ce/README.md`), but the trainer locates them by AOB and patches them itself. CE is
@@ -113,6 +115,7 @@ terrariabonker patch status                 # code-patch cheats: on/off
 terrariabonker patch enable mining --value 0.15   # global mining speed (pickSpeed; lower = faster)
 terrariabonker patch enable reach --value 30      # placement reach (extra tiles)
 terrariabonker patch enable tool_reach --value 40 # unified mining/interaction/crafting reach
+terrariabonker patch enable pickup --value 50     # item pickup range (× grab radius)
 terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
 ```
 

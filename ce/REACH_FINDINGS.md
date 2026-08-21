@@ -62,6 +62,19 @@ fixed prologue above (no ASLR bytes in it), inject at `prologue + 0xCA` (this bu
 
 Placement is a separate, simpler lever (write the static `tileRangeX`), if wanted.
 
+## Code-cave note: borrow vs allocate
+
+The `tool_reach` stub is written into **borrowed** executable padding (a run of int3 /
+zero between JIT'd methods), not into memory we allocate. That is safe *enough* here
+because it is small (22 bytes), disposable (disable restores, restart clears, AOB
+re-derives), and because wine-mono's forward/bump code allocator won't reclaim
+interstitial alignment padding (non-tiered, no re-JIT, no code unloading). **Risk
+scales with stub size** — big caves are rare and more likely to be real data — so this
+is a small-stub-only technique. When we add a second injection cheat, need a bigger
+stub, or port to 64-bit (where `rel32` can't reach a far allocation), graduate to an
+**allocate-the-body** backend and extract a reusable Hook/Detour abstraction. Full
+rationale is in the `Patcher._find_cave` docstring.
+
 ## Probes
 
 - `poc_player_reach.lua` — enumerate the Player reach-field offsets (tileRangeX/Y are

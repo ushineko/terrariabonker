@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import struct
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from terrariabonker.locate import find_players
@@ -82,6 +83,10 @@ ANCHORS: dict[str, Pattern] = {
     "getranges": _pat("55 8B EC 53 57 56 83 EC 1C 8B 5D 08 8B 75 0C 8B 7D 10 "
                       "B8 ?? ?? ?? ?? F7 00 01 00 00 00 74 05 E8 ?? ?? ?? ?? "
                       "8B 05 ?? ?? ?? ?? 8B 0B 0F AF C1 89 06"),
+    # Player.GrabItems: the grab-range store `mov [ebp-54],eax; lea eax,[ebp-50]; …;
+    # cmp [ebx],ebx` followed by the first get_Hitbox call (wildcarded). Starts at the
+    # injection point (the store), so the injection offset is 0.
+    "grabitems": _pat("89 45 AC 8D 45 B0 89 44 24 04 89 1C 24 39 1B E8 ?? ?? ?? ??"),
 }
 
 
@@ -119,18 +124,36 @@ CHEATS: dict[str, Cheat] = {
 }
 
 
+def _i32(n: int) -> bytes:
+    return struct.pack("<i", int(n))
+
+
+def _force_xy(n: int) -> bytes:
+    """mov dword [esi], N ; mov dword [edi], N — force the two GetRanges outputs."""
+    return b"\xc7\x06" + _i32(n) + b"\xc7\x07" + _i32(n)
+
+
+def _imul_eax(n: int) -> bytes:
+    """imul eax, eax, N — scale the value in eax (e.g. a grab range) by N."""
+    n = int(n)
+    if -128 <= n <= 127:
+        return b"\x6b\xc0" + struct.pack("<b", n)      # imul eax,eax,imm8
+    return b"\x69\xc0" + struct.pack("<i", n)          # imul eax,eax,imm32
+
+
 @dataclass(frozen=True)
 class Injection:
-    """A code-cave cheat: some cheats can't be done in place because they need to
-    write more bytes than the site has room for. We anchor a method, overwrite a few
+    """A code-cave cheat: some cheats can't be done in place because the code we want
+    to add is longer than the site has room for. We anchor a method, overwrite a few
     bytes at an injection point with a jump to a code cave (a run of executable
-    padding), run our stub there, then jump back. Used for ``tool_reach`` — forcing
-    the two outputs of ``TileReachCheckSettings.GetRanges`` (mining + interaction)."""
+    padding), run our stub there, then jump back. ``make_body(value)`` builds the
+    injected instructions; the stub is ``make_body(value) + overwrite + jmp back``."""
     name: str
     label: str
-    anchor: str          # key into ANCHORS (the method prologue)
+    anchor: str          # key into ANCHORS
     inject_off: int      # offset from the anchor to the injection point
     overwrite: bytes     # the original bytes there (re-run inside the stub)
+    make_body: Callable[[int], bytes]   # injected instructions, before `overwrite`
     note: str = ""
 
 
@@ -141,9 +164,16 @@ INJECTIONS: dict[str, Injection] = {
     # back to `pop ebx`. Forces the tile-reach output past the game's clamp.
     "tool_reach": Injection(
         "tool_reach", "Tool + interaction reach (GetRanges)", "getranges",
-        0xCA, _b("8D 65 F4 5E 5F"),
+        0xCA, _b("8D 65 F4 5E 5F"), _force_xy,
         note="forces the GetRanges output so mining/tool use and chest/sign reach "
              "extend (code cave); a game restart clears it"),
+    # Player.GrabItems: a call returns the grab range in eax, then `mov [ebp-54],eax`
+    # stores it. Inject `imul eax,N` before that store to scale the pickup radius.
+    # Overwrite `mov [ebp-54],eax; lea eax,[ebp-50]` (6 bytes), re-run in the stub.
+    "pickup": Injection(
+        "pickup", "Item pickup range (GrabItems)", "grabitems",
+        0x0, _b("89 45 AC 8D 45 B0"), _imul_eax,
+        note="scales the item grab range by N (code cave); a game restart clears it"),
 }
 
 
@@ -171,6 +201,7 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
     "mining": ValueSpec("f32", 0.2, 0.05, 2.0, "pickSpeed · lower = faster"),
     "reach": ValueSpec("i32", 20, 0, 100, "extra tiles"),
     "tool_reach": ValueSpec("i32", 30, 1, 200, "tiles · mining & interaction"),
+    "pickup": ValueSpec("i32", 50, 2, 500, "× grab range"),
 }
 
 
@@ -313,8 +344,7 @@ class Patcher:
         base = self._resolve(inj.anchor)
         inject = base + inj.inject_off
         back = inject + len(inj.overwrite)              # lands on the byte after ours
-        n = struct.pack("<i", int(value))
-        body = b"\xc7\x06" + n + b"\xc7\x07" + n + inj.overwrite   # mov[esi]/[edi]; orig
+        body = inj.make_body(int(value)) + inj.overwrite   # injected code, then original
         stub_len = len(body) + 5                        # + jmp back (rel32)
         prev = self._inj.get(inj.name)
         cave = prev["cave"] if prev else self._find_cave(stub_len)

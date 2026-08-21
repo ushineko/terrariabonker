@@ -94,6 +94,9 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
   investigation: Player reach-field offsets, the 2-out `TileReachCheckSettings.GetRanges`
   (the hook target for unified mining+interaction reach), and the mining chain proving
   the 4-out overload calls the 2-out. Full write-up in `REACH_FINDINGS.md`.
+- `poc_grabitems.lua` — dump `Player.GrabItems` to find the pickup-range hook site: a
+  call returns the grab range in eax, then `mov [ebp-54],eax`; injecting `imul eax,N`
+  before that store scales the pickup radius (ported from the FearLess ReGrind table).
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 
