@@ -33,9 +33,11 @@ ITEM_PICK = 0x90        # pickaxe power %
 ITEM_AXE = 0x94         # axe power (x5 = displayed %)
 ITEM_HAMMER = 0x98      # hammer power %
 ITEM_DAMAGE = 0xAC      # weapon/tool damage (-1 for non-damaging items)
+ITEM_DEFENSE = 0xD4     # defense the item grants (armor/some accessories; 0 otherwise)
 ITEM_CONSUMABLE = 0xBD  # byte bool; if set, the item is used up on use (careful!)
 ITEM_AUTOREUSE = 0xBE   # byte bool; auto-swing while the button is held
 ITEM_RARE = 0xF8        # rarity tier (int): -1 gray .. 0 white .. 10 red .. 11 purple
+ITEM_PREFIX = 0x15C     # modifier tier (byte): 0 none .. e.g. Legendary/Warding/Menacing
 
 
 @dataclass
@@ -51,6 +53,8 @@ class Slot:
     damage: int
     auto_reuse: int
     rare: int
+    defense: int
+    prefix: int
 
     @property
     def empty(self) -> bool:
@@ -95,6 +99,8 @@ class Inventory:
             damage=self.mem.read_i32(addr + ITEM_DAMAGE),
             auto_reuse=self.mem.read(addr + ITEM_AUTOREUSE, 1)[0] if addr else 0,
             rare=self.mem.read_i32(addr + ITEM_RARE),
+            defense=self.mem.read_i32(addr + ITEM_DEFENSE),
+            prefix=self.mem.read(addr + ITEM_PREFIX, 1)[0] if addr else 0,
         )
 
     def slots(self) -> list[Slot]:
@@ -150,6 +156,15 @@ class Inventory:
     def set_pick(self, index: int, value: int) -> bool:
         addr = self._item_addr(index)
         return self.mem.write_i32(addr + ITEM_PICK, value) if addr else False
+
+    def set_defense(self, index: int, value: int) -> bool:
+        addr = self._item_addr(index)
+        return self.mem.write_i32(addr + ITEM_DEFENSE, value) if addr else False
+
+    def set_prefix(self, index: int, value: int) -> bool:
+        """Set the item's modifier tier (a byte, e.g. Legendary/Warding)."""
+        addr = self._item_addr(index)
+        return self.mem.write(addr + ITEM_PREFIX, bytes([value & 0xFF])) if addr else False
 
     def set_tile_boost(self, index: int, value: int) -> bool:
         """Set extra placement reach (tiles) for the item in this slot."""

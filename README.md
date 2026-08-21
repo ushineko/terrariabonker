@@ -34,10 +34,11 @@ holds no state; stopping it ends every effect.*
 - **Stat edits** — set current and permanent-max HP and mana.
 - **Grid item editor** — an inventory grid that mirrors the in-game layout
   (Hotbar / Inventory / Coins / Ammo). Click a slot to open an editor dialog for
-  item **type** (ItemID), **stack**, **damage**, **auto-reuse** (auto-attack),
-  **use-speed**, **use-animation**, **pickaxe power**, and **placement reach**;
-  click an empty slot to place a fully-statted item, or clear a slot. Accessories
-  carried in the inventory edit through the same path.
+  item **type** (ItemID), **stack**, **damage**, **defense**, **prefix** (modifier
+  tier), **auto-reuse** (auto-attack), **use-speed**, **use-animation**, **pickaxe
+  power**, and **placement reach**; click an empty slot to place a fully-statted
+  item, or clear a slot. Accessories carried in the inventory (including their
+  defense and prefix) edit through the same path.
 - **Fast mining** — sets every pickaxe to Picksaw-tier speed and power in one click.
 - **Long reach** — extends placement distance on all items.
 - **Give items by name** — the editor dialog's item field autocompletes over all

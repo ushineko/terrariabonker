@@ -114,6 +114,10 @@ def tooltip(row: dict, name: str) -> str:
              f"Stack {row.get('stack')}"]
     if row.get("damage", -1) >= 0:
         lines.append(f"Damage {row['damage']}")
+    if row.get("defense", 0) > 0:
+        lines.append(f"Defense {row['defense']}")
+    if row.get("prefix", 0) > 0:
+        lines.append(f"Prefix {row['prefix']}")
     if row.get("pick", 0) > 0:
         lines.append(f"Pickaxe power {row['pick']}%")
     if row.get("tile_boost", 0) > 0:

@@ -61,6 +61,8 @@ class ItemSlot:
     tile_boost: int
     use_anim: int
     rare: int
+    defense: int
+    prefix: int
 
 
 @dataclass(frozen=True)
@@ -201,7 +203,8 @@ class Service:
     @staticmethod
     def _to_slot(s: Slot) -> ItemSlot:
         return ItemSlot(s.index, s.type, s.stack, s.damage, s.auto_reuse,
-                        s.use_time, s.pick, s.tile_boost, s.use_anim, s.rare)
+                        s.use_time, s.pick, s.tile_boost, s.use_anim, s.rare,
+                        s.defense, s.prefix)
 
     def inventory(self) -> list[ItemSlot]:
         return [self._to_slot(s) for s in self._live_inventory().slots()]
@@ -230,7 +233,7 @@ class Service:
 
     def set_item(self, slot: int, item_type: int, *, stack=None, damage=None,
                  auto_reuse=None, use_time=None, use_anim=None, pick=None,
-                 tile_boost=None) -> None:
+                 tile_boost=None, defense=None, prefix=None) -> None:
         invs = self._all_inventories()
         cur = invs[0].read_slot(slot)
         # Only re-template when the item type actually changes (field tweaks on the
@@ -253,6 +256,10 @@ class Service:
                 inv.set_pick(slot, pick)
             if tile_boost is not None:
                 inv.set_tile_boost(slot, tile_boost)
+            if defense is not None:
+                inv.set_defense(slot, defense)
+            if prefix is not None:
+                inv.set_prefix(slot, prefix)
 
     def give_item(self, item_type: int, stack: int = 1) -> int:
         """Put a fully-statted item in the first empty main-inventory slot."""

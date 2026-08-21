@@ -70,6 +70,14 @@ class StateTests(unittest.TestCase):
                "pick": 0, "tile_boost": 0, "auto_reuse": 1, "use_time": 15}
         self.assertIn("Rarity: Yellow (8)", invgrid.tooltip(row, "Terra Blade"))
 
+    def test_tooltip_shows_defense_and_prefix(self):
+        row = {"slot": 20, "type": 54, "stack": 1, "damage": -1, "rare": 1,
+               "defense": 12, "prefix": 65, "pick": 0, "tile_boost": 0,
+               "auto_reuse": 0, "use_time": 20}
+        tip = invgrid.tooltip(row, "Hermes Boots")
+        self.assertIn("Defense 12", tip)
+        self.assertIn("Prefix 65", tip)
+
     def test_tooltip_hides_inapplicable_fields(self):
         # An accessory-like item: no damage, no pick power, no reach.
         row = {"slot": 20, "type": 100, "stack": 1, "damage": -1,

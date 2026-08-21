@@ -406,7 +406,8 @@ class MainWindow(QWidget):
             self._run(client.set_item_argv(
                 slot, t, stack=r["stack"], damage=r["damage"],
                 auto_reuse=r["auto_reuse"], use_time=r["use_time"],
-                use_anim=r["use_anim"], pick=r["pick"], tile_boost=r["tile_boost"]))
+                use_anim=r["use_anim"], pick=r["pick"], tile_boost=r["tile_boost"],
+                defense=r["defense"], prefix=r["prefix"]))
 
     def closeEvent(self, event):
         self._status_timer.stop()

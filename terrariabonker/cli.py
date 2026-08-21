@@ -125,7 +125,8 @@ def cmd_set_item(args) -> int:
     svc = _svc(guard=True, force=args.force)
     svc.set_item(args.slot, args.type, stack=args.stack, damage=args.damage,
                  auto_reuse=args.auto_reuse, use_time=args.use_time,
-                 use_anim=args.use_anim, pick=args.pick, tile_boost=args.tile_boost)
+                 use_anim=args.use_anim, pick=args.pick, tile_boost=args.tile_boost,
+                 defense=args.defense, prefix=args.prefix)
     print(f"[OK] set slot {args.slot} to type {args.type}")
     return 0
 
@@ -281,6 +282,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--use-anim", type=int, default=None, help="swing animation frames")
     p.add_argument("--pick", type=int, default=None, help="pickaxe power (percent)")
     p.add_argument("--tile-boost", type=int, default=None, help="extra placement reach (tiles)")
+    p.add_argument("--defense", type=int, default=None, help="defense the item grants")
+    p.add_argument("--prefix", type=int, default=None,
+                   help="modifier tier byte (0 none; e.g. Legendary/Warding/Menacing)")
     force_flag(p)
     p.set_defaults(func=cmd_set_item)
 

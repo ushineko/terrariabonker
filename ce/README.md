@@ -87,6 +87,9 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
   match the 32-bit game + its MonoDataCollector32.
 - `poc_resolve_method.lua` — attach + mono resolve `ResetEffects` → JIT address.
 - `poc_fields.lua` — dump the speed/reach field offsets.
+- `poc_item_fields.lua` — dump `Terraria.Item` field offsets (mono metadata). Used to
+  pin `prefix` = 0x15C (a byte; not template-diffable since every template has prefix
+  0) and to cross-check `defense` = 0xD4 / `rare` = 0xF8 against the /proc offsets.
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 

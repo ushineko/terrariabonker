@@ -53,9 +53,13 @@ class ItemEditDialog(QDialog):
         self.use_anim = self._spin(1, 255, int(row.get("use_anim") or ut))
         self.pick = self._spin(0, 2000, int(row.get("pick", 0)))
         self.tile = self._spin(0, 100, int(row.get("tile_boost", 0)))
+        self.defense = self._spin(0, 9999, int(row.get("defense", 0)))
+        self.prefix = self._spin(0, 255, int(row.get("prefix", 0)))
 
         form.addRow("Stack", self.stack)
         form.addRow("Damage", self.damage)
+        form.addRow("Defense", self.defense)
+        form.addRow("Prefix (modifier tier)", self.prefix)
         form.addRow("Auto-reuse", self.auto)
         form.addRow("Use time (lower = faster)", self.use_time)
         form.addRow("Use animation", self.use_anim)
@@ -103,6 +107,8 @@ class ItemEditDialog(QDialog):
             "use_anim": self.use_anim.value(),
             "pick": self.pick.value(),
             "tile_boost": self.tile.value(),
+            "defense": self.defense.value(),
+            "prefix": self.prefix.value(),
         }
         self.accept()
 

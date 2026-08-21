@@ -108,6 +108,16 @@ items with *distinct* known values; the intersection is unique. Bright rarity va
 outside the templated `[0x1C, 0x140)` block are found by resolving each template's base
 address and reading a wider window.
 
+`Item.defense` = **0xD4** was pinned the same way (a helmet tier ladder: Copper 1,
+Iron 2, Silver 3, Gold 4, Platinum 5, Molten 8; a weapon reads 0). `Item.prefix`
+(the modifier tier) can **not** be template-diffed — every `ContentSamples` template
+has prefix 0 — so it was read straight from mono metadata with Cheat Engine
+(`ce/poc_item_fields.lua`: `mono_findClass("Terraria","Item")` +
+`mono_class_enumFields`): `prefix` = **0x15C** (a `System.Byte`). That same dump
+confirmed every `/proc`-derived offset (type 0x6C, stack 0x88, damage 0xAC, defense
+0xD4, rare 0xF8, …), so mono enumeration is the authoritative cross-check whenever an
+offset is in doubt or after a game update.
+
 ## Re-deriving after an update
 
 `version.py` gates the trainer on the exact build (`1.4.5.7`, Steam buildid
