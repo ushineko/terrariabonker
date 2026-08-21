@@ -17,14 +17,14 @@ import sys
 
 from PyQt6.QtCore import QProcess, Qt, QTimer
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QCompleter,
-                             QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
-                             QHeaderView, QLabel, QLineEdit, QPlainTextEdit,
-                             QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QDoubleSpinBox,
+                             QGridLayout, QGroupBox, QHBoxLayout, QLabel,
+                             QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
                              QTabWidget, QVBoxLayout, QWidget)
 
 from terrariabonker import names
-from terrariabonker.gui import client
+from terrariabonker.gui import client, invgrid
+from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import CHEATS
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -47,12 +47,12 @@ class MainWindow(QWidget):
         self._freeze: QProcess | None = None
         self._procs: set[QProcess] = set()   # keep refs so none is GC'd mid-run
         self._status_busy = False
-        self._filling = False                # suppress cell-edit signals during fill
         self._patch_filling = False          # suppress patch-checkbox signals during refresh
         self._patch_cbs: dict = {}           # cheat name -> checkbox
         self._patch_vals: dict = {}          # cheat name -> value spinbox (valued cheats)
-        self._rows: list[dict] = []          # rows currently shown in the table
+        self._cells: dict = {}               # inventory slot -> grid cell button
         self._all_rows: list[dict] = []      # every slot (incl. empty), for slot-finding
+        self._item_names = sorted(names._NAMES.values())   # for the edit-dialog completer
         self._build()
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self.refresh_status)
@@ -128,59 +128,43 @@ class MainWindow(QWidget):
         col.addStretch()
         return w
 
-    INV_COLS = ["Slot", "ID", "Name", "Stack", "Dmg", "Auto", "useTime", "Pick"]
-
     def _inventory_tab(self) -> QWidget:
-        w = QWidget()
-        col = QVBoxLayout(w)
-
-        # Give-item browser: type a name (autocompleted) or an ItemID number.
-        give = QGroupBox("Give item")
-        gg = QHBoxLayout(give)
-        self.give_search = QLineEdit(placeholderText="item name or ItemID…")
-        comp = QCompleter(sorted(n for n in names._NAMES.values()))
-        comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        comp.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.give_search.setCompleter(comp)
-        self.sp_gstack = self._spin(1, 9999, 999)
-        gg.addWidget(self.give_search, 1)
-        gg.addWidget(QLabel("×"))
-        gg.addWidget(self.sp_gstack)
-        gg.addWidget(QLabel("→ first empty slot"))
-        give_btn = QPushButton("Give")
-        give_btn.clicked.connect(self.give_item)
-        self.give_search.returnPressed.connect(self.give_item)
-        gg.addWidget(give_btn)
-        col.addWidget(give)
+        """A grid mirroring Terraria's inventory. Each cell is a slot; clicking one
+        opens the edit dialog (place an item into an empty slot, or edit a filled
+        one). This replaces the old sortable table."""
+        outer = QWidget()
+        ov = QVBoxLayout(outer)
 
         bar = QHBoxLayout()
         bar.addWidget(self._btn2("Refresh", self.refresh_inventory))
-        self.cb_empty = QCheckBox("show empty slots")
-        self.cb_empty.toggled.connect(self.refresh_inventory)
-        bar.addWidget(self.cb_empty)
-        bar.addStretch()
-        col.addLayout(bar)
+        hint = QLabel("<i>Click a slot to edit it, or an empty slot to place an item.</i>")
+        hint.setWordWrap(True)
+        bar.addWidget(hint, 1)
+        ov.addLayout(bar)
 
-        self.table = QTableWidget(0, len(self.INV_COLS))
-        self.table.setHorizontalHeaderLabels(self.INV_COLS)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
-        self.table.setSortingEnabled(True)                 # click a header to sort
-        # Default to Slot ascending so the table matches the in-game inventory
-        # order. A user's later header click persists (refreshes re-sort by the
-        # current indicator, not back to Slot).
-        self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
-        hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)  # all resizable
-        hdr.setSectionsMovable(True)
-        hdr.setStretchLastSection(True)
-        self.table.itemChanged.connect(self._on_cell_edited)
-        col.addWidget(self.table, 1)
-        note = QLabel("<i>Double-click ID / Stack / Dmg / Auto / useTime to edit. "
-                      "Auto: 1 = auto-swing; lower useTime = faster.</i>")
-        note.setWordWrap(True)
-        col.addWidget(note)
-        return w
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        inner = QWidget()
+        col = QVBoxLayout(inner)
+        for title, rng, cols in invgrid.SECTIONS:
+            box = QGroupBox(title)
+            g = QGridLayout(box)
+            g.setSpacing(3)
+            for pos, slot in enumerate(rng):
+                cell = self._make_cell(slot)
+                self._cells[slot] = cell
+                g.addWidget(cell, pos // cols, pos % cols)
+            col.addWidget(box)
+        col.addStretch()
+        area.setWidget(inner)
+        ov.addWidget(area, 1)
+        return outer
+
+    def _make_cell(self, slot: int) -> QPushButton:
+        b = QPushButton("")
+        b.setFixedSize(64, 46)
+        b.clicked.connect(lambda _=False, s=slot: self._on_cell_clicked(s))
+        return b
 
     def _on_tab_changed(self, i: int):
         if i == 1:
@@ -354,84 +338,57 @@ class MainWindow(QWidget):
         note = "" if ok else " — FAILED (is steam installed?)"
         self.log.appendPlainText(f"[launch Terraria: {url}{note}]")
 
-    # --- inventory tab -----------------------------------------------------
+    # --- inventory tab (grid) ----------------------------------------------
     def refresh_inventory(self):
-        self._spawn(client.inventory_argv(), on_output=self._fill_table)
+        self._spawn(client.inventory_argv(), on_output=self._fill_grid)
 
-    def _fill_table(self, raw: str):
-        all_rows = client.parse_inventory(raw)
-        if all_rows is None:
+    def _fill_grid(self, raw: str):
+        rows = client.parse_inventory(raw)
+        if rows is None:
             return
-        self._all_rows = all_rows
-        rows = all_rows if self.cb_empty.isChecked() else [r for r in all_rows if r["type"] != 0]
-        self._filling = True
-        self.table.setSortingEnabled(False)          # never sort mid-insert
-        self._rows = rows
-        self.table.setRowCount(len(rows))
-        RO = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
-        EDIT = RO | Qt.ItemFlag.ItemIsEditable
-        editable = {1, 3, 4, 5, 6}                    # ID, Stack, Dmg, Auto, useTime
-        name_col = 2                                  # only this column sorts as text
-        for r, d in enumerate(rows):
-            vals = [d["slot"], d["type"], names.label(d["type"]), d["stack"],
-                    d["damage"], d["auto_reuse"], d["use_time"], d["pick"]]
-            for c, v in enumerate(vals):
-                it = QTableWidgetItem()
-                if c == name_col:
-                    it.setData(Qt.ItemDataRole.DisplayRole, str(v))
-                else:
-                    it.setData(Qt.ItemDataRole.DisplayRole, int(v))   # numeric sort
-                it.setFlags(EDIT if c in editable else RO)
-                self.table.setItem(r, c, it)
-        self._filling = False
-        self.table.setSortingEnabled(True)
-        self.table.resizeColumnsToContents()
+        self._all_rows = rows
+        by_slot = {r["slot"]: r for r in rows}
+        for slot, cell in self._cells.items():
+            self._render_cell(cell, by_slot.get(slot, {"slot": slot, "type": 0}))
 
-    def _on_cell_edited(self, item):
-        if self._filling:
+    def _render_cell(self, cell: QPushButton, row: dict):
+        if invgrid.is_empty(row):
+            cell.setText("")
+            cell.setToolTip(invgrid.tooltip(row, ""))
+            cell.setStyleSheet("QPushButton { color: gray; }")
             return
-        row, col = item.row(), item.column()
-        # Key off the Slot cell, not the row index: sorting reorders rows.
-        slot_item = self.table.item(row, 0)
-        if slot_item is None:
+        name = names.label(row["type"])
+        badge = invgrid.stack_badge(row.get("stack", 0))
+        cell.setText(invgrid.abbrev(name) + (f"\n×{badge}" if badge else ""))
+        cell.setToolTip(invgrid.tooltip(row, name))
+        cell.setStyleSheet("")
+
+    def _row_for(self, slot: int) -> dict:
+        return next((r for r in self._all_rows if r["slot"] == slot),
+                    {"slot": slot, "type": 0})
+
+    def _on_cell_clicked(self, slot: int):
+        dlg = ItemEditDialog(self, self._row_for(slot), self._item_names)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        slot = int(slot_item.text())
-        d = next((r for r in self._all_rows if r["slot"] == slot), None)
-        if d is None:
-            return
-        try:
-            val = int(item.text())
-        except ValueError:
-            self.refresh_inventory()
-            return
-        if col == 3:                                     # Stack
-            self._run(client.set_stack_argv(slot, val))
-        elif col == 1:                                   # ItemID
-            self._run(client.set_item_argv(slot, val, stack=d["stack"] or 1))
-        elif col == 4:                                   # Damage
-            self._run(client.set_item_argv(slot, d["type"], damage=val))
-        elif col == 5:                                   # autoReuse
-            self._run(client.set_item_argv(slot, d["type"], auto_reuse=1 if val else 0))
-        elif col == 6:                                   # useTime
-            self._run(client.set_item_argv(slot, d["type"], use_time=val))
+        if dlg.cleared:
+            self._run(client.set_item_argv(slot, 0))
+        elif dlg.resolved:
+            self._apply_item_edit(slot, dlg.resolved, dlg._orig_type)
         QTimer.singleShot(600, self.refresh_inventory)
 
-    def give_item(self):
-        text = self.give_search.text().strip()
-        if not text:
-            return
-        if text.isdigit():
-            item_id = int(text)
+    def _apply_item_edit(self, slot: int, r: dict, orig_type: int):
+        """Apply the dialog result. A type change (incl. placing into an empty
+        slot) sends only type + stack so the ContentSamples template supplies real
+        stats; a same-item edit sends the full field set."""
+        t = r["type"]
+        if t != orig_type:
+            self._run(client.set_item_argv(slot, t, stack=r["stack"]))
         else:
-            hits = names.search(text, limit=1)
-            if not hits:
-                self.log.appendPlainText(f"[no item matches '{text}']")
-                return
-            item_id, matched = hits[0]
-            self.log.appendPlainText(f"['{text}' → {matched} (#{item_id})]")
-        # The service finds the first empty slot and reports if the inventory is full.
-        self._run(client.give_argv(item_id, self.sp_gstack.value()))
-        QTimer.singleShot(600, self.refresh_inventory)
+            self._run(client.set_item_argv(
+                slot, t, stack=r["stack"], damage=r["damage"],
+                auto_reuse=r["auto_reuse"], use_time=r["use_time"],
+                use_anim=r["use_anim"], pick=r["pick"], tile_boost=r["tile_boost"]))
 
     def closeEvent(self, event):
         self._status_timer.stop()

@@ -59,6 +59,7 @@ class ItemSlot:
     use_time: int
     pick: int
     tile_boost: int
+    use_anim: int
 
 
 @dataclass(frozen=True)
@@ -199,7 +200,7 @@ class Service:
     @staticmethod
     def _to_slot(s: Slot) -> ItemSlot:
         return ItemSlot(s.index, s.type, s.stack, s.damage, s.auto_reuse,
-                        s.use_time, s.pick, s.tile_boost)
+                        s.use_time, s.pick, s.tile_boost, s.use_anim)
 
     def inventory(self) -> list[ItemSlot]:
         return [self._to_slot(s) for s in self._live_inventory().slots()]
@@ -234,7 +235,8 @@ class Service:
         # Only re-template when the item type actually changes (field tweaks on the
         # same item must not wipe the edits, and must stay scan-free/fast).
         changed = cur is None or item_type != cur.type
-        block = self._template_block(item_type) if changed else None
+        # type 0 clears the slot — never template-scan for the "empty" type.
+        block = self._template_block(item_type) if (changed and item_type) else None
         if changed:
             self._place_item(invs, slot, item_type, block)
         for inv in invs:

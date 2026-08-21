@@ -32,13 +32,17 @@ holds no state; stopping it ends every effect.*
 
 - **Godmode** and **infinite mana** — high-frequency freezes that hold HP/mana.
 - **Stat edits** — set current and permanent-max HP and mana.
-- **Full item editor** — per inventory slot: item **type** (ItemID), **stack**,
-  **damage**, **auto-reuse** (auto-attack), **use-speed** (mining/placing/attack
-  speed), **pickaxe power**, and **placement reach** (`tileBoost`).
+- **Grid item editor** — an inventory grid that mirrors the in-game layout
+  (Hotbar / Inventory / Coins / Ammo). Click a slot to open an editor dialog for
+  item **type** (ItemID), **stack**, **damage**, **auto-reuse** (auto-attack),
+  **use-speed**, **use-animation**, **pickaxe power**, and **placement reach**;
+  click an empty slot to place a fully-statted item, or clear a slot. Accessories
+  carried in the inventory edit through the same path.
 - **Fast mining** — sets every pickaxe to Picksaw-tier speed and power in one click.
 - **Long reach** — extends placement distance on all items.
-- **Give items by name** — a searchable browser over all 6,195 item names,
-  extracted from the game's own `Terraria.exe` for the exact 1.4.5.7 build.
+- **Give items by name** — the editor dialog's item field autocompletes over all
+  6,195 item names, extracted from the game's own `Terraria.exe` for the exact
+  1.4.5.7 build.
 - **Code-patch cheats** — global mining speed, item-independent placement reach, and
   fast placement: things a value-write can't hold, applied by patching the game's JIT
   code through `/proc` (derived with Cheat Engine, but no CE needed at runtime).
@@ -126,10 +130,11 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   the frame-reset cheats (global mining speed, placement reach, fast placement)
   with tunable value spinboxes for mining and reach. No Cheat Engine at runtime;
   a game restart clears them.
-- **Inventory** tab — a live table sorted by slot to match the in-game order
-  (slot, ID, name, stack, damage, auto, useTime, pick); double-click Stack / ID /
-  Dmg / Auto to edit in place. **Give item** takes an item name (autocompleted)
-  or an ItemID and drops it into the first empty slot, warning if full.
+- **Inventory** tab — a grid mirroring the in-game inventory (Hotbar / Inventory /
+  Coins / Ammo). Each cell shows an abbreviated name and stack, with a full-detail
+  tooltip. Click a filled cell to edit it in a dialog, or an empty cell to place a
+  fully-statted item (item field autocompletes over all item names); the dialog can
+  also clear a slot.
 
 The window runs unprivileged and runs each action as a short `sudo` CLI call, so
 Qt never runs as root.
@@ -176,7 +181,11 @@ terrariabonker/
 │   ├── data/items.json         ItemID name map (extracted from Terraria.exe)
 ├── tools/extract_item_names/   dotnet tool that regenerates items.json from the exe
 │   ├── cli.py                  argparse front end
-│   └── gui/main_window.py      PyQt6 control panel
+│   └── gui/
+│       ├── main_window.py      PyQt6 control panel
+│       ├── client.py           CLI-argv builders + output parsers (CLI/GUI parity)
+│       ├── invgrid.py          Qt-free grid layout / label / tooltip helpers
+│       └── item_dialog.py      modal per-item editor
 ├── docs/discovery.md           how the offsets were derived and how to rebuild them
 ├── ce/                         Cheat Engine spike: how the code-patch sites were found
 ├── specs/                      feature specs
