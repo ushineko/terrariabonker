@@ -16,6 +16,7 @@ import os
 import sys
 
 from PyQt6.QtCore import QProcess, Qt, QTimer
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QCompleter,
                              QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
                              QLineEdit, QPlainTextEdit, QPushButton, QSpinBox,
@@ -25,10 +26,9 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComple
 from terrariabonker import names
 from terrariabonker.gui import client
 
-ENTRY = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "terrariabonker.py",
-)
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ENTRY = os.path.join(_ROOT, "terrariabonker.py")
+ICON = os.path.join(_ROOT, "assets", "terrariabonker.svg")
 
 
 def _cli_args(sub_args: list[str]) -> tuple[str, list[str]]:
@@ -40,6 +40,8 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("terrariabonker")
+        if os.path.exists(ICON):
+            self.setWindowIcon(QIcon(ICON))
         self._freeze: QProcess | None = None
         self._procs: set[QProcess] = set()   # keep refs so none is GC'd mid-run
         self._status_busy = False
@@ -156,8 +158,8 @@ class MainWindow(QWidget):
         hdr.setStretchLastSection(True)
         self.table.itemChanged.connect(self._on_cell_edited)
         col.addWidget(self.table, 1)
-        col.addWidget(QLabel("<i>Double-click Stack / ID / Dmg to edit. "
-                             "Auto: 1 = auto-swing.</i>"))
+        col.addWidget(QLabel("<i>Double-click ID / Stack / Dmg / Auto / useTime to edit. "
+                             "Auto: 1 = auto-swing; lower useTime = faster.</i>"))
         return w
 
     def _spin(self, lo, hi, val):
@@ -267,7 +269,7 @@ class MainWindow(QWidget):
         self.table.setRowCount(len(rows))
         RO = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
         EDIT = RO | Qt.ItemFlag.ItemIsEditable
-        editable = {1, 3, 4, 5}                       # ID, Stack, Dmg, Auto
+        editable = {1, 3, 4, 5, 6}                    # ID, Stack, Dmg, Auto, useTime
         name_col = 2                                  # only this column sorts as text
         for r, d in enumerate(rows):
             vals = [d["slot"], d["type"], names.label(d["type"]), d["stack"],
@@ -309,6 +311,8 @@ class MainWindow(QWidget):
             self._run(client.set_item_argv(slot, d["type"], damage=val))
         elif col == 5:                                   # autoReuse
             self._run(client.set_item_argv(slot, d["type"], auto_reuse=1 if val else 0))
+        elif col == 6:                                   # useTime
+            self._run(client.set_item_argv(slot, d["type"], use_time=val))
         QTimer.singleShot(600, self.refresh_inventory)
 
     def give_item(self):
@@ -345,6 +349,8 @@ class MainWindow(QWidget):
 def run() -> int:
     app = QApplication(sys.argv)
     app.setDesktopFileName("terrariabonker")
+    if os.path.exists(ICON):
+        app.setWindowIcon(QIcon(ICON))
     w = MainWindow()
     w.resize(560, 620)
     w.show()

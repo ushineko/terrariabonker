@@ -61,7 +61,7 @@ def set_stack_argv(slot: int, value: int) -> list[str]:
 
 
 def set_item_argv(slot: int, item_type: int, *, stack=None, damage=None,
-                  auto_reuse=None) -> list[str]:
+                  auto_reuse=None, use_time=None) -> list[str]:
     argv = ["set-item", str(slot), str(item_type)]
     if stack is not None:
         argv += ["--stack", str(stack)]
@@ -69,6 +69,8 @@ def set_item_argv(slot: int, item_type: int, *, stack=None, damage=None,
         argv += ["--damage", str(damage)]
     if auto_reuse is not None:
         argv += ["--auto-reuse", str(auto_reuse)]
+    if use_time is not None:
+        argv += ["--use-time", str(use_time)]
     return argv
 
 
@@ -105,7 +107,7 @@ SAMPLE_ARGVS: list[list[str]] = [
     status_argv(), inventory_argv(),
     set_hp_argv("max"), set_mana_argv(20), set_max_hp_argv(500), set_max_mana_argv(200),
     set_stack_argv(40, 999),
-    set_item_argv(0, 3507, stack=1, damage=200, auto_reuse=1),
+    set_item_argv(0, 3507, stack=1, damage=200, auto_reuse=1, use_time=8),
     give_argv(2, 999), fast_mining_argv(), long_reach_argv(25),
     freeze_argv(True, True),
 ]

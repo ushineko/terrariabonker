@@ -13,16 +13,27 @@ subprocess boundary carries.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from terrariabonker import version as ver
-from terrariabonker.inventory import INVENTORY_SLOTS, Inventory, Slot
+from terrariabonker.inventory import INVENTORY_SLOTS, ITEM_TYPE, Inventory, Slot
 from terrariabonker.locate import find_players, pick_live
 from terrariabonker.player import Player
 from terrariabonker.proc import Mem, ProcError, find_pid
 
 # Main-inventory slots used for "give" (0-49): skips coin/ammo/equip slots.
 GIVE_RANGE = range(0, 50)
+
+# When changing a slot's item, copy the pristine template's field block so the
+# new item has real stats (SetDefaults values), not a bare type with zeroed
+# damage/useTime. Range starts past the object header/reference pointers and
+# covers the stat block; every Item is the same large class, so this stays
+# safely inside the object.
+ITEM_COPY_LO = 0x1C
+ITEM_COPY_HI = 0x140
 
 
 class ServiceError(RuntimeError):
@@ -112,6 +123,58 @@ class Service:
     def _live_inventory(self) -> Inventory:
         return Inventory(self.mem, self.live_block().life_addr)
 
+    def _all_inventories(self) -> list[Inventory]:
+        """Every player copy's inventory. Writes go to all so the live copy is
+        always hit (copies are identical; snapshots ignore the writes) - which
+        copy is 'live' can't be told apart while the game is paused."""
+        return [Inventory(self.mem, b.life_addr) for b in self.players()]
+
+    def _item_vtable(self) -> int | None:
+        """The shared mono vtable of Item objects, read from any real item."""
+        for s in self._all_inventories()[0].slots():
+            if not s.empty:
+                return self.mem.read_u32(s.item_addr)
+        return None
+
+    def _template_block(self, item_type: int) -> bytes | None:
+        """Field bytes of a pristine Item of this type (from ContentSamples).
+
+        The game keeps a template Item for every type; scan for an Item object
+        (vtable match) whose type field equals ``item_type`` and return its stat
+        block. Returns None if not found (caller falls back to a bare type set).
+        """
+        vt = self._item_vtable()
+        if vt is None:
+            return None
+        for start, end in self.mem.regions():
+            buf = self.mem.read(start, end - start)
+            n = len(buf) // 4
+            if n < 1:
+                continue
+            arr = np.frombuffer(buf[: n * 4], dtype=np.int32)
+            for idx in np.where(arr == item_type)[0].tolist():
+                off = idx * 4 - ITEM_TYPE
+                if off < 0 or off + 4 > len(buf):
+                    continue
+                if struct.unpack_from("<I", buf, off)[0] != vt:
+                    continue
+                base = start + off
+                block = self.mem.read(base + ITEM_COPY_LO, ITEM_COPY_HI - ITEM_COPY_LO)
+                if len(block) == ITEM_COPY_HI - ITEM_COPY_LO:
+                    return block
+        return None
+
+    def _place_item(self, invs: list[Inventory], slot: int, item_type: int,
+                    block: bytes | None) -> None:
+        """Set a slot to an item type in every copy, using the template block if
+        available so the item has real stats, else a bare type set."""
+        for inv in invs:
+            addr = inv._item_addr(slot)
+            if addr and block:
+                self.mem.write(addr + ITEM_COPY_LO, block)
+            else:
+                inv.set_type(slot, item_type)
+
     # --- reads -------------------------------------------------------------
     def snapshot(self, with_inventory: bool = True) -> Snapshot:
         blocks = find_players(self.mem)
@@ -158,45 +221,61 @@ class Service:
         for p in self._all_targets():
             p.set_max_mana(int(value))
 
-    # --- inventory mutations (live copy only) ------------------------------
+    # --- inventory mutations (applied to every copy) -----------------------
     def set_stack(self, slot: int, value: int) -> None:
-        self._live_inventory().set_stack(slot, value)
+        for inv in self._all_inventories():
+            inv.set_stack(slot, value)
 
     def set_item(self, slot: int, item_type: int, *, stack=None, damage=None,
                  auto_reuse=None, use_time=None, use_anim=None, pick=None,
                  tile_boost=None) -> None:
-        inv = self._live_inventory()
-        inv.set_type(slot, item_type)
-        if stack is not None:
-            inv.set_stack(slot, stack)
-        if damage is not None:
-            inv.set_damage(slot, damage)
-        if auto_reuse is not None:
-            inv.set_auto_reuse(slot, bool(auto_reuse))
-        if use_time is not None:
-            inv.set_use_speed(slot, use_time, use_anim)
-        if pick is not None:
-            inv.set_pick(slot, pick)
-        if tile_boost is not None:
-            inv.set_tile_boost(slot, tile_boost)
+        invs = self._all_inventories()
+        cur = invs[0].read_slot(slot)
+        # Only re-template when the item type actually changes (field tweaks on the
+        # same item must not wipe the edits, and must stay scan-free/fast).
+        changed = cur is None or item_type != cur.type
+        block = self._template_block(item_type) if changed else None
+        if changed:
+            self._place_item(invs, slot, item_type, block)
+        for inv in invs:
+            if stack is not None:
+                inv.set_stack(slot, stack)
+            if damage is not None:
+                inv.set_damage(slot, damage)
+            if auto_reuse is not None:
+                inv.set_auto_reuse(slot, bool(auto_reuse))
+            if use_time is not None:
+                inv.set_use_speed(slot, use_time, use_anim)
+            if pick is not None:
+                inv.set_pick(slot, pick)
+            if tile_boost is not None:
+                inv.set_tile_boost(slot, tile_boost)
 
     def give_item(self, item_type: int, stack: int = 1) -> int:
-        """Put an item in the first empty main-inventory slot. Returns that slot."""
-        inv = self._live_inventory()
-        by_slot = {s.index: s for s in inv.slots()}
+        """Put a fully-statted item in the first empty main-inventory slot."""
+        invs = self._all_inventories()
+        by_slot = {s.index: s for s in invs[0].slots()}
         empty = next((i for i in GIVE_RANGE
                       if i in by_slot and by_slot[i].empty), None)
         if empty is None:
             raise ServiceError("inventory full — no empty slot to give into")
-        inv.set_type(empty, item_type)
-        inv.set_stack(empty, stack)
+        block = self._template_block(item_type)
+        self._place_item(invs, empty, item_type, block)
+        for inv in invs:
+            inv.set_stack(empty, stack)
         return empty
 
     def fast_mining(self, use_time: int = 8, use_anim: int = 13, pick: int = 200) -> list[int]:
-        return self._live_inventory().make_fast_mining(use_time, use_anim, pick)
+        hit = []
+        for inv in self._all_inventories():
+            hit = inv.make_fast_mining(use_time, use_anim, pick)
+        return hit
 
     def long_reach(self, tiles: int = 20) -> list[int]:
-        return self._live_inventory().long_reach(tiles)
+        hit = []
+        for inv in self._all_inventories():
+            hit = inv.long_reach(tiles)
+        return hit
 
 
 __all__ = ["Service", "ServiceError", "Snapshot", "PlayerState", "ItemSlot",
