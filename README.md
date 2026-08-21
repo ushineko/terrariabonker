@@ -1,0 +1,183 @@
+# terrariabonker
+
+A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.7**
+(Steam appid 105600), the Windows build running under Proton (wine-mono). It
+finds the player in memory with no hardcoded address, then reads, edits and
+freezes player state and inventory items by reading and writing
+`/proc/<pid>/mem`. A PyQt6 control panel drives the same operations as the CLI.
+
+No Cheat Engine required for any of this: discovery and editing both run in
+Python. Cheat Engine is only needed for the cheats that require patching game
+*code* rather than editing values — see [The persistent/frame-reset split](#the-persistentframe-reset-split).
+
+*This edits your own single-player game in memory. It writes nothing to disk and
+holds no state; stopping it ends every effect.*
+
+## Table of Contents
+
+- [What it can do](#what-it-can-do)
+- [The persistent/frame-reset split](#the-persistentframe-reset-split)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage (CLI)](#usage-cli)
+- [Usage (GUI)](#usage-gui)
+- [Version safety](#version-safety)
+- [How it works](#how-it-works)
+- [Project layout](#project-layout)
+- [Testing](#testing)
+- [Safety](#safety)
+
+## What it can do
+
+- **Godmode** and **infinite mana** — high-frequency freezes that hold HP/mana.
+- **Stat edits** — set current and permanent-max HP and mana.
+- **Full item editor** — per inventory slot: item **type** (ItemID), **stack**,
+  **damage**, **auto-reuse** (auto-attack), **use-speed** (mining/placing/attack
+  speed), **pickaxe power**, and **placement reach** (`tileBoost`).
+- **Fast mining** — sets every pickaxe to Picksaw-tier speed and power in one click.
+- **Long reach** — extends placement distance on all items.
+- **Give items by name** — a searchable browser over 3,900+ item names.
+
+## The persistent/frame-reset split
+
+An external trainer can only hold values the game keeps frame-to-frame. Terraria
+recomputes some player fields every frame in `ResetEffects` and reads them within
+that same frame, so an external `/proc` write always loses the race (the same
+reason a single lethal hit can kill through a health freeze). This draws a hard line:
+
+| Reachable externally (persistent) | Needs Cheat Engine (frame-reset code) |
+| :--- | :--- |
+| HP, mana, godmode-by-freeze | true damage-immunity (patch the death check) |
+| Item stack / type / damage / auto-reuse | — |
+| Mining / placing / attack **speed** (`Item.useTime`) | global `pickSpeed` multiplier |
+| Placement **distance** (`Item.tileBoost`) | base tile reach (`tileRangeX/Y`) |
+| Pickaxe power (`Item.pick`) | pickup range (`itemGrabRange`) |
+
+The externally-reachable half is this trainer. The frame-reset half is planned as
+a companion `tables/Terraria.CT` Cheat Engine table (see the Megabonk.CT sibling),
+which patches the reset code the way a tModLoader mod does from inside the frame.
+
+## Requirements
+
+- Terraria launched as the **Windows build under Proton** (not the native Linux
+  build). Force Proton in Steam under Properties, Compatibility.
+- Python 3.10+ (system Python; `/usr/bin/python3`, not conda)
+- `numpy` and `PyQt6` (Arch/CachyOS: `python-numpy python-pyqt6`)
+- `sudo`. Game memory access needs root (`kernel.yama.ptrace_scope=1`). The CLI
+  re-execs under sudo; the GUI stays unprivileged and shells each action out
+  through sudo. Passwordless sudo makes both seamless.
+
+## Installation
+
+```bash
+cd ~/git/ag-scripts/terrariabonker
+./install.sh
+```
+
+Installs a `terrariabonker` symlink into `~/.local/bin` and a desktop entry that
+launches the GUI. Nothing is copied; the entry points at this checkout, so
+`git pull` updates it. Remove with `./uninstall.sh`.
+
+## Usage (CLI)
+
+```bash
+terrariabonker status              # find the player, show HP/mana
+terrariabonker version             # detected build and compatibility
+
+terrariabonker godmode             # pin HP to max; Ctrl-C to stop
+terrariabonker freeze --godmode --mana
+terrariabonker set-hp max          # heal to full
+terrariabonker set-max-hp 500
+
+terrariabonker inventory           # list your inventory
+terrariabonker set-stack 40 9999   # set a slot's quantity
+terrariabonker set-item 0 3507 --damage 200 --auto-reuse 1   # edit a slot
+terrariabonker fast-mining         # speed + power on all pickaxes
+terrariabonker long-reach --tiles 25
+```
+
+Every memory-touching command elevates through sudo first and is gated on the
+game build (see below).
+
+## Usage (GUI)
+
+Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
+
+- **Trainer** tab — godmode / infinite-mana toggles, heal / refill, max HP/mana,
+  fast-mining, long-reach.
+- **Inventory** tab — a live table (slot, ID, name, stack, damage, auto, useTime,
+  pick); double-click Stack / ID / Dmg / Auto to edit in place. **Give item**
+  takes an item name (autocompleted) or an ItemID and drops it into the first
+  empty slot, warning if the inventory is full.
+
+The window runs unprivileged and runs each action as a short `sudo` CLI call, so
+Qt never runs as root.
+
+## Version safety
+
+The offsets are specific to one game build. `version.py` reads the running game's
+version string and Steam buildid and compares them to the known-good build:
+
+| Situation | Behaviour |
+| :--- | :--- |
+| Exact match (`1.4.5.7`, buildid `24825745`) | proceeds |
+| Hotfix only (`1.4.5.8`) or buildid drift | warns, proceeds |
+| Major/minor/patch differs (`1.4.6`, `1.5.x`) | refuses without `--force` |
+
+The locator also fails safe: a shifted layout matches nothing rather than writing
+to a wrong address. After an update, see [docs/discovery.md](docs/discovery.md).
+
+## How it works
+
+The player is located by scanning writable memory for the six-int32 life/mana
+block, validated by Terraria invariants and a real character-name string.
+wine-mono does not move objects, so a located address stays valid for the world's
+lifetime. The inventory is reached structurally (`Player.inventory[]`, a 59-slot
+`Item[]`), because value-scanning a stack count only finds downstream caches. The
+full derivation, and how to rebuild the offsets after a game update, is in
+**[docs/discovery.md](docs/discovery.md)**.
+
+## Project layout
+
+```
+terrariabonker/
+├── terrariabonker.py           thin entry point
+├── terrariabonker/
+│   ├── proc.py                 /proc read/write, PID detect, sudo self-elevation
+│   ├── locate.py               from-scratch player locator (signature + name anchor)
+│   ├── player.py               player stat offsets and a read/write handle
+│   ├── inventory.py            inventory array + Item field editor
+│   ├── trainer.py              the freeze engine (godmode, infinite mana)
+│   ├── version.py              build detection and the compatibility gate
+│   ├── names.py                ItemID -> name lookup for the item browser
+│   ├── data/items.json         bundled ItemID name map
+│   ├── cli.py                  argparse front end
+│   └── gui/main_window.py      PyQt6 control panel
+├── docs/discovery.md           how the offsets were derived and how to rebuild them
+├── specs/                      feature specs
+└── tests/                      unittest suite (headless, no game, no root)
+```
+
+## Testing
+
+```bash
+QT_QPA_PLATFORM=offscreen /usr/bin/python3 -m pytest tests/ -q
+```
+
+Tests run against an in-memory fake process, so they need neither the game nor
+root and never touch real game memory.
+
+## Safety
+
+- The tool writes nothing to disk and keeps no state. Stopping it ends every
+  effect; edited values are ordinary game values the game keeps managing.
+- Godmode is a freeze, not a code patch. A single hit larger than current HP can
+  still register before the next rewrite; raise max HP for headroom.
+- **`Item.consumable`** is deliberately not exposed for editing: setting it on a
+  stack-of-one item makes the game eat it on use. If an item is damaged by an
+  edit, the game keeps a pristine template of every item in memory
+  (`ContentSamples`) that can be cloned back — see docs/discovery.md.
+- Terraria is single-player here. Edited characters and worlds are yours.
+- The version gate exists because running stale offsets on a changed build could
+  write into the wrong fields. Do not `--force` past an incompatible build unless
+  you have re-derived the offsets.

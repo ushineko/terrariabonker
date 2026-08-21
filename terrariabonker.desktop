@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=terrariabonker
+Comment=Live-memory trainer and item editor for Terraria (Proton)
+Exec=/usr/bin/python3 /home/nverenin/git/ag-scripts/terrariabonker/terrariabonker.py gui
+Icon=applications-games
+Terminal=false
+Type=Application
+Categories=Game;Utility;
+Keywords=terraria;trainer;godmode;cheat;memory;item;editor;
+StartupNotify=true
