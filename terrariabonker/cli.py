@@ -185,8 +185,9 @@ def cmd_patch(args) -> int:
             for name, on in st.items():
                 print(f"  [{'x' if on else ' '}] {name:<11} {CHEATS[name].label}")
         elif args.action in ("enable", "on"):
-            p.enable(args.cheat)
-            print(f"[OK] enabled {args.cheat}")
+            p.enable(args.cheat, value=args.value)
+            shown = f" (value {args.value})" if args.value is not None else ""
+            print(f"[OK] enabled {args.cheat}{shown}")
         elif args.action in ("disable", "off"):
             p.disable(args.cheat)
             print(f"[OK] disabled {args.cheat}")
@@ -304,6 +305,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("patch", help="code-patch cheats (mining/reach/placement)")
     p.add_argument("action", choices=["status", "enable", "disable", "on", "off"])
     p.add_argument("cheat", nargs="?", choices=list(CHEATS))
+    p.add_argument("--value", type=float, default=None,
+                   help="override the enabled value (mining pickSpeed, reach tiles)")
     p.add_argument("--json", action="store_true", help="machine-readable status")
     force_flag(p)
     p.set_defaults(func=cmd_patch)

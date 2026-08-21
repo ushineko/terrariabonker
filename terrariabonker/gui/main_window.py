@@ -18,10 +18,10 @@ import sys
 from PyQt6.QtCore import QProcess, Qt, QTimer
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QCompleter,
-                             QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-                             QLineEdit, QPlainTextEdit, QPushButton, QSpinBox,
-                             QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
-                             QWidget)
+                             QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
+                             QHeaderView, QLabel, QLineEdit, QPlainTextEdit,
+                             QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
+                             QTabWidget, QVBoxLayout, QWidget)
 
 from terrariabonker import names
 from terrariabonker.gui import client
@@ -30,6 +30,7 @@ from terrariabonker.patcher import CHEATS
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ENTRY = os.path.join(_ROOT, "terrariabonker.py")
 ICON = os.path.join(_ROOT, "assets", "terrariabonker.svg")
+APPID = "105600"        # Terraria on Steam; launched via steam://rungameid/
 
 
 def _cli_args(sub_args: list[str]) -> tuple[str, list[str]]:
@@ -49,6 +50,7 @@ class MainWindow(QWidget):
         self._filling = False                # suppress cell-edit signals during fill
         self._patch_filling = False          # suppress patch-checkbox signals during refresh
         self._patch_cbs: dict = {}           # cheat name -> checkbox
+        self._patch_vals: dict = {}          # cheat name -> value spinbox (valued cheats)
         self._rows: list[dict] = []          # rows currently shown in the table
         self._all_rows: list[dict] = []      # every slot (incl. empty), for slot-finding
         self._build()
@@ -56,19 +58,26 @@ class MainWindow(QWidget):
         self._status_timer.timeout.connect(self.refresh_status)
         self._status_timer.start(2000)
         self.refresh_status()
+        self.refresh_patches()               # code patches live on the Trainer tab
 
     # --- layout ------------------------------------------------------------
     def _build(self):
         root = QVBoxLayout(self)
 
+        top = QHBoxLayout()
         self.status = QLabel("Locating Terraria…")
         self.status.setTextFormat(Qt.TextFormat.RichText)
-        root.addWidget(self.status)
+        self.status.setWordWrap(True)
+        top.addWidget(self.status, 1)
+        self.btn_launch = QPushButton("Launch Terraria")
+        self.btn_launch.setToolTip("Start Terraria through Steam (steam://rungameid/%s)" % APPID)
+        self.btn_launch.clicked.connect(self._launch_terraria)
+        top.addWidget(self.btn_launch)
+        root.addLayout(top)
 
         tabs = QTabWidget()
         tabs.addTab(self._trainer_tab(), "Trainer")
         tabs.addTab(self._inventory_tab(), "Inventory")
-        tabs.addTab(self._patches_tab(), "CE Patches")
         tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(tabs, 1)
 
@@ -114,6 +123,8 @@ class MainWindow(QWidget):
         tg.addWidget(self.sp_reach)
         tg.addWidget(self._btn("Long reach", lambda: client.long_reach_argv(self.sp_reach.value())))
         col.addWidget(tool_box)
+
+        col.addWidget(self._patches_group())
         col.addStretch()
         return w
 
@@ -155,48 +166,82 @@ class MainWindow(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
         self.table.setSortingEnabled(True)                 # click a header to sort
+        # Default to Slot ascending so the table matches the in-game inventory
+        # order. A user's later header click persists (refreshes re-sort by the
+        # current indicator, not back to Slot).
+        self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)  # all resizable
         hdr.setSectionsMovable(True)
         hdr.setStretchLastSection(True)
         self.table.itemChanged.connect(self._on_cell_edited)
         col.addWidget(self.table, 1)
-        col.addWidget(QLabel("<i>Double-click ID / Stack / Dmg / Auto / useTime to edit. "
-                             "Auto: 1 = auto-swing; lower useTime = faster.</i>"))
+        note = QLabel("<i>Double-click ID / Stack / Dmg / Auto / useTime to edit. "
+                      "Auto: 1 = auto-swing; lower useTime = faster.</i>")
+        note.setWordWrap(True)
+        col.addWidget(note)
         return w
 
     def _on_tab_changed(self, i: int):
         if i == 1:
             self.refresh_inventory()
-        elif i == 2:
-            self.refresh_patches()
 
-    def _patches_tab(self) -> QWidget:
-        w = QWidget()
-        col = QVBoxLayout(w)
-        box = QGroupBox("Code patches (frame-reset cheats — need patching, not just editing)")
-        bl = QVBoxLayout(box)
-        for name, cheat in CHEATS.items():
+    # units shown beside a valued code-patch spinbox
+    _PATCH_UNIT = {"mining": "pickSpeed · lower = faster", "reach": "extra tiles"}
+
+    def _patches_group(self) -> QGroupBox:
+        """Code-patch cheats, embedded in the Trainer tab. No Cheat Engine at
+        runtime — these are byte patches applied through /proc; a game restart
+        clears them. (The 'CE' tab is reserved for real CE instrumentation.)"""
+        box = QGroupBox("Code patches (no CE needed — via /proc; cleared on game restart)")
+        g = QGridLayout(box)
+        for row, (name, cheat) in enumerate(CHEATS.items()):
             cb = QCheckBox(cheat.label)
             cb.setToolTip(cheat.note)
             cb.toggled.connect(lambda on, n=name: self._on_patch_toggled(n, on))
             self._patch_cbs[name] = cb
-            bl.addWidget(cb)
-        col.addWidget(box)
-        col.addWidget(self._btn2("Refresh", self.refresh_patches))
-        col.addWidget(QLabel(
-            "<i>These patch the game's code (via /proc) so a value holds against the "
-            "per-frame reset — the cheats a value-write alone can't do. A game restart "
-            "clears them. Offsets are for 1.4.5.7; re-derive with the ce/ tools after an "
-            "update.</i>"))
-        col.addStretch()
-        return w
+            g.addWidget(cb, row, 0)
+            if cheat.value_off is not None:
+                spin = self._value_spin(cheat)
+                spin.valueChanged.connect(lambda _v, n=name: self._on_patch_value(n))
+                self._patch_vals[name] = spin
+                g.addWidget(spin, row, 1)
+                unit = QLabel(self._PATCH_UNIT.get(name, ""))
+                unit.setStyleSheet("color: gray")
+                g.addWidget(unit, row, 2)
+        g.setColumnStretch(0, 1)
+        return box
+
+    def _value_spin(self, cheat) -> QWidget:
+        if cheat.value_kind == "f32":
+            s = QDoubleSpinBox()
+            s.setRange(0.05, 2.0)
+            s.setSingleStep(0.05)
+            s.setDecimals(2)
+            s.setValue(float(cheat.on_value))
+        else:
+            s = QSpinBox()
+            s.setRange(0, 100)
+            s.setValue(int(cheat.on_value))
+        return s
+
+    def _patch_value(self, name: str):
+        """Current spinbox value for a valued cheat, or None if it carries none."""
+        spin = self._patch_vals.get(name)
+        return spin.value() if spin is not None else None
 
     def _on_patch_toggled(self, name: str, on: bool):
         if self._patch_filling:
             return
-        self._run(client.patch_set_argv(name, on))
+        self._run(client.patch_set_argv(name, on, value=self._patch_value(name)))
         QTimer.singleShot(500, self.refresh_patches)
+
+    def _on_patch_value(self, name: str):
+        """Re-apply a live patch when its value spinbox changes."""
+        if self._patch_filling:
+            return
+        if self._patch_cbs[name].isChecked():
+            self._run(client.patch_set_argv(name, True, value=self._patch_value(name)))
 
     def refresh_patches(self):
         self._spawn(client.patch_status_argv(), on_output=self._render_patches)
@@ -300,6 +345,14 @@ class MainWindow(QWidget):
             f"<b>{d.get('name')}</b> — HP {d.get('hp')}/{d.get('max_hp')} · "
             f"Mana {d.get('mana')}/{d.get('max_mana')} · "
             f"PID {d.get('pid')} · Terraria {d.get('version')}{god}")
+
+    def _launch_terraria(self):
+        """Start Terraria through Steam. Unprivileged and detached — Steam
+        refuses to run as root, so this never goes through the sudo CLI wrapper."""
+        url = f"steam://rungameid/{APPID}"
+        ok = QProcess.startDetached("steam", [url]) or QProcess.startDetached("xdg-open", [url])
+        note = "" if ok else " — FAILED (is steam installed?)"
+        self.log.appendPlainText(f"[launch Terraria: {url}{note}]")
 
     # --- inventory tab -----------------------------------------------------
     def refresh_inventory(self):

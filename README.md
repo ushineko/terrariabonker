@@ -6,9 +6,10 @@ finds the player in memory with no hardcoded address, then reads, edits and
 freezes player state and inventory items by reading and writing
 `/proc/<pid>/mem`. A PyQt6 control panel drives the same operations as the CLI.
 
-No Cheat Engine required for any of this: discovery and editing both run in
-Python. Cheat Engine is only needed for the cheats that require patching game
-*code* rather than editing values — see [The persistent/frame-reset split](#the-persistentframe-reset-split).
+No Cheat Engine required at runtime: discovery, value edits, and the *code
+patches* all run from Python over `/proc`. Cheat Engine is used only off to the
+side, to re-derive patch offsets after a game update — see
+[Two kinds of cheat](#two-kinds-of-cheat-value-edits-and-code-patches).
 
 *This edits your own single-player game in memory. It writes nothing to disk and
 holds no state; stopping it ends every effect.*
@@ -16,7 +17,7 @@ holds no state; stopping it ends every effect.*
 ## Table of Contents
 
 - [What it can do](#what-it-can-do)
-- [The persistent/frame-reset split](#the-persistentframe-reset-split)
+- [Two kinds of cheat](#two-kinds-of-cheat-value-edits-and-code-patches)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage (CLI)](#usage-cli)
@@ -102,10 +103,13 @@ terrariabonker fast-mining         # speed + power on all pickaxes
 terrariabonker long-reach --tiles 25
 
 terrariabonker patch status                 # code-patch cheats: on/off
-terrariabonker patch enable mining          # global mining speed (pickSpeed)
-terrariabonker patch enable reach           # placement reach (blockRange)
-terrariabonker patch disable fast_place     # fast placement (ApplyItemTime)
+terrariabonker patch enable mining --value 0.15   # global mining speed (pickSpeed; lower = faster)
+terrariabonker patch enable reach --value 30      # placement reach (extra tiles)
+terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
 ```
+
+`--value` overrides the enabled value; omit it to use the default (mining `0.2`,
+reach `20`). `fast_place` carries no value.
 
 Every memory-touching command elevates through sudo first and is gated on the
 game build (see below).
@@ -114,14 +118,18 @@ game build (see below).
 
 Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
 
+- **Launch Terraria** — a header button starts the game through Steam when it
+  isn't already running. It runs unprivileged (Steam refuses to run as root), so
+  unlike the memory actions it does not go through sudo.
 - **Trainer** tab — godmode / infinite-mana toggles, heal / refill, max HP/mana,
-  fast-mining, long-reach.
-- **Inventory** tab — a live table (slot, ID, name, stack, damage, auto, useTime,
-  pick); double-click Stack / ID / Dmg / Auto to edit in place. **Give item**
-  takes an item name (autocompleted) or an ItemID and drops it into the first
-  empty slot, warning if the inventory is full.
-- **CE Patches** tab — checkboxes for the code-patch cheats (global mining speed,
-  placement reach, fast placement); a game restart clears them.
+  fast-mining, long-reach, and a **Code patches** section: checkbox toggles for
+  the frame-reset cheats (global mining speed, placement reach, fast placement)
+  with tunable value spinboxes for mining and reach. No Cheat Engine at runtime;
+  a game restart clears them.
+- **Inventory** tab — a live table sorted by slot to match the in-game order
+  (slot, ID, name, stack, damage, auto, useTime, pick); double-click Stack / ID /
+  Dmg / Auto to edit in place. **Give item** takes an item name (autocompleted)
+  or an ItemID and drops it into the first empty slot, warning if full.
 
 The window runs unprivileged and runs each action as a short `sudo` CLI call, so
 Qt never runs as root.

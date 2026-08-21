@@ -97,8 +97,13 @@ def parse_patch_status(raw: str) -> dict | None:
         return None
 
 
-def patch_set_argv(cheat: str, on: bool) -> list[str]:
-    return ["patch", "enable" if on else "disable", cheat]
+def patch_set_argv(cheat: str, on: bool, value: float | None = None) -> list[str]:
+    if not on:
+        return ["patch", "disable", cheat]
+    argv = ["patch", "enable", cheat]
+    if value is not None:
+        argv += ["--value", str(value)]
+    return argv
 
 
 def freeze_argv(godmode: bool, mana: bool) -> list[str]:
@@ -125,5 +130,6 @@ SAMPLE_ARGVS: list[list[str]] = [
     set_item_argv(0, 3507, stack=1, damage=200, auto_reuse=1, use_time=8),
     give_argv(2, 999), fast_mining_argv(), long_reach_argv(25),
     freeze_argv(True, True),
-    patch_status_argv(), patch_set_argv("mining", True), patch_set_argv("reach", False),
+    patch_status_argv(), patch_set_argv("mining", True, value=0.2),
+    patch_set_argv("reach", False), patch_set_argv("fast_place", True),
 ]

@@ -149,20 +149,25 @@ class Patcher:
             raise PatchError("no player found")
         return blocks
 
-    def _set_value(self, cheat: Cheat, on: bool):
+    def _set_value(self, cheat: Cheat, on: bool, override: float | int | None = None):
         if cheat.value_off is None:
             return
-        val = cheat.on_value if on else cheat.off_value
+        if on:
+            val = cheat.on_value if override is None else override
+        else:
+            val = cheat.off_value
         raw = struct.pack("<f", float(val)) if cheat.value_kind == "f32" \
             else struct.pack("<i", int(val))
         for b in self._players():
             self.mem.write(b.life_addr + cheat.value_off, raw)
 
-    def enable(self, name: str) -> None:
+    def enable(self, name: str, value: float | int | None = None) -> None:
+        """Patch the code site and set the field. ``value`` overrides the cheat's
+        default ``on_value`` (ignored for cheats that carry no value, e.g. fast_place)."""
         cheat = CHEATS[name]
         site = self._resolve(cheat.anchor) + cheat.patch_off
         self.mem.write(site, cheat.patched)
-        self._set_value(cheat, on=True)
+        self._set_value(cheat, on=True, override=value)
         self._enabled.add(name)
         self._save_state()
 
