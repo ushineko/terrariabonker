@@ -260,8 +260,39 @@ class Patcher:
 
     # --- code cave / injection --------------------------------------------
     def _find_cave(self, size: int) -> int:
-        """Find ``size`` bytes of executable padding for a stub. mono's JIT leaves
-        runs of int3 (0xCC) or zero between methods; those are safe to borrow."""
+        """Find ``size`` bytes of executable padding for a stub — we *borrow* space
+        rather than allocate our own.
+
+        We scan the JIT's executable regions for a run of int3 (0xCC, preferred) or
+        zero, which is the alignment padding emitted between methods. int3 is chosen
+        because it traps if ever executed, so a long 0xCC run is almost certainly
+        unreachable filler; 0x00 is the weaker fallback (it decodes as a real
+        instruction and a long zero run *could* be live data).
+
+        Why borrowing is safe *enough* here — and where it stops being safe:
+
+        - mono JITs lazily into code-manager chunks with a forward/bump allocator, so
+          interstitial alignment padding inside an already-emitted chunk is not put
+          back on any free list and won't be handed to a later method. wine-mono is
+          the old .NET-Framework runtime: non-tiered, no re-JIT, effectively no code
+          unloading. So the borrowed bytes are stable for the process lifetime, and
+          JIT churn (front-loaded at first-call) grows the pool forward, not into us.
+        - It is still a heuristic, not a guarantee. The failure mode is a clobbered
+          stub -> a crash, which is cheaply recoverable: disable restores the site,
+          a restart clears everything, and we re-derive by AOB each session.
+
+        RISK SCALES WITH ``size``. Real alignment gaps are small (a 16-byte-aligned
+        gap is <=15 bytes); a large request can only be met by a long cold run, which
+        is both rarer AND more likely to be actual data than incidental padding. So
+        this is a SMALL-STUB-ONLY technique. When we grow past it, DO NOT grow the
+        cave — allocate instead: keep the injected footprint minimal (the 5-byte site
+        jump + a tiny springboard) and put the routine in memory we allocate
+        (VirtualAllocEx / mmap-via-ptrace). Triggers to graduate to an alloc backend:
+        a second/third injection cheat (extract a reusable Hook/Detour with a
+        borrow-or-allocate backend chosen by stub size), a stub too big for a gap, or
+        a 64-bit port (rel32 can't reach a far allocation -> a 2-stage hook needs a
+        small nearby cave anyway). See ce/REACH_FINDINGS.md.
+        """
         want = size + 4
         for pad in (b"\xcc", b"\x00"):
             needle = pad * want
