@@ -12,7 +12,6 @@ keep alive, no GC landmines, and the child is a real OS process we can signal.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
@@ -24,6 +23,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComple
                              QWidget)
 
 from terrariabonker import names
+from terrariabonker.gui import client
 
 ENTRY = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -89,25 +89,25 @@ class MainWindow(QWidget):
 
         stat_box = QGroupBox("Stats")
         sg = QGridLayout(stat_box)
-        sg.addWidget(self._btn("Heal to full", ["set-hp", "max"]), 0, 0)
-        sg.addWidget(self._btn("Refill mana", ["set-mana", "max"]), 0, 1)
+        sg.addWidget(self._btn("Heal to full", client.set_hp_argv("max")), 0, 0)
+        sg.addWidget(self._btn("Refill mana", client.set_mana_argv("max")), 0, 1)
         self.sp_maxhp = self._spin(100, 9999, 400)
         self.sp_maxmana = self._spin(20, 400, 200)
         sg.addWidget(QLabel("Max HP"), 1, 0)
         sg.addWidget(self.sp_maxhp, 1, 1)
-        sg.addWidget(self._btn("Set", lambda: ["set-max-hp", str(self.sp_maxhp.value())]), 1, 2)
+        sg.addWidget(self._btn("Set", lambda: client.set_max_hp_argv(self.sp_maxhp.value())), 1, 2)
         sg.addWidget(QLabel("Max mana"), 2, 0)
         sg.addWidget(self.sp_maxmana, 2, 1)
-        sg.addWidget(self._btn("Set", lambda: ["set-max-mana", str(self.sp_maxmana.value())]), 2, 2)
+        sg.addWidget(self._btn("Set", lambda: client.set_max_mana_argv(self.sp_maxmana.value())), 2, 2)
         col.addWidget(stat_box)
 
         tool_box = QGroupBox("Tools")
         tg = QHBoxLayout(tool_box)
-        tg.addWidget(self._btn("Fast mining (all pickaxes)", ["fast-mining"]))
+        tg.addWidget(self._btn("Fast mining (all pickaxes)", client.fast_mining_argv()))
         self.sp_reach = self._spin(1, 100, 20)
         tg.addWidget(QLabel("Reach +"))
         tg.addWidget(self.sp_reach)
-        tg.addWidget(self._btn("Long reach", lambda: ["long-reach", "--tiles", str(self.sp_reach.value())]))
+        tg.addWidget(self._btn("Long reach", lambda: client.long_reach_argv(self.sp_reach.value())))
         col.addWidget(tool_box)
         col.addStretch()
         return w
@@ -149,8 +149,11 @@ class MainWindow(QWidget):
         self.table.setHorizontalHeaderLabels(self.INV_COLS)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
-        self.table.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch)   # Name column stretches
+        self.table.setSortingEnabled(True)                 # click a header to sort
+        hdr = self.table.horizontalHeader()
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)  # all resizable
+        hdr.setSectionsMovable(True)
+        hdr.setStretchLastSection(True)
         self.table.itemChanged.connect(self._on_cell_edited)
         col.addWidget(self.table, 1)
         col.addWidget(QLabel("<i>Double-click Stack / ID / Dmg to edit. "
@@ -215,19 +218,16 @@ class MainWindow(QWidget):
                 self._freeze.waitForFinished(500)
             self._procs.discard(self._freeze)
             self._freeze = None
-        flags = []
-        if self.cb_god.isChecked():
-            flags.append("--godmode")
-        if self.cb_mana.isChecked():
-            flags.append("--mana")
-        if not flags:
+        god, mana = self.cb_god.isChecked(), self.cb_mana.isChecked()
+        if not (god or mana):
             self.log.appendPlainText("[freeze stopped]")
             return
+        sub_args = client.freeze_argv(god, mana)
         self._freeze = QProcess(self)
         self._procs.add(self._freeze)
-        prog, argv = _cli_args(["freeze", *flags])
+        prog, argv = _cli_args(sub_args)
         self._freeze.start(prog, argv)
-        self.log.appendPlainText(f"[freeze started: {' '.join(flags)}]")
+        self.log.appendPlainText(f"[freeze started: {' '.join(sub_args[1:])}]")
 
     def refresh_status(self):
         if self._status_busy:
@@ -238,12 +238,11 @@ class MainWindow(QWidget):
             self._status_busy = False
             self._render_status(out)
 
-        self._spawn(["status", "--json"], on_output=done)
+        self._spawn(client.status_argv(), on_output=done)
 
     def _render_status(self, raw: str):
-        try:
-            d = json.loads(raw.strip().splitlines()[-1])
-        except (ValueError, IndexError):
+        d = client.parse_status(raw)
+        if d is None:
             self.status.setText("<b>Terraria not found</b> — is it running under Proton?")
             return
         god = " · <span style='color:#d33'>GODMODE</span>" if self.cb_god.isChecked() else ""
@@ -254,55 +253,63 @@ class MainWindow(QWidget):
 
     # --- inventory tab -----------------------------------------------------
     def refresh_inventory(self):
-        args = ["inventory", "--json"]
-        self._spawn(args, on_output=self._fill_table)
+        self._spawn(client.inventory_argv(), on_output=self._fill_table)
 
     def _fill_table(self, raw: str):
-        try:
-            all_rows = json.loads(raw.strip().splitlines()[-1])
-        except (ValueError, IndexError):
+        all_rows = client.parse_inventory(raw)
+        if all_rows is None:
             return
         self._all_rows = all_rows
         rows = all_rows if self.cb_empty.isChecked() else [r for r in all_rows if r["type"] != 0]
         self._filling = True
+        self.table.setSortingEnabled(False)          # never sort mid-insert
         self._rows = rows
         self.table.setRowCount(len(rows))
         RO = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
         EDIT = RO | Qt.ItemFlag.ItemIsEditable
+        editable = {1, 3, 4, 5}                       # ID, Stack, Dmg, Auto
+        name_col = 2                                  # only this column sorts as text
         for r, d in enumerate(rows):
             vals = [d["slot"], d["type"], names.label(d["type"]), d["stack"],
                     d["damage"], d["auto_reuse"], d["use_time"], d["pick"]]
-            editable = {1, 3, 4, 5}      # ID, Stack, Dmg, Auto
             for c, v in enumerate(vals):
-                it = QTableWidgetItem(str(v))
+                it = QTableWidgetItem()
+                if c == name_col:
+                    it.setData(Qt.ItemDataRole.DisplayRole, str(v))
+                else:
+                    it.setData(Qt.ItemDataRole.DisplayRole, int(v))   # numeric sort
                 it.setFlags(EDIT if c in editable else RO)
                 self.table.setItem(r, c, it)
         self._filling = False
+        self.table.setSortingEnabled(True)
+        self.table.resizeColumnsToContents()
 
     def _on_cell_edited(self, item):
         if self._filling:
             return
         row, col = item.row(), item.column()
-        d = self._rows[row]
-        slot = d["slot"]
+        # Key off the Slot cell, not the row index: sorting reorders rows.
+        slot_item = self.table.item(row, 0)
+        if slot_item is None:
+            return
+        slot = int(slot_item.text())
+        d = next((r for r in self._all_rows if r["slot"] == slot), None)
+        if d is None:
+            return
         try:
             val = int(item.text())
         except ValueError:
             self.refresh_inventory()
             return
         if col == 3:                                     # Stack
-            self._run(["set-stack", str(slot), str(val)])
+            self._run(client.set_stack_argv(slot, val))
         elif col == 1:                                   # ItemID
-            self._run(["set-item", str(slot), str(val), "--stack", str(d["stack"] or 1)])
+            self._run(client.set_item_argv(slot, val, stack=d["stack"] or 1))
         elif col == 4:                                   # Damage
-            self._run(["set-item", str(slot), str(d["type"]), "--damage", str(val)])
+            self._run(client.set_item_argv(slot, d["type"], damage=val))
         elif col == 5:                                   # autoReuse
-            self._run(["set-item", str(slot), str(d["type"]), "--auto-reuse", "1" if val else "0"])
+            self._run(client.set_item_argv(slot, d["type"], auto_reuse=1 if val else 0))
         QTimer.singleShot(600, self.refresh_inventory)
-
-    # inventory slots the game treats as the main grid for "give" (0-49);
-    # avoids dropping items into coin/ammo/equip slots.
-    GIVE_RANGE = range(0, 50)
 
     def give_item(self):
         text = self.give_search.text().strip()
@@ -317,15 +324,8 @@ class MainWindow(QWidget):
                 return
             item_id, matched = hits[0]
             self.log.appendPlainText(f"['{text}' → {matched} (#{item_id})]")
-        by_slot = {r["slot"]: r for r in self._all_rows}
-        empty = next((s for s in self.GIVE_RANGE
-                      if s in by_slot and by_slot[s]["type"] == 0), None)
-        if empty is None:
-            self.log.appendPlainText("[inventory full — no empty slot; "
-                                     "double-click a slot's ID to overwrite instead]")
-            return
-        self._run(["set-item", str(empty), str(item_id),
-                   "--stack", str(self.sp_gstack.value())])
+        # The service finds the first empty slot and reports if the inventory is full.
+        self._run(client.give_argv(item_id, self.sp_gstack.value()))
         QTimer.singleShot(600, self.refresh_inventory)
 
     def closeEvent(self, event):
