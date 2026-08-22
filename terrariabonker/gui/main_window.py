@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout,
                              QWidget)
 
-from terrariabonker import names, recipes, sprites
+from terrariabonker import names, prefixes, recipes, sprites
 from terrariabonker.gui import client, invgrid
 from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import PATCH_CATALOG
@@ -510,6 +510,9 @@ class MainWindow(QWidget):
             cell.setStyleSheet("QPushButton { color: gray; }")
             return
         name = names.label(row["type"])
+        pfx = prefixes.name(row.get("prefix", 0))
+        full = f"{pfx} {name}" if pfx else name          # e.g. "Fabled Slime Staff"
+        quality = prefixes.quality(row.get("prefix", 0))
         cell.setText("")
         pm = self._pixmap_for(row["type"])
         if pm.isNull():                                 # no sprite: fall back to abbrev text
@@ -517,8 +520,8 @@ class MainWindow(QWidget):
             cell.setIcon(QIcon())
             cell.setText(invgrid.abbrev(name) + (f"\n×{badge}" if badge else ""))
         else:
-            cell.setIcon(self._cell_icon(row["type"], row.get("stack", 0)))
-        cell.setToolTip(invgrid.tooltip(row, name))
+            cell.setIcon(self._cell_icon(row["type"], row.get("stack", 0), quality))
+        cell.setToolTip(invgrid.tooltip(row, full))
         bg, border = invgrid.cell_colors(row.get("rare", 0))
         cell.setStyleSheet(
             f"QPushButton {{ background-color: rgb{bg};"
@@ -662,9 +665,13 @@ class MainWindow(QWidget):
         self._icon_cache[item_id] = ic
         return ic
 
-    def _cell_icon(self, item_id: int, stack: int) -> QIcon:
+    _QUALITY_DOT = {"good": QColor(80, 220, 90), "bad": QColor(230, 70, 70),
+                    "neutral": QColor(180, 180, 180)}
+
+    def _cell_icon(self, item_id: int, stack: int, quality: str = "none") -> QIcon:
         """Build an inventory-cell icon: the sprite with the stack count composited into
-        the bottom-right corner (Terraria-style). Falls back to the placeholder."""
+        the bottom-right corner (Terraria-style), plus a top-left dot for a modifier
+        (green=beneficial, red=detrimental, gray=neutral). Falls back to the placeholder."""
         base = self._pixmap_for(item_id)
         size = CELL_H - 12                              # leave room for the rarity border
         canvas = QPixmap(size, size)
@@ -674,6 +681,11 @@ class MainWindow(QWidget):
             s = base.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
                             Qt.TransformationMode.FastTransformation)
             painter.drawPixmap((size - s.width()) // 2, (size - s.height()) // 2, s)
+        dot = self._QUALITY_DOT.get(quality)
+        if dot is not None:                             # modifier indicator, top-left
+            painter.setPen(QColor(0, 0, 0))
+            painter.setBrush(dot)
+            painter.drawEllipse(1, 1, 6, 6)
         if stack and stack > 1:
             f = QFont(self.font())
             f.setPointSize(8)

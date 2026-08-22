@@ -36,11 +36,14 @@ holds no state; stopping it ends every effect.*
 - **Stat edits** — set current and permanent-max HP and mana.
 - **Grid item editor** — an inventory grid that mirrors the in-game layout
   (Hotbar / Inventory / Coins / Ammo). Click a slot to open an editor dialog for
-  item **type** (ItemID), **stack**, **damage**, **defense**, **prefix** (modifier
-  tier), **auto-reuse** (auto-attack), **use-speed**, **use-animation**, **pickaxe
+  item **type** (ItemID), **stack**, **damage**, **defense**, **modifier** (prefix),
+  **auto-reuse** (auto-attack), **use-speed**, **use-animation**, **pickaxe
   power**, and **placement reach**; click an empty slot to place a fully-statted
-  item, or clear a slot. Accessories carried in the inventory (including their
-  defense and prefix) edit through the same path.
+  item, or clear a slot. The **modifier** is a named dropdown filtered to the item's
+  damage class — melee, ranged, magic, and summon weapons and accessories each offer
+  only their own modifiers; a modified item shows the modifier in its name (e.g.
+  *Fabled Slime Staff*) and a colour-coded corner dot in the grid (green = beneficial,
+  red = detrimental). Accessories edit through the same path.
 - **Fast mining** — sets every pickaxe to Picksaw-tier speed and power in one click.
 - **Long reach** — extends placement distance on all items.
 - **Give items by name** — the editor dialog's item field autocompletes over all
@@ -234,10 +237,12 @@ terrariabonker/
 │   ├── service.py              view-neutral core shared by CLI and GUI
 │   ├── version.py              build detection and the compatibility gate
 │   ├── names.py                ItemID -> name lookup for the item browser
+│   ├── prefixes.py             modifier names + per-class applicability + good/bad quality
 │   ├── recipes.py              recipe extraction (from Main.recipe[]) + browse/search
 │   ├── xnb.py                  self-contained XNB + LZX + Texture2D decoder (item sprites)
 │   ├── sprites.py              item-icon cache (decode Content/Images -> ~/.cache)
 │   ├── data/items.json         ItemID name map (extracted from Terraria.exe)
+│   ├── data/prefixes.json      modifier-id name map (extracted from Terraria.exe)
 │   ├── data/recipes.json       recipe cache (extracted from the running game)
 ├── tools/extract_item_names/   dotnet tool that regenerates items.json from the exe
 │   ├── cli.py                  argparse front end

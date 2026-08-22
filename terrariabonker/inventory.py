@@ -38,6 +38,13 @@ ITEM_CONSUMABLE = 0xBD  # byte bool; if set, the item is used up on use (careful
 ITEM_AUTOREUSE = 0xBE   # byte bool; auto-swing while the button is held
 ITEM_RARE = 0xF8        # rarity tier (int): -1 gray .. 0 white .. 10 red .. 11 purple
 ITEM_PREFIX = 0x15C     # modifier tier (byte): 0 none .. e.g. Legendary/Warding/Menacing
+# Damage-class / accessory flags (byte bools) — used to offer only item-appropriate
+# modifiers in the editor and to label a modified item.
+ITEM_ACCESSORY = 0x7D
+ITEM_MELEE = 0x15D
+ITEM_MAGIC = 0x15E
+ITEM_RANGED = 0x15F
+ITEM_SUMMON = 0x160
 
 
 @dataclass
@@ -55,6 +62,7 @@ class Slot:
     rare: int
     defense: int
     prefix: int
+    flags: dict          # damage-class / accessory bools: melee/ranged/magic/summon/accessory
 
     @property
     def empty(self) -> bool:
@@ -101,6 +109,13 @@ class Inventory:
             rare=self.mem.read_i32(addr + ITEM_RARE),
             defense=self.mem.read_i32(addr + ITEM_DEFENSE),
             prefix=self.mem.read(addr + ITEM_PREFIX, 1)[0] if addr else 0,
+            flags={
+                "accessory": bool(self.mem.read(addr + ITEM_ACCESSORY, 1)[0]),
+                "melee": bool(self.mem.read(addr + ITEM_MELEE, 1)[0]),
+                "magic": bool(self.mem.read(addr + ITEM_MAGIC, 1)[0]),
+                "ranged": bool(self.mem.read(addr + ITEM_RANGED, 1)[0]),
+                "summon": bool(self.mem.read(addr + ITEM_SUMMON, 1)[0]),
+            },
         )
 
     def slots(self) -> list[Slot]:

@@ -9,11 +9,11 @@ window issues the actual ``set-item`` through the CLI client.
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QCheckBox, QCompleter, QDialog, QDialogButtonBox,
-                             QFormLayout, QLineEdit, QMessageBox, QPushButton,
-                             QSpinBox)
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QCompleter, QDialog,
+                             QDialogButtonBox, QFormLayout, QLineEdit, QMessageBox,
+                             QPushButton, QSpinBox)
 
-from terrariabonker import names
+from terrariabonker import names, prefixes
 
 
 class ItemEditDialog(QDialog):
@@ -54,12 +54,13 @@ class ItemEditDialog(QDialog):
         self.pick = self._spin(0, 2000, int(row.get("pick", 0)))
         self.tile = self._spin(0, 100, int(row.get("tile_boost", 0)))
         self.defense = self._spin(0, 9999, int(row.get("defense", 0)))
-        self.prefix = self._spin(0, 255, int(row.get("prefix", 0)))
+        self.prefix = QComboBox()
+        self._fill_prefixes(row, empty)
 
         form.addRow("Stack", self.stack)
         form.addRow("Damage", self.damage)
         form.addRow("Defense", self.defense)
-        form.addRow("Prefix (modifier tier)", self.prefix)
+        form.addRow("Modifier", self.prefix)
         form.addRow("Auto-reuse", self.auto)
         form.addRow("Use time (lower = faster)", self.use_time)
         form.addRow("Use animation", self.use_anim)
@@ -82,6 +83,29 @@ class ItemEditDialog(QDialog):
         s.setRange(lo, hi)
         s.setValue(max(lo, min(hi, val)))
         return s
+
+    def _fill_prefixes(self, row: dict, empty: bool):
+        """Populate the modifier dropdown with the item-class-appropriate prefixes,
+        showing readable names. A placed-new item (unknown class) offers all; a
+        non-weapon/non-accessory item offers none."""
+        flags = row.get("flags") or {}
+        cur = int(row.get("prefix", 0))
+        if prefixes.has_categories(flags):
+            ids = prefixes.valid_prefixes(flags)
+        elif empty:                              # placing a new item: class unknown -> all
+            ids = prefixes.all_ids()
+        else:                                    # a tool / block: modifiers don't apply
+            ids = []
+        self.prefix.addItem("(none)", 0)
+        if cur and cur not in ids:               # keep the current modifier visible off-pool
+            ids = [cur] + list(ids)
+        for i in ids:
+            self.prefix.addItem(f"{prefixes.name(i) or '#' + str(i)}  ({i})", i)
+        idx = self.prefix.findData(cur)
+        self.prefix.setCurrentIndex(idx if idx >= 0 else 0)
+        if not ids and not empty:
+            self.prefix.setEnabled(False)
+            self.prefix.setToolTip("This item type takes no modifiers.")
 
     def _resolve_type(self) -> int | None:
         text = self.item.text().strip()
@@ -108,7 +132,7 @@ class ItemEditDialog(QDialog):
             "pick": self.pick.value(),
             "tile_boost": self.tile.value(),
             "defense": self.defense.value(),
-            "prefix": self.prefix.value(),
+            "prefix": int(self.prefix.currentData() or 0),
         }
         self.accept()
 

@@ -117,7 +117,10 @@ def tooltip(row: dict, name: str) -> str:
     if row.get("defense", 0) > 0:
         lines.append(f"Defense {row['defense']}")
     if row.get("prefix", 0) > 0:
-        lines.append(f"Prefix {row['prefix']}")
+        from terrariabonker import prefixes
+        pn = prefixes.name(row["prefix"])
+        lines.append(f"Modifier: {pn} ({row['prefix']})" if pn
+                     else f"Modifier tier {row['prefix']}")
     if row.get("pick", 0) > 0:
         lines.append(f"Pickaxe power {row['pick']}%")
     if row.get("tile_boost", 0) > 0:

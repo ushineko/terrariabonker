@@ -15,11 +15,16 @@ It reads two things from the managed assembly, via `System.Reflection.Metadata`
 
 and joins them into `{ "id": "name" }`.
 
+It can also emit the modifier (prefix) map with `--prefixes`: `Terraria.ID.PrefixID`
+consts joined with the `Prefix` localization section → `data/prefixes.json`.
+
 ## Usage
 
 ```bash
 cd tools/extract_item_names
 dotnet run -- /path/to/Terraria.exe > /tmp/items.json
+# modifier names:
+dotnet run -- --prefixes /path/to/Terraria.exe > /tmp/prefixes.json
 # then, compacted into the package:
 python3 -c "import json;d=json.load(open('/tmp/items.json'));\
 json.dump(d,open('../../terrariabonker/data/items.json','w'),separators=(',',':'),sort_keys=True)"

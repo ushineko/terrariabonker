@@ -76,7 +76,7 @@ class StateTests(unittest.TestCase):
                "auto_reuse": 0, "use_time": 20}
         tip = invgrid.tooltip(row, "Hermes Boots")
         self.assertIn("Defense 12", tip)
-        self.assertIn("Prefix 65", tip)
+        self.assertIn("Warding (65)", tip)      # modifier shown by readable name
 
     def test_tooltip_hides_inapplicable_fields(self):
         # An accessory-like item: no damage, no pick power, no reach.

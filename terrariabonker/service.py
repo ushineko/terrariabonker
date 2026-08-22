@@ -63,6 +63,7 @@ class ItemSlot:
     rare: int
     defense: int
     prefix: int
+    flags: dict = field(default_factory=dict)   # melee/ranged/magic/summon/accessory bools
 
 
 @dataclass(frozen=True)
@@ -210,7 +211,7 @@ class Service:
     def _to_slot(s: Slot) -> ItemSlot:
         return ItemSlot(s.index, s.type, s.stack, s.damage, s.auto_reuse,
                         s.use_time, s.pick, s.tile_boost, s.use_anim, s.rare,
-                        s.defense, s.prefix)
+                        s.defense, s.prefix, s.flags)
 
     def inventory(self) -> list[ItemSlot]:
         return [self._to_slot(s) for s in self._live_inventory().slots()]
