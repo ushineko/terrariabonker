@@ -107,6 +107,9 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
   0xC, requiredTile 0x1C; Item createTile 0xA0 names stations).
 - `poc_spawner.lua` — dump `Spawner.GetSpawnRate` prologue/epilogue for the `spawn_rate`
   code-cave cheat (force out spawnRate=esi / out maxSpawns=edi at +0x1EAA, ReGrind-style).
+- `poc_tilename.lua` — dump `MapHelper.TileToLookup` and `Lang.GetMapObjectName` to
+  resolve the two statics `recipes.py` uses for real station names
+  (`Lang._mapLegendCache[MapHelper.tileLookup[tile]]._value`).
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 

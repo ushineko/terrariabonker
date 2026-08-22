@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 
 from terrariabonker import names
-from terrariabonker.locate import main_static_base
+from terrariabonker.locate import _exec_regions, main_static_base, read_mono_string
+from terrariabonker.patcher import _pat
 
 _DATA = os.path.join(os.path.dirname(__file__), "data", "recipes.json")
 
@@ -27,18 +29,18 @@ RECIPE_REQUIRED_ITEM = 0xC
 RECIPE_REQUIRED_TILE = 0x1C
 ITEM_TYPE = 0x6C
 ITEM_STACK = 0x88
-ITEM_CREATE_TILE = 0xA0
 ARR_LEN = 0xC
 ARR_DATA = 0x10
+LOCALIZEDTEXT_VALUE = 0xC        # LocalizedText._value (String*)
 
-# Station tile ids for stations that are NOT themselves crafted (so they never appear
-# as a recipe output and can't be auto-named from an item's createTile). The rest are
-# derived from the game at extraction time; unknown ids show as "Tile #N".
-_STATIONS_NOT_CRAFTED: dict[int, str] = {
-    16: "Anvil", 17: "Furnace", 26: "Demon/Crimson Altar", 77: "Hellforge",
-    133: "Adamantite/Titanium Forge", 134: "Mythril/Orichalcum Anvil",
-    412: "Ancient Manipulator",
-}
+# AOBs (operand at offset 2) that read the two statics the tile-name lookup needs:
+# MapHelper.tileLookup (ushort[]: tileType -> map-legend index) from TileToLookup's
+# `lea eax,[eax+esi*2+10]; movzx eax,word[eax]; add eax,edi`, and Lang._mapLegendCache
+# (LocalizedText[]) from GetMapObjectName's double-read + array index.
+_TILELOOKUP_PAT = _pat("8B 05 ?? ?? ?? ?? 39 70 0C 0F 86 ?? ?? ?? ?? "
+                       "8D 44 70 10 0F B7 00 03 C7")
+_MAPLEGEND_PAT = _pat("8B 05 ?? ?? ?? ?? 85 C0 74 24 8B 05 ?? ?? ?? ?? "
+                      "8B 4D 08 39 48 0C 0F 86 ?? ?? ?? ?? 8D 44 88 10 8B 00")
 
 
 class RecipeError(RuntimeError):
@@ -46,10 +48,8 @@ class RecipeError(RuntimeError):
 
 
 def station_name(tile: int) -> str:
-    """Name for a station tile: the game-derived map (an item's createTile), then the
-    not-crafted supplement, else "Tile #N"."""
-    st = load().get("stations", {})
-    return st.get(str(tile)) or _STATIONS_NOT_CRAFTED.get(tile) or f"Tile #{tile}"
+    """Name for a station tile from the cached game-derived map, else "Tile #N"."""
+    return load().get("stations", {}).get(str(tile)) or f"Tile #{tile}"
 
 
 # --- extraction (reads the running game) -------------------------------------
@@ -65,6 +65,48 @@ def _ru(mem, addr):
         return mem.read_u32(addr)
     except Exception:
         return None
+
+
+def _resolve_operand(mem, pat) -> int | None:
+    """Unique match of ``pat``; return the u32 operand of its `mov eax,[abs]` (offset 2)."""
+    seed_off, seed = pat.seed()
+    found = None
+    for start, end in _exec_regions(mem):
+        buf = mem.read(start, end - start)
+        i = buf.find(seed)
+        while i != -1:
+            pos = i - seed_off
+            if pat.matches(buf, pos):
+                if found is not None:
+                    return None                      # not unique
+                found = start + pos
+            i = buf.find(seed, i + 1)
+    return mem.read_u32(found + 2) if found is not None else None
+
+
+def _tile_names(mem, tiles) -> dict[str, str]:
+    """Map station tile ids -> display names via Lang._mapLegendCache[tileLookup[t]].
+    This is Terraria's own tile name (what the map/crafting UI show). {} if the AOBs
+    aren't found (game updated) — callers then fall back to "Tile #N"."""
+    tl_addr = _resolve_operand(mem, _TILELOOKUP_PAT)
+    ml_addr = _resolve_operand(mem, _MAPLEGEND_PAT)
+    if not tl_addr or not ml_addr:
+        return {}
+    tl, ml = _ru(mem, tl_addr), _ru(mem, ml_addr)
+    tl_len = _ri(mem, tl + ARR_LEN) if tl else 0
+    ml_len = _ri(mem, ml + ARR_LEN) if ml else 0
+    out = {}
+    for t in tiles:
+        if not (tl_len and 0 <= t < tl_len):
+            continue
+        idx = struct.unpack("<H", mem.read(tl + ARR_DATA + t * 2, 2))[0]
+        if not (ml_len and 0 <= idx < ml_len):
+            continue
+        lt = _ru(mem, ml + ARR_DATA + idx * 4)
+        s = read_mono_string(mem, _ru(mem, lt + LOCALIZEDTEXT_VALUE)) if lt else None
+        if s:
+            out[str(t)] = s
+    return out
 
 
 def _read_ingredients(mem, item_arr: int | None) -> list[list[int]]:
@@ -85,8 +127,8 @@ def _read_ingredients(mem, item_arr: int | None) -> list[list[int]]:
 def extract(mem) -> dict:
     """Walk `Main.recipe[]` in the running game. Returns
     ``{"recipes": [{"out", "n", "ing": [[id,count],...], "tile"?}], "stations": {tile: name}}``.
-    Station names are derived from each output item's ``createTile`` (an item whose
-    createTile is a station tile *is* that station), which is exact and build-specific."""
+    Station names come from Terraria's own tile display names (see `_tile_names`), so
+    they are exact and build-specific."""
     base = main_static_base(mem)
     if base is None:
         raise RecipeError("could not locate Main (get_LocalPlayer AOB missing?)")
@@ -94,7 +136,7 @@ def extract(mem) -> dict:
     maxr = _ri(mem, arr + ARR_LEN) if arr else None
     if not arr or not maxr or not (0 < maxr <= 50000):
         raise RecipeError("Main.recipe array not found or implausible")
-    recipes, stations = [], {}
+    recipes, tiles = [], set()
     for i in range(maxr):
         ro = _ru(mem, arr + ARR_DATA + i * 4)
         if not ro:
@@ -108,11 +150,9 @@ def extract(mem) -> dict:
         tile = _ri(mem, ro + RECIPE_REQUIRED_TILE)
         if tile is not None and tile >= 0:
             rec["tile"] = tile
-        ct = _ri(mem, ci + ITEM_CREATE_TILE)         # this output item places tile ct
-        if ct is not None and ct >= 0 and ct not in stations:
-            stations[ct] = names.label(ot)
+            tiles.add(tile)
         recipes.append(rec)
-    return {"recipes": recipes, "stations": {str(k): v for k, v in stations.items()}}
+    return {"recipes": recipes, "stations": _tile_names(mem, tiles)}
 
 
 def save(data: dict, path: str = _DATA) -> None:

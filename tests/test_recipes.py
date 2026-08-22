@@ -26,6 +26,5 @@ def test_by_output_and_using(monkeypatch):
 
 def test_station_name(monkeypatch):
     monkeypatch.setattr(R, "_CACHE", FIXTURE)
-    assert R.station_name(18) == "Work Bench"          # from the cache
-    assert R.station_name(26) == "Demon/Crimson Altar"  # not-crafted supplement
-    assert R.station_name(9999) == "Tile #9999"        # unknown fallback
+    assert R.station_name(18) == "Work Bench"           # from the game-derived cache
+    assert R.station_name(9999) == "Tile #9999"         # not in cache -> fallback
