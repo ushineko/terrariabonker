@@ -32,7 +32,8 @@ def game(tmp_path, monkeypatch):
 def test_status_all_off_initially(game):
     _, p = game
     assert p.status() == {"mining": False, "reach": False, "fast_place": False,
-                          "tool_reach": False, "pickup": False, "spawn_rate": False}
+                          "tool_reach": False, "pickup": False, "spawn_rate": False,
+                          "loot": False}
 
 
 def test_tool_reach_injection_roundtrip(game):
@@ -44,7 +45,7 @@ def test_tool_reach_injection_roundtrip(game):
     p.enable("tool_reach", value=40)
     assert m.read(inject, 1) == b"\xe9"                   # jmp to the cave installed
     assert p.is_enabled("tool_reach")
-    rec = p._inj["tool_reach"]
+    rec = p._inj["tool_reach"]["sites"][0]
     # the cave holds the stub: mov [esi],40 ; mov [edi],40 ; <overwrite> ; jmp back
     assert m.read(rec["cave"], 2) == b"\xc7\x06"
     assert struct.unpack("<i", m.read(rec["cave"] + 2, 4))[0] == 40
@@ -61,7 +62,7 @@ def test_pickup_injection_uses_imul_stub(game):
     m.write(inject, inj.overwrite)
     p.enable("pickup", value=50)
     assert m.read(inject, 1) == b"\xe9"                   # jmp installed
-    rec = p._inj["pickup"]
+    rec = p._inj["pickup"]["sites"][0]
     # stub begins with imul eax,eax,50 (6B C0 32), then the 6 overwritten bytes
     assert m.read(rec["cave"], 3) == b"\x6b\xc0\x32"
     assert m.read(rec["cave"] + 3, 6) == inj.overwrite
@@ -78,7 +79,7 @@ def test_spawn_rate_injection_forces_outputs(game):
     m.write(inject, inj.overwrite)
     p.enable("spawn_rate", value=40)
     assert m.read(inject, 1) == b"\xe9"
-    rec = p._inj["spawn_rate"]
+    rec = p._inj["spawn_rate"]["sites"][0]
     # stub: mov [esi],6 (spawnRate) ; mov [edi],40 (maxSpawns) ; then the overwrite
     assert m.read(rec["cave"], 2) == b"\xc7\x06"
     assert struct.unpack("<i", m.read(rec["cave"] + 2, 4))[0] == 6
@@ -86,6 +87,74 @@ def test_spawn_rate_injection_forces_outputs(game):
     p.disable("spawn_rate")
     assert m.read(inject, 5) == inj.overwrite
     assert not p.is_enabled("spawn_rate")
+
+
+def test_loot_injection_caps_denominator(game):
+    m, p = game
+    inj = P.INJECTIONS["loot"]
+    m.write(CODE + 0x600, P.ANCHORS["trydrop"].raw)      # plant the prologue anchor
+    inject = CODE + 0x600 + inj.inject_off
+    m.write(inject, inj.overwrite)                        # original 7 bytes at the site
+    p.enable("loot", value=100)                           # 100% -> cap denominator to 1
+    assert m.read(inject, 1) == b"\xe9"                   # jmp to the cave installed
+    assert p.is_enabled("loot")
+    rec = p._inj["loot"]
+    site = rec["sites"][0]
+    # stub replaces the load in place (rerun_overwrite=False): it must NOT re-run the
+    # displaced `mov ecx,[esi+10]; mov [esp+04],ecx` after the body.
+    body = m.read(site["cave"], rec["stub_len"])
+    assert body.startswith(b"\x8b\x4e\x10\x81\xf9")       # mov ecx,[esi+10]; cmp ecx,imm
+    assert struct.unpack("<i", body[5:9])[0] == 1         # cap == 100//100 == 1
+    assert body.endswith(b"\x89\x4c\x24\x04" + b"\xe9" + body[-4:])   # store, then jmp back
+    assert inj.overwrite not in body[:-9]                 # displaced load NOT re-run wholesale
+    # a 50% floor caps the denominator at 2
+    p.disable("loot")
+    p.enable("loot", value=50)
+    body = m.read(p._inj["loot"]["sites"][0]["cave"], p._inj["loot"]["stub_len"])
+    assert struct.unpack("<i", body[5:9])[0] == 2         # cap == 100//50 == 2
+    p.disable("loot")
+    assert m.read(inject, len(inj.overwrite)) == inj.overwrite   # site restored
+    assert not p.is_enabled("loot")
+
+
+def test_loot_multi_site_patches_every_twin(game):
+    m, p = game
+    inj = P.INJECTIONS["loot"]
+    assert inj.multi
+    # plant the anchor TWICE (CommonDrop and its structural twin)
+    a, b = CODE + 0x200, CODE + 0x600
+    m.write(a, P.ANCHORS["trydrop"].raw)
+    m.write(b, P.ANCHORS["trydrop"].raw)
+    inj_a, inj_b = a + inj.inject_off, b + inj.inject_off
+    m.write(inj_a, inj.overwrite)
+    m.write(inj_b, inj.overwrite)
+    p.enable("loot", value=100)
+    sites = p._inj["loot"]["sites"]
+    assert len(sites) == 2                               # both twins patched
+    assert {s["inject"] for s in sites} == {inj_a, inj_b}
+    assert m.read(inj_a, 1) == b"\xe9" and m.read(inj_b, 1) == b"\xe9"
+    p.disable("loot")
+    assert m.read(inj_a, len(inj.overwrite)) == inj.overwrite   # both restored
+    assert m.read(inj_b, len(inj.overwrite)) == inj.overwrite
+
+
+def test_loot_reenable_is_idempotent_without_rescan(game):
+    # Regression: the loot site sits inside its own anchor's reach, so a re-scan after
+    # the jump is installed would find nothing ("anchor not found"). Re-enable / live
+    # value change must reuse the recorded sites and only rewrite the stub.
+    m, p = game
+    inj = P.INJECTIONS["loot"]
+    m.write(CODE + 0x600, P.ANCHORS["trydrop"].raw)
+    inject = CODE + 0x600 + inj.inject_off
+    m.write(inject, inj.overwrite)
+    p.enable("loot", value=100)
+    sites_before = [s["inject"] for s in p._inj["loot"]["sites"]]
+    # obliterate the anchor: a re-resolve would now raise. Idempotent enable must not care.
+    m.write(CODE + 0x600, b"\x90" * len(P.ANCHORS["trydrop"].raw))
+    p.enable("loot", value=50)                            # would raise if it re-scanned
+    assert [s["inject"] for s in p._inj["loot"]["sites"]] == sites_before
+    body = m.read(p._inj["loot"]["sites"][0]["cave"], p._inj["loot"]["stub_len"])
+    assert struct.unpack("<i", body[5:9])[0] == 2         # stub rewritten to cap=2
 
 
 def test_enable_disable_fast_place(game):
@@ -131,7 +200,7 @@ def test_values_default_before_any_apply(game):
     _, p = game
     # every valued cheat reports its ValueSpec default until one is applied
     assert p.values() == {"mining": 0.2, "reach": 20, "tool_reach": 30,
-                          "pickup": 50, "spawn_rate": 15}
+                          "pickup": 50, "spawn_rate": 15, "loot": 100}
     assert "fast_place" not in p.values()   # carries no value
 
 

@@ -93,6 +93,18 @@ ANCHORS: dict[str, Pattern] = {
     "get_spawn_rate": _pat("55 8B EC 53 57 56 83 EC 5C 8B 5D 0C 8B 75 10 8B 7D 14 "
                            "B8 ?? ?? ?? ?? F7 00 01 00 00 00 74 05 E8 ?? ?? ?? ?? "
                            "D9 EE D9 5D D4 8B 05 ?? ?? ?? ?? 89 06"),
+    # CommonDrop.TryDroppingItem (esi = this = the CommonDrop). The chance roll passes
+    # chanceDenominator (this+0x10, `mov ecx,[esi+10]` at method +0x26) as the RNG
+    # bound, then a drop happens when the roll < chanceNumerator (this+0x1C). We cap the
+    # denominator at +0x26 to floor the drop chance. The anchor is based at +0x2D — the
+    # distinctive `mov [esp],eax; ...; mov ecx,[esi+1C]; ... mov eax,[esi+0C]` tail that
+    # reads chanceNumerator and itemId — so the pattern sits ENTIRELY DOWNSTREAM of the
+    # bytes the jump overwrites (inject_off = -7). That keeps the anchor scannable even
+    # after the patch is in place (disable/recover never hit a self-corrupted seed).
+    # Call-target immediates are wildcarded, which also makes it match both CommonDrop
+    # twins (see Injection.multi).
+    "trydrop": _pat("89 04 24 39 00 90 E8 ?? ?? ?? ?? 8B 4E 1C 3B C1 0F 8D ?? ?? ?? ?? "
+                    "8B 45 10 89 45 E8 8B 46 0C 89 45 E4"),
 }
 
 
@@ -153,6 +165,34 @@ def _force_spawn(n: int) -> bytes:
     return b"\xc7\x06" + _i32(6) + b"\xc7\x07" + _i32(n)
 
 
+def _cap_drop_denom(pct: int) -> bytes:
+    """Rewrite `mov ecx,[esi+10]; mov [esp+04],ecx` (the chanceDenominator load feeding
+    the drop roll) so the denominator is clamped to ``cap = 100 // pct``. A drop rolls
+    < chanceDenominator and succeeds when the roll < chanceNumerator, so a smaller
+    denominator only ever *raises* the chance: pct=100 -> cap=1 -> roll is always 0 ->
+    guaranteed; pct=50 -> cap=2 -> at least a 1-in-2 floor; existing better drops are
+    untouched (min, never max). ``rerun_overwrite=False`` — this replaces both
+    displaced instructions."""
+    cap = max(1, 100 // int(pct))
+    return (b"\x8b\x4e\x10"                 # mov ecx,[esi+10]   (chanceDenominator)
+            + b"\x81\xf9" + _i32(cap)       # cmp ecx, cap
+            + b"\x7e\x05"                   # jle +5  (already <= cap: keep it)
+            + b"\xb9" + _i32(cap)           # mov ecx, cap
+            + b"\x89\x4c\x24\x04")          # mov [esp+04],ecx  (reproduced store)
+
+
+def _norm_inj(v: dict) -> dict:
+    """Normalize a persisted injection record to the multi-site shape
+    ``{"sites": [{"inject", "cave"}], "stub_len"}`` — accepting the legacy flat
+    ``{"inject", "cave", "stub_len"}`` written before multi-site support."""
+    stub_len = int(v.get("stub_len", 0))
+    if "sites" in v:
+        sites = [{"inject": int(s["inject"]), "cave": int(s["cave"])} for s in v["sites"]]
+    else:
+        sites = [{"inject": int(v["inject"]), "cave": int(v["cave"])}]
+    return {"sites": sites, "stub_len": stub_len}
+
+
 @dataclass(frozen=True)
 class Injection:
     """A code-cave cheat: some cheats can't be done in place because the code we want
@@ -164,9 +204,20 @@ class Injection:
     label: str
     anchor: str          # key into ANCHORS
     inject_off: int      # offset from the anchor to the injection point
-    overwrite: bytes     # the original bytes there (re-run inside the stub)
+    overwrite: bytes     # the original bytes there
     make_body: Callable[[int], bytes]   # injected instructions, before `overwrite`
     note: str = ""
+    # If True (default), the stub re-runs ``overwrite`` after ``make_body`` (force a
+    # value, then continue the displaced original). If False, ``make_body`` fully
+    # replaces those instructions (it reproduces whatever of them must still happen)
+    # and they are NOT re-run — used when the displaced bytes are the very computation
+    # being overridden (e.g. the loot cheat rewrites the denominator load in place).
+    rerun_overwrite: bool = True
+    # If True, the anchor is expected to match multiple sites (structural twins whose
+    # bodies are identical bar their call targets, e.g. CommonDrop and its luck-scaling
+    # sibling) and the stub is installed at EVERY match rather than requiring a unique
+    # anchor.
+    multi: bool = False
 
 
 INJECTIONS: dict[str, Injection] = {
@@ -192,6 +243,14 @@ INJECTIONS: dict[str, Injection] = {
         "spawn_rate", "Spawn rate (GetSpawnRate)", "get_spawn_rate",
         0x1EAA, _b("8D 65 F4 5E 5F"), _force_spawn,
         note="caps active enemies at N (0 = peaceful); a game restart clears it"),
+    # CommonDrop.TryDroppingItem +0x26: cap the chance denominator so drops have a
+    # minimum chance (100% = guaranteed). Ported from the FearLess ReGrind table.
+    "loot": Injection(
+        "loot", "Drop chance floor (CommonDrop)", "trydrop",
+        -7, _b("8B 4E 10 89 4C 24 04"), _cap_drop_denom,   # anchor at +0x2D -> site at +0x26
+        note="floors the drop chance of common enemy/grab-bag drops at N% "
+             "(100 = guaranteed); a game restart clears it",
+        rerun_overwrite=False, multi=True),
 }
 
 
@@ -221,6 +280,7 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
     "tool_reach": ValueSpec("i32", 30, 1, 200, "tiles · mining & interaction"),
     "pickup": ValueSpec("i32", 50, 2, 500, "× grab range"),
     "spawn_rate": ValueSpec("i32", 15, 0, 200, "max active enemies · 0 = peaceful"),
+    "loot": ValueSpec("i32", 100, 1, 100, "% min drop chance · 100 = guaranteed"),
 }
 
 
@@ -259,8 +319,7 @@ class Patcher:
             if s.get("pid") == self.mem.pid:     # same process -> reuse
                 self._sites = {k: int(v) for k, v in s.get("sites", {}).items()}
                 self._enabled = set(s.get("enabled", []))
-                self._inj = {k: {kk: int(vv) for kk, vv in v.items()}
-                             for k, v in s.get("inj", {}).items()}
+                self._inj = {k: _norm_inj(v) for k, v in s.get("inj", {}).items()}
                 self._values = {k: v for k, v in s.get("values", {}).items()
                                 if k in _VALUE_SPECS}
         except (OSError, ValueError):
@@ -318,8 +377,28 @@ class Patcher:
         self._sites[anchor_key] = found
         return found
 
+    def _resolve_all(self, anchor_key: str) -> list[int]:
+        """Like ``_resolve`` but returns EVERY match, for anchors that intentionally
+        match structural twins (see ``Injection.multi``). Not cached — one scan per
+        enable is cheap and the site set can differ across re-JITs."""
+        pat = ANCHORS[anchor_key]
+        seed_off, seed = pat.seed()
+        hits = []
+        for start, end in self._exec_regions():
+            buf = self.mem.read(start, end - start)
+            i = buf.find(seed)
+            while i != -1:
+                pos = i - seed_off
+                if pat.matches(buf, pos):
+                    hits.append(start + pos)
+                i = buf.find(seed, i + 1)
+        if not hits:
+            raise PatchError(f"anchor {anchor_key!r} not found "
+                             "(game updated? re-derive AOBs with CE)")
+        return hits
+
     # --- code cave / injection --------------------------------------------
-    def _find_cave(self, size: int) -> int:
+    def _find_cave(self, size: int, claimed: list[int] | None = None) -> int:
         """Find ``size`` bytes of executable padding for a stub — we *borrow* space
         rather than allocate our own.
 
@@ -354,14 +433,21 @@ class Patcher:
         small nearby cave anyway). See ce/REACH_FINDINGS.md.
         """
         want = size + 4
+        claimed = claimed or []
         for pad in (b"\xcc", b"\x00"):
             needle = pad * want
             for start, end in self._exec_regions():
                 buf = self.mem.read(start, end - start)
                 i = buf.find(needle)
-                if i != -1:
-                    return start + i + 2        # small margin into the run
-        raise PatchError("no code cave found for the reach injection")
+                while i != -1:
+                    cave = start + i + 2       # small margin into the run
+                    # skip a run already handed out this pass (multi-site injections
+                    # allocate one cave per site and must not collide — each stub has a
+                    # distinct jmp-back target).
+                    if not any(cave < c + size and c < cave + size for c in claimed):
+                        return cave
+                    i = buf.find(needle, i + 1)
+        raise PatchError("no code cave found for the injection stub")
 
     @staticmethod
     def _rel32(src_after: int, target: int) -> bytes:
@@ -370,34 +456,59 @@ class Patcher:
         return struct.pack("<I", (target - src_after) & 0xFFFFFFFF)
 
     def _enable_injection(self, inj: Injection, value: int) -> None:
-        base = self._resolve(inj.anchor)
-        inject = base + inj.inject_off
-        back = inject + len(inj.overwrite)              # lands on the byte after ours
-        body = inj.make_body(int(value)) + inj.overwrite   # injected code, then original
+        body = inj.make_body(int(value))                   # injected code
+        if inj.rerun_overwrite:
+            body += inj.overwrite                          # then re-run the displaced original
         stub_len = len(body) + 5                        # + jmp back (rel32)
-        prev = self._inj.get(inj.name)
-        cave = prev["cave"] if prev else self._find_cave(stub_len)
-        stub = body + b"\xe9" + self._rel32(cave + stub_len, back)
-        self.mem.write(cave, stub)
-        self.mem.write(inject, b"\xe9" + self._rel32(inject + 5, cave))
-        self._inj[inj.name] = {"inject": inject, "cave": cave, "stub_len": stub_len}
+        # Idempotent re-apply: when already installed, reuse the recorded sites/caves and
+        # only rewrite the stub (e.g. a live value change). We must NOT re-resolve the
+        # anchor here — some injection sites overlap their own anchor bytes (the loot
+        # cheat patches inside the pattern), so a pristine scan would find nothing once
+        # the jump is in place. A fresh resolve happens only on the first enable.
+        prev_sites = self._inj.get(inj.name, {}).get("sites", [])
+        if prev_sites:
+            injects = [s["inject"] for s in prev_sites]
+            caves = [s["cave"] for s in prev_sites]
+        else:
+            bases = self._resolve_all(inj.anchor) if inj.multi else [self._resolve(inj.anchor)]
+            injects = [b + inj.inject_off for b in bases]
+            caves = []
+            for _ in injects:
+                caves.append(self._find_cave(stub_len, caves))   # distinct cave per site
+        sites = []
+        for inject, cave in zip(injects, caves):
+            back = inject + len(inj.overwrite)          # lands on the byte after ours
+            stub = body + b"\xe9" + self._rel32(cave + stub_len, back)
+            self.mem.write(cave, stub)
+            self.mem.write(inject, b"\xe9" + self._rel32(inject + 5, cave))
+            sites.append({"inject": inject, "cave": cave})
+        self._inj[inj.name] = {"sites": sites, "stub_len": stub_len}
         self._save_state()
 
     def _disable_injection(self, inj: Injection) -> None:
         rec = self._inj.get(inj.name)
-        inject = rec["inject"] if rec else self._resolve(inj.anchor) + inj.inject_off
-        self.mem.write(inject, inj.overwrite)           # restore original bytes
-        if rec and rec.get("cave"):
-            self.mem.write(rec["cave"], b"\xcc" * rec.get("stub_len", 0))  # scrub
+        if rec:
+            sites, stub_len = rec["sites"], rec.get("stub_len", 0)
+        else:  # no record (rare): fall back to a fresh resolve of every site
+            bases = self._resolve_all(inj.anchor) if inj.multi else [self._resolve(inj.anchor)]
+            sites = [{"inject": b + inj.inject_off, "cave": 0} for b in bases]
+            stub_len = 0
+        for s in sites:
+            self.mem.write(s["inject"], inj.overwrite)  # restore original bytes
+            if s.get("cave"):
+                self.mem.write(s["cave"], b"\xcc" * stub_len)   # scrub the stub
         self._inj.pop(inj.name, None)
         self._save_state()
 
     def _injection_enabled(self, inj: Injection) -> bool:
         rec = self._inj.get(inj.name)
-        inject = rec["inject"] if rec else (
-            self._sites.get(inj.anchor, 0) + inj.inject_off
-            if inj.anchor in self._sites else 0)
-        return bool(inject) and self.mem.read(inject, 1) == b"\xe9"
+        if rec and rec.get("sites"):
+            inject = rec["sites"][0]["inject"]
+        elif inj.anchor in self._sites:
+            inject = self._sites[inj.anchor] + inj.inject_off
+        else:
+            return False
+        return self.mem.read(inject, 1) == b"\xe9"
 
     # --- apply / toggle ----------------------------------------------------
     def _players(self):

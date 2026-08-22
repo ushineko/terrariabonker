@@ -49,10 +49,12 @@ holds no state; stopping it ends every effect.*
   running game's `Main.recipe[]` and cached — vanilla Terraria has no such browser.
 - **Code-patch cheats** — global mining speed, item-independent placement reach,
   fast placement, **unified tool/interaction reach** (mining, tool use, chests,
-  signs, and crafting-station range all extend together), and **item pickup range**
-  (grab items from far off-screen): things a value-write can't hold, applied by
-  patching the game's JIT code through `/proc` — including code-cave injections for the
-  reach and pickup hooks (derived with Cheat Engine, but no CE needed at runtime).
+  signs, and crafting-station range all extend together), **item pickup range**
+  (grab items from far off-screen), **spawn-rate / enemy cap** (0 = peaceful), and a
+  **drop-chance floor** (guaranteed or minimum-% common drops): things a value-write
+  can't hold, applied by patching the game's JIT code through `/proc` — including
+  code-cave injections for the reach, pickup, spawn, and drop hooks (derived with
+  Cheat Engine, but no CE needed at runtime).
 
 ## Two kinds of cheat: value edits and code patches
 
@@ -72,10 +74,18 @@ both — no Cheat Engine at runtime:
 | Placement distance per item (`Item.tileBoost`) | **Tool + interaction reach** (`GetRanges`, code cave) |
 | | **Item pickup range** (`GrabItems`, code cave) |
 | | **Spawn rate** (`GetSpawnRate`, code cave; 0 = peaceful) |
+| | **Drop-chance floor** (`CommonDrop.TryDroppingItem`, code cave; 100 = guaranteed) |
 
 The code-patch sites were **derived with Cheat Engine's mono dissector** (see
 `ce/README.md`), but the trainer locates them by AOB and patches them itself. CE is
 only needed to re-derive the patterns after a game update.
+
+**Credit:** the pickup-range, spawn-rate, drop-chance, and (upcoming) map-ping
+teleport cheats were **ported from the FearLess Forums "TerrariaReGrind" Cheat Engine
+table**. That table targets 1.4.5; the method sites and offsets were re-derived here
+for the 1.4.5.7 build (the drop hook, for instance, moved from `[esi+0C]` to `[esi+10]`
+and now floors four CommonDrop twins instead of one). Reverse-engineering credit for
+those hooks belongs to the ReGrind authors.
 
 ## Requirements
 
