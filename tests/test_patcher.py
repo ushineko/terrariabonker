@@ -33,7 +33,7 @@ def test_status_all_off_initially(game):
     _, p = game
     assert p.status() == {"mining": False, "reach": False, "fast_place": False,
                           "tool_reach": False, "pickup": False, "spawn_rate": False,
-                          "loot": False}
+                          "loot": False, "teleport": False}
 
 
 def test_tool_reach_injection_roundtrip(game):
@@ -155,6 +155,61 @@ def test_loot_reenable_is_idempotent_without_rescan(game):
     assert [s["inject"] for s in p._inj["loot"]["sites"]] == sites_before
     body = m.read(p._inj["loot"]["sites"][0]["cave"], p._inj["loot"]["stub_len"])
     assert struct.unpack("<i", body[5:9])[0] == 2         # stub rewritten to cap=2
+
+
+def test_teleport_managed_call_stub(game):
+    m, p = game
+    inj = P.INJECTIONS["teleport"]
+    assert inj.make_body is None and inj.call_anchor == "player_teleport"
+    # plant the inject anchor (TriggerPing tail) and the call-target anchor (Teleport)
+    tp = CODE + 0x300
+    tele = CODE + 0xA00
+    m.write(tp, P.ANCHORS["trigger_ping"].raw)
+    m.write(tele, P.ANCHORS["player_teleport"].raw)
+    inject = tp + inj.inject_off                          # inject_off == 0
+    m.write(inject, inj.overwrite)                        # first 7 bytes at the site
+    p.enable("teleport")
+    assert m.read(inject, 1) == b"\xe9"                   # jmp to the cave installed
+    assert p.is_enabled("teleport")
+    rec = p._inj["teleport"]
+    site = rec["sites"][0]
+    assert len(rec["sites"]) == 1                         # single-site
+    body = m.read(site["cave"], rec["stub_len"])
+    # pushad ; mov ebx,esp ; mov eax,[ebp+08]
+    assert body[:6] == b"\x60\x8b\xdc\x8b\x45\x08"
+    # tile->pixel ×16 on both coords: add eax,0x02000000 and add ecx,0x02000000
+    assert b"\x05" + struct.pack("<i", P._F32_TIMES16) in body        # add eax,imm32
+    assert b"\x81\xc1" + struct.pack("<i", P._F32_TIMES16) in body    # add ecx,imm32
+    assert b"\x8b\x4d\x0c" in body                                     # mov ecx,[ebp+0C]
+    # push player_base (this) = life_addr - 0x738
+    player_base = LIFE - P.STATLIFE_FROM_OBJ
+    assert b"\x68" + struct.pack("<I", player_base) in body
+    # mov eax, Teleport entry (= call-target anchor match - 0x32) ; call eax
+    call_target = tele - inj.call_target_off
+    idx = body.index(b"\xb8" + struct.pack("<I", call_target))
+    assert body[idx + 5: idx + 7] == b"\xff\xd0"          # call eax
+    # tail: restore esp via ebx, popad, reproduce the two displaced instructions, jmp back
+    assert body.endswith(b"\x8b\xe3\x61\x8b\x4d\x08\x89\x4c\x24\x04"
+                         + b"\xe9" + body[-4:])
+    p.disable("teleport")
+    assert m.read(inject, len(inj.overwrite)) == inj.overwrite   # site restored
+    assert not p.is_enabled("teleport")
+
+
+def test_teleport_stub_is_stack_convention_agnostic():
+    # The stub must NOT hand-balance the arg pushes with `add esp,N` (mono emits `ret N`
+    # for some methods); it saves esp in ebx before the pushes and restores it after the
+    # call, so it is correct whether the callee cleans the stack or not.
+    body = P._teleport_body(0x11223344, 0x55667788)
+    assert body[1:3] == b"\x8b\xdc"                       # mov ebx,esp (save restore point)
+    assert b"\x8b\xe3" in body                            # mov esp,ebx (restore, either conv)
+    assert b"\x83\xc4" not in body                        # no `add esp,imm8` cleanup guess
+    # tile->pixel ×16 (exponent += 4) applied to both coords before the call
+    assert b"\x05" + struct.pack("<i", P._F32_TIMES16) in body
+    assert b"\x81\xc1" + struct.pack("<i", P._F32_TIMES16) in body
+    # exactly five dword args pushed for Teleport(this, X, Y, Style, extraInfo)
+    assert body.count(b"\x6a\x00") == 2                   # push 0 (Style, extraInfo)
+    assert b"\x68\x44\x33\x22\x11" in body               # push this (little-endian)
 
 
 def test_enable_disable_fast_place(game):

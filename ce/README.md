@@ -110,12 +110,18 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
 - `poc_tilename.lua` — dump `MapHelper.TileToLookup` and `Lang.GetMapObjectName` to
   resolve the two statics `recipes.py` uses for real station names
   (`Lang._mapLegendCache[MapHelper.tileLookup[tile]]._value`).
-- `poc_droploot_teleport.lua` — recon for two ReGrind-ported cheats on 1.4.5.7: the
-  drop-chance floor (`CommonDrop.TryDroppingItem` — enumerate fields to pin
+- `poc_droploot_teleport.lua` — recon PASS 1 for two ReGrind-ported cheats on 1.4.5.7:
+  the drop-chance floor (`CommonDrop.TryDroppingItem` — enumerate fields to pin
   `chanceDenominator` at `+0x10`, find the denominator load at `+0x26`, and the
   distinctive `[esi+1C]`/`[esi+0C]` tail used as the anchor) and the map-ping teleport
-  (`Main.TriggerPing` prologue + `Player.Teleport` prologue, for the upcoming
-  managed-call stub). The 1.4.5.7 sites differ from the ReGrind 1.4.5 table.
+  (`Main.TriggerPing` prologue + `Player.Teleport` prologue). The 1.4.5.7 sites differ
+  from the ReGrind 1.4.5 table.
+- `poc_teleport.lua` — recon PASS 2 for the map-ping teleport (PASS 1's CE build lacked
+  the mono param API, so `Player.Teleport` was never compiled). Compiles and dumps
+  `Player.Teleport` (32-bit mono cdecl: `this,+0C X,+10 Y,+14 Style,+18 extraInfo`) and
+  re-dumps `Main.TriggerPing` (the ping tile X/Y at `[ebp+08]/[ebp+0C]`). Feeds the
+  `teleport` code-cave *call* in `patcher.py` (anchors `trigger_ping` at TriggerPing+0x2D
+  and `player_teleport` at Teleport+0x32; the stub scales the tile coords ×16 to pixels).
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 

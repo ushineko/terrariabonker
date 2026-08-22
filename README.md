@@ -52,10 +52,12 @@ holds no state; stopping it ends every effect.*
 - **Code-patch cheats** — global mining speed, item-independent placement reach,
   fast placement, **unified tool/interaction reach** (mining, tool use, chests,
   signs, and crafting-station range all extend together), **item pickup range**
-  (grab items from far off-screen), **spawn-rate / enemy cap** (0 = peaceful), and a
-  **drop-chance floor** (guaranteed or minimum-% common drops): things a value-write
+  (grab items from far off-screen), **spawn-rate / enemy cap** (0 = peaceful), a
+  **drop-chance floor** (guaranteed or minimum-% common drops), and **map-ping
+  teleport** (double-click the fullscreen map to warp there): things a value-write
   can't hold, applied by patching the game's JIT code through `/proc` — including
-  code-cave injections for the reach, pickup, spawn, and drop hooks (derived with
+  code-cave injections for the reach, pickup, spawn, and drop hooks and a managed
+  code-cave *call* into `Player.Teleport` for the map-ping warp (derived with
   Cheat Engine, but no CE needed at runtime).
 
 ## Two kinds of cheat: value edits and code patches
@@ -77,17 +79,25 @@ both — no Cheat Engine at runtime:
 | | **Item pickup range** (`GrabItems`, code cave) |
 | | **Spawn rate** (`GetSpawnRate`, code cave; 0 = peaceful) |
 | | **Drop-chance floor** (`CommonDrop.TryDroppingItem`, code cave; 100 = guaranteed) |
+| | **Map-ping teleport** (`Main.TriggerPing` → `Player.Teleport`, code-cave *call*) |
 
 The code-patch sites were **derived with Cheat Engine's mono dissector** (see
 `ce/README.md`), but the trainer locates them by AOB and patches them itself. CE is
 only needed to re-derive the patterns after a game update.
 
-**Credit:** the pickup-range, spawn-rate, drop-chance, and (upcoming) map-ping
-teleport cheats were **ported from the FearLess Forums "TerrariaReGrind" Cheat Engine
-table**. That table targets 1.4.5; the method sites and offsets were re-derived here
-for the 1.4.5.7 build (the drop hook, for instance, moved from `[esi+0C]` to `[esi+10]`
-and now floors four CommonDrop twins instead of one). Reverse-engineering credit for
-those hooks belongs to the ReGrind authors.
+The map-ping teleport is the first *managed-call* code cave: rather than forcing a
+value, its stub hooks `Main.TriggerPing` (fired when you drop a fullscreen-map ping),
+reads the ping's tile coordinates, converts them to world pixels (×16), and **calls**
+`Player.Teleport(this, x, y, 0, 0)` on the local player. Enable it, then **double-click**
+a spot on the fullscreen map to warp there.
+
+**Credit:** the pickup-range, spawn-rate, drop-chance, and map-ping teleport cheats
+were **ported from the FearLess Forums "TerrariaReGrind" Cheat Engine table**. That
+table targets 1.4.5; the method sites and offsets were re-derived here for the 1.4.5.7
+build (the drop hook, for instance, moved from `[esi+0C]` to `[esi+10]` and now floors
+four CommonDrop twins instead of one; the teleport reads the ping in tile units and
+scales ×16 to the pixel coordinates `Player.Teleport` expects). Reverse-engineering
+credit for those hooks belongs to the ReGrind authors.
 
 ## Requirements
 
@@ -132,13 +142,14 @@ terrariabonker patch enable mining --value 0.15   # global mining speed (pickSpe
 terrariabonker patch enable reach --value 30      # placement reach (extra tiles)
 terrariabonker patch enable tool_reach --value 40 # unified mining/interaction/crafting reach
 terrariabonker patch enable pickup --value 50     # item pickup range (× grab radius)
+terrariabonker patch enable teleport              # map-ping teleport: double-click the map to warp
 terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
 
 terrariabonker extract-recipes     # read Main.recipe[] -> data/recipes.json (for the Recipes tab)
 ```
 
 `--value` overrides the enabled value; omit it to use the default (mining `0.2`,
-reach `20`). `fast_place` carries no value.
+reach `20`). `fast_place` and `teleport` carry no value (on/off only).
 
 Every memory-touching command elevates through sudo first and is gated on the
 game build (see below).
@@ -151,10 +162,12 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   isn't already running. It runs unprivileged (Steam refuses to run as root), so
   unlike the memory actions it does not go through sudo.
 - **Trainer** tab — godmode / infinite-mana toggles, heal / refill, max HP/mana,
-  fast-mining, long-reach, and a **Code patches** section: checkbox toggles for
-  the frame-reset cheats (global mining speed, placement reach, fast placement)
-  with tunable value spinboxes for mining and reach. No Cheat Engine at runtime;
-  a game restart clears them.
+  fast-mining, long-reach, and a **Code patches** section: checkbox toggles for the
+  code-patch cheats (mining speed, placement reach, fast placement, tool/interaction
+  reach, item pickup range, spawn rate, drop-chance floor, and **map-ping teleport**)
+  with tunable value spinboxes where applicable. With teleport on, **double-click a
+  spot on the fullscreen map to warp there**. No Cheat Engine at runtime; a game
+  restart clears them all.
 - **Inventory** tab — a grid mirroring the in-game inventory (Hotbar / Inventory /
   Coins / Ammo). Each cell shows an abbreviated name and stack, is tinted by the
   item's **rarity** (Terraria's own tooltip colours), and has a full-detail tooltip.

@@ -24,7 +24,8 @@ import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from terrariabonker.locate import find_players
+from terrariabonker.locate import (STATLIFE_FROM_OBJ, find_players,
+                                   resolve_local_player)
 
 _STATE = os.path.expanduser("~/.config/terrariabonker/patches.json")
 
@@ -105,6 +106,23 @@ ANCHORS: dict[str, Pattern] = {
     # twins (see Injection.multi).
     "trydrop": _pat("89 04 24 39 00 90 E8 ?? ?? ?? ?? 8B 4E 1C 3B C1 0F 8D ?? ?? ?? ?? "
                     "8B 45 10 89 45 E8 8B 46 0C 89 45 E4"),
+    # Main.TriggerPing(Vector2 position): fires when a fullscreen-map ping is placed;
+    # [ebp+08]/[ebp+0C] are the ping world X/Y. The inject anchor is the position-
+    # independent arg-marshal tail at TriggerPing+0x2D (`mov ecx,[ebp+08]; mov [esp+04],
+    # ecx; mov ecx,[ebp+0C]; mov [esp+08],ecx; mov [esp],eax; cmp [eax],eax; lea
+    # ebp,[ebp+00]`), with the following call's rel32 wildcarded. inject_off = 0; the
+    # overwrite is the first 7 bytes (`mov ecx,[ebp+08]; mov [esp+04],ecx`), reproduced
+    # in the stub. Placed here (not at the class-init `mov eax,<imm>` at +0x6) because
+    # that instruction embeds an ASLR/JIT address and would not be a stable overwrite.
+    "trigger_ping": _pat("8B 4D 08 89 4C 24 04 8B 4D 0C 89 4C 24 08 89 04 24 39 00 "
+                         "8D 6D 00 E8 ?? ?? ?? ??"),
+    # Player.Teleport(Vector2 newPos, int Style, int extraInfo): the call target for the
+    # map-ping hook. Anchored on the two constant field stores at Teleport+0x32
+    # (`mov [ebx+BF4],64; mov [ebx+468],4`) plus the `cmp esi,0A; sete al; movzx eax,al`
+    # Style dispatch — all position-independent. The method entry (the absolute call
+    # target) is anchor_base - 0x32 (see Injection.call_target_off).
+    "player_teleport": _pat("C7 83 F4 0B 00 00 64 00 00 00 C7 83 68 04 00 00 04 00 00 00 "
+                            "83 FE 0A 0F 94 C0 0F B6 C0"),
 }
 
 
@@ -146,6 +164,12 @@ def _i32(n: int) -> bytes:
     return struct.pack("<i", int(n))
 
 
+def _u32(n: int) -> bytes:
+    """Pack an absolute 32-bit address (unsigned; a high user-space address in a 32-bit
+    process would overflow the signed pack)."""
+    return struct.pack("<I", int(n) & 0xFFFFFFFF)
+
+
 def _force_xy(n: int) -> bytes:
     """mov dword [esi], N ; mov dword [edi], N — force the two GetRanges outputs."""
     return b"\xc7\x06" + _i32(n) + b"\xc7\x07" + _i32(n)
@@ -181,6 +205,50 @@ def _cap_drop_denom(pct: int) -> bytes:
             + b"\x89\x4c\x24\x04")          # mov [esp+04],ecx  (reproduced store)
 
 
+# float ×16 by adding 4 to the IEEE-754 exponent field (bits 23-30): 4 << 23. Valid for
+# normalized positive floats (the ping tile coords), no FPU / no memory constant needed.
+_F32_TIMES16 = 0x02000000
+
+
+def _teleport_body(player_base: int, call_target: int) -> bytes:
+    """Managed-call stub for the map-ping teleport, injected at Main.TriggerPing+0x2D
+    (ebp frame valid; [ebp+08]/[ebp+0C] = the ping position). Calls
+    ``Player.Teleport(this=player_base, newPos=(X,Y), Style=0, extraInfo=0)`` then
+    reproduces the two displaced instructions so the ping itself still proceeds. The
+    final jmp back is appended by the caller.
+
+    ``TriggerPing`` delivers the ping in **tile** coordinates (float), but
+    ``Player.Teleport`` (which sets ``Player.position``) works in **world pixels**
+    (1 tile = 16 px). The stub converts tile→pixel by adding ``_F32_TIMES16`` to each
+    coord's float bits (exponent += 4 == ×16) — verified against live data
+    (tile 3501.84 → 56029.4 px, landing on the pinged spot).
+
+    32-bit mono passes all args on the stack, right-to-left (this, X, Y, Style,
+    extraInfo). Rather than assume caller- vs callee-cleanup (mono emits ``ret N`` for
+    some methods), esp is saved before the pushes and restored after the call via ebx —
+    a callee-saved register Teleport preserves — so the stub is correct either way.
+    Style 0 avoids Teleport's 4/9/10 special branches (plain teleport, no side effects).
+    ``pushad``/``popad`` protect the registers the original code still needs (notably
+    eax, loaded upstream and consumed as the ping-list arg just after the inject site)."""
+    return (b"\x60"                             # pushad
+            + b"\x8b\xdc"                       # mov ebx,esp   (restore point, survives call)
+            + b"\x8b\x45\x08"                   # mov eax,[ebp+08]   (ping tile X)
+            + b"\x05" + _i32(_F32_TIMES16)      # add eax, 0x02000000   (×16 -> px X)
+            + b"\x8b\x4d\x0c"                   # mov ecx,[ebp+0C]   (ping tile Y)
+            + b"\x81\xc1" + _i32(_F32_TIMES16)  # add ecx, 0x02000000   (×16 -> px Y)
+            + b"\x6a\x00"                       # push 0             (extraInfo)
+            + b"\x6a\x00"                       # push 0             (Style)
+            + b"\x51"                           # push ecx           (newPos.Y px)
+            + b"\x50"                           # push eax           (newPos.X px)
+            + b"\x68" + _u32(player_base)       # push player_base   (this)
+            + b"\xb8" + _u32(call_target)       # mov eax, Teleport entry
+            + b"\xff\xd0"                       # call eax
+            + b"\x8b\xe3"                       # mov esp,ebx        (restore esp, either conv)
+            + b"\x61"                           # popad
+            + b"\x8b\x4d\x08"                   # mov ecx,[ebp+08]   \ reproduce the two
+            + b"\x89\x4c\x24\x04")              # mov [esp+04],ecx   / displaced instructions
+
+
 def _norm_inj(v: dict) -> dict:
     """Normalize a persisted injection record to the multi-site shape
     ``{"sites": [{"inject", "cave"}], "stub_len"}`` — accepting the legacy flat
@@ -205,7 +273,9 @@ class Injection:
     anchor: str          # key into ANCHORS
     inject_off: int      # offset from the anchor to the injection point
     overwrite: bytes     # the original bytes there
-    make_body: Callable[[int], bytes]   # injected instructions, before `overwrite`
+    # Injected instructions before `overwrite`. None for a managed-call injection, whose
+    # body is built from resolved runtime addresses instead (see call_anchor).
+    make_body: Callable[[int], bytes] | None
     note: str = ""
     # If True (default), the stub re-runs ``overwrite`` after ``make_body`` (force a
     # value, then continue the displaced original). If False, ``make_body`` fully
@@ -218,6 +288,14 @@ class Injection:
     # sibling) and the stub is installed at EVERY match rather than requiring a unique
     # anchor.
     multi: bool = False
+    # Managed-call injection: when set, the stub CALLS a managed method (the project's
+    # first). ``call_anchor`` names the anchor for the call target; the method entry is
+    # ``resolve(call_anchor) - call_target_off``. The body is built by ``_teleport_body``
+    # from that target and the local player object base, not from ``make_body``. Such
+    # injections are single-site, carry no tunable value, and reproduce their displaced
+    # bytes themselves (``rerun_overwrite=False``).
+    call_anchor: str | None = None
+    call_target_off: int = 0
 
 
 INJECTIONS: dict[str, Injection] = {
@@ -251,6 +329,18 @@ INJECTIONS: dict[str, Injection] = {
         note="floors the drop chance of common enemy/grab-bag drops at N% "
              "(100 = guaranteed); a game restart clears it",
         rerun_overwrite=False, multi=True),
+    # Map-ping teleport (ported from the FearLess ReGrind table). Hook Main.TriggerPing
+    # at +0x2D; the stub calls Player.Teleport(this, pingX, pingY, 0, 0), warping the
+    # local player to any fullscreen-map ping. No tunable value (on/off). The call target
+    # is resolved via the player_teleport anchor (entry = match - 0x32). A game restart
+    # clears it; re-toggle after a world/character reload (the player object base is
+    # baked into the stub at enable time).
+    "teleport": Injection(
+        "teleport", "Map-ping teleport (TriggerPing)", "trigger_ping",
+        0x0, _b("8B 4D 08 89 4C 24 04"), None,
+        note="drop a fullscreen-map ping to teleport there; a game restart clears it "
+             "(re-toggle after a world/character reload)",
+        rerun_overwrite=False, call_anchor="player_teleport", call_target_off=0x32),
 }
 
 
@@ -455,10 +545,25 @@ class Patcher:
         unsigned two's complement so it is correct regardless of jump direction."""
         return struct.pack("<I", (target - src_after) & 0xFFFFFFFF)
 
+    def _teleport_stub_body(self, inj: Injection) -> bytes:
+        """Build the managed-call stub body: resolve the call target from ``call_anchor``
+        and bake the local player object base. The Player object base (Teleport's ``this``)
+        is ``statLife_addr - STATLIFE_FROM_OBJ``. Uses ``resolve_local_player`` — the
+        authoritative ``Main.player[myPlayer]`` — because the scan can also return inert
+        load-time snapshots; falls back to the scan only if the AOB resolve is unavailable
+        (e.g. the synthetic test image)."""
+        target = self._resolve(inj.call_anchor) - inj.call_target_off
+        blk = resolve_local_player(self.mem) or self._players()[0]
+        player_base = blk.life_addr - STATLIFE_FROM_OBJ
+        return _teleport_body(player_base, target)
+
     def _enable_injection(self, inj: Injection, value: int) -> None:
-        body = inj.make_body(int(value))                   # injected code
-        if inj.rerun_overwrite:
-            body += inj.overwrite                          # then re-run the displaced original
+        if inj.call_anchor is not None:                    # managed-call injection
+            body = self._teleport_stub_body(inj)
+        else:
+            body = inj.make_body(int(value))               # injected code
+            if inj.rerun_overwrite:
+                body += inj.overwrite                      # then re-run the displaced original
         stub_len = len(body) + 5                        # + jmp back (rel32)
         # Idempotent re-apply: when already installed, reuse the recorded sites/caves and
         # only rewrite the stub (e.g. a live value change). We must NOT re-resolve the

@@ -10,4 +10,4 @@ from terrariabonker.player import Player  # noqa: F401
 from terrariabonker.proc import Mem, ProcError, find_pid  # noqa: F401
 from terrariabonker.trainer import Freezer  # noqa: F401
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
