@@ -14,6 +14,8 @@ side, to re-derive patch offsets after a game update — see
 *This edits your own single-player game in memory. It writes nothing to disk and
 holds no state; stopping it ends every effect.*
 
+![terrariabonker inventory editor showing the item grid for a running Terraria game](assets/screenshot.png)
+
 ## Table of Contents
 
 - [What it can do](#what-it-can-do)
