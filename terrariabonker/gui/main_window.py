@@ -15,14 +15,15 @@ from __future__ import annotations
 import os
 import sys
 
-from PyQt6.QtCore import QProcess, Qt, QTimer
-from PyQt6.QtGui import QFont, QIcon
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter, QDialog,
+from PyQt6.QtCore import QProcess, QSize, QSortFilterProxyModel, Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap, QStandardItem, QStandardItemModel
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
-                             QLabel, QLineEdit, QListWidget, QPlainTextEdit, QPushButton,
-                             QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+                             QLabel, QLineEdit, QListView, QPlainTextEdit,
+                             QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout,
+                             QWidget)
 
-from terrariabonker import names, recipes
+from terrariabonker import names, recipes, sprites
 from terrariabonker.gui import client, invgrid
 from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import PATCH_CATALOG
@@ -38,6 +39,95 @@ CELL_PT = 8              # cell font point size — small enough that names don'
 def _cli_args(sub_args: list[str]) -> tuple[str, list[str]]:
     """Build the ('sudo', [...]) argv to run a CLI subcommand under sudo."""
     return "sudo", ["-E", sys.executable, ENTRY, *sub_args]
+
+
+def _cli_args_user(sub_args: list[str]) -> tuple[str, list[str]]:
+    """Argv to run a CLI subcommand WITHOUT sudo — for disk-only work (sprite extraction)
+    so its output (the icon cache) is owned by the user, not root."""
+    return sys.executable, [ENTRY, *sub_args]
+
+
+ROLE_ITEM_ID = int(Qt.ItemDataRole.UserRole)
+ROLE_SEARCH = int(Qt.ItemDataRole.UserRole) + 1
+
+
+class _ItemFilterProxy(QSortFilterProxyModel):
+    """Live filter over the icon grid: case-insensitive substring of "name #id"."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._q = ""
+
+    def set_query(self, q: str) -> None:
+        self._q = q
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, row, parent) -> bool:
+        if not self._q:
+            return True
+        idx = self.sourceModel().index(row, 0, parent)
+        return self._q in (idx.data(ROLE_SEARCH) or "")
+
+
+class RecipeDialog(QDialog):
+    """Popup detailing an item's recipe(s): output, each ingredient (icon + count), and
+    the crafting station. ``icon_for`` maps an ItemID to a cached QIcon."""
+
+    def __init__(self, item_id, recs, mode, icon_for, parent=None):
+        super().__init__(parent)
+        title = names.label(item_id)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(360)
+        self._icon_for = icon_for
+        outer = QVBoxLayout(self)
+
+        header = QHBoxLayout()
+        h = QLabel()
+        h.setPixmap(icon_for(item_id).pixmap(40, 40))
+        header.addWidget(h)
+        header.addWidget(QLabel(f"<b>{title}</b> &nbsp;"
+                                f"<span style='color:gray'>#{item_id}</span>"))
+        header.addStretch(1)
+        outer.addLayout(header)
+
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        body = QWidget()
+        bl = QVBoxLayout(body)
+        if not recs:
+            bl.addWidget(QLabel("<i>No recipe found.</i>"))
+        for r in recs:
+            bl.addWidget(self._recipe_block(r))
+        bl.addStretch(1)
+        area.setWidget(body)
+        outer.addWidget(area, 1)
+
+    def _recipe_block(self, r) -> QGroupBox:
+        station = recipes.station_name(r["tile"]) if "tile" in r else "by hand"
+        box = QGroupBox()
+        v = QVBoxLayout(box)
+        v.addLayout(self._item_row(int(r["out"]), r.get("n", 1), bold=True,
+                                   suffix=f" &nbsp;&nbsp;<span style='color:gray'>"
+                                          f"[{station}]</span>"))
+        v.addWidget(QLabel("<span style='color:gray'>Ingredients:</span>"))
+        ing = r.get("ing", [])
+        if not ing:
+            v.addWidget(QLabel("<i>(none)</i>"))
+        for t, c in ing:
+            v.addLayout(self._item_row(int(t), c))
+        return box
+
+    def _item_row(self, item_id, count, bold=False, suffix="") -> QHBoxLayout:
+        row = QHBoxLayout()
+        ic = QLabel()
+        ic.setPixmap(self._icon_for(item_id).pixmap(28, 28))
+        row.addWidget(ic)
+        text = f"{names.label(item_id)} ×{count}"
+        if bold:
+            text = f"<b>{text}</b>"
+        row.addWidget(QLabel(text + suffix))
+        row.addStretch(1)
+        return row
 
 
 class MainWindow(QWidget):
@@ -182,6 +272,8 @@ class MainWindow(QWidget):
     def _on_tab_changed(self, i: int):
         if i == 1:
             self.refresh_inventory()
+        elif i == 2:
+            self._ensure_recipe_grid()
 
     def _patches_group(self) -> QGroupBox:
         """Code-patch cheats, embedded in the Trainer tab. No Cheat Engine at
@@ -293,6 +385,39 @@ class MainWindow(QWidget):
 
         proc.finished.connect(_finished)
         prog, argv = _cli_args(sub_args)
+        proc.start(prog, argv)
+        return proc
+
+    def _spawn_user(self, sub_args: list[str], on_output=None, on_progress=None) -> QProcess:
+        """Like ``_spawn`` but WITHOUT sudo (disk-only work). ``on_progress(line)`` is
+        called for each stdout line as it arrives (used for extraction progress)."""
+        proc = QProcess(self)
+        self._procs.add(proc)
+        proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        buf = {"tail": ""}
+
+        def _ready():
+            try:
+                chunk = bytes(proc.readAllStandardOutput()).decode(errors="replace")
+            except RuntimeError:
+                return
+            buf["tail"] += chunk
+            if on_progress:
+                *lines, buf["tail"] = buf["tail"].split("\n")
+                for ln in lines:
+                    if ln.strip():
+                        on_progress(ln.strip())
+
+        def _finished(*_):
+            _ready()
+            if on_output:
+                on_output(buf["tail"])
+            self._procs.discard(proc)
+            proc.deleteLater()
+
+        proc.readyReadStandardOutput.connect(_ready)
+        proc.finished.connect(_finished)
+        prog, argv = _cli_args_user(sub_args)
         proc.start(prog, argv)
         return proc
 
@@ -420,55 +545,149 @@ class MainWindow(QWidget):
         bar = QHBoxLayout()
         self.recipe_mode = QComboBox()
         self.recipe_mode.addItems(["Makes", "Uses"])
-        self.recipe_mode.setToolTip("Makes: recipes that produce the item.\n"
-                                    "Uses: recipes that need it as an ingredient.")
+        self.recipe_mode.setToolTip("Makes: pick a craftable item to see how it's made.\n"
+                                    "Uses: pick an ingredient to see what it makes.")
+        self.recipe_mode.currentTextChanged.connect(self._rebuild_recipe_grid)
         bar.addWidget(self.recipe_mode)
-        self.recipe_search = QLineEdit(placeholderText="item name or ItemID…")
-        comp = QCompleter(self._item_names, self)
-        comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        comp.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.recipe_search.setCompleter(comp)
-        self.recipe_search.returnPressed.connect(self.search_recipes)
+        self.recipe_search = QLineEdit(placeholderText="filter by item name or ItemID…")
+        self.recipe_search.textChanged.connect(self._filter_recipe_grid)
         bar.addWidget(self.recipe_search, 1)
-        bar.addWidget(self._btn2("Search", self.search_recipes))
         col.addLayout(bar)
 
-        self.recipe_list = QListWidget()
-        col.addWidget(self.recipe_list, 1)
+        self.recipe_view = QListView()
+        self.recipe_view.setViewMode(QListView.ViewMode.IconMode)
+        self.recipe_view.setResizeMode(QListView.ResizeMode.Adjust)
+        self.recipe_view.setMovement(QListView.Movement.Static)
+        self.recipe_view.setUniformItemSizes(True)
+        self.recipe_view.setIconSize(QSize(40, 40))
+        self.recipe_view.setGridSize(QSize(74, 86))
+        self.recipe_view.setWordWrap(True)
+        self.recipe_view.setSpacing(2)
+        self.recipe_view.setEditTriggers(QListView.EditTrigger.NoEditTriggers)
+        self.recipe_view.clicked.connect(self._open_recipe_popup)
+        col.addWidget(self.recipe_view, 1)
+
+        self._recipe_src_model = QStandardItemModel(self)
+        self._recipe_proxy = _ItemFilterProxy(self)
+        self._recipe_proxy.setSourceModel(self._recipe_src_model)
+        self.recipe_view.setModel(self._recipe_proxy)
+
         self.recipe_status = QLabel()
         self.recipe_status.setStyleSheet("color: gray")
         col.addWidget(self.recipe_status)
 
         row = QHBoxLayout()
         row.addWidget(self._btn2("Re-extract from game", self.reextract_recipes))
-        note = QLabel("<i>Recipes are read from the running game once and cached "
-                      "(offline after that). Re-extract after a game update.</i>")
+        note = QLabel("<i>Recipes and item icons are read from the game once and cached "
+                      "(offline after). Re-extract after a game update.</i>")
         note.setWordWrap(True)
         row.addWidget(note, 1)
         col.addLayout(row)
-        self._recipe_count_hint()
+
+        self._recipe_grid_ready = False
+        self._icon_cache: dict[int, QIcon] = {}
+        self._placeholder_icon = None
+        self._recipe_status_hint()
         return w
 
-    def _recipe_count_hint(self):
+    def _recipe_status_hint(self):
         recipes._CACHE = None                       # reflect any fresh extraction
         n = len(recipes.load().get("recipes", []))
-        self.recipe_status.setText(
-            f"{n} recipes cached." if n
-            else "No recipe cache yet — click 'Re-extract from game' with Terraria running.")
+        if not n:
+            self.recipe_status.setText(
+                "No recipe cache yet — click 'Re-extract from game' with Terraria running.")
+        elif not sprites.is_cached():
+            self.recipe_status.setText(f"{n} recipes cached; item icons not yet extracted.")
+        else:
+            self.recipe_status.setText(f"{n} recipes cached.")
 
-    def search_recipes(self):
-        q = self.recipe_search.text().strip()
-        self.recipe_list.clear()
-        if not q:
+    def _ensure_recipe_grid(self):
+        """Populate the grid the first time the tab is shown; extract icons first if the
+        cache is missing/stale."""
+        if self._recipe_grid_ready:
             return
-        hits = (recipes.by_output(q) if self.recipe_mode.currentText() == "Makes"
-                else recipes.using(q))
-        for r in hits:
-            out = f"{names.label(r['out'])} ×{r['n']}"
-            ing = " + ".join(f"{names.label(t)} ×{c}" for t, c in r["ing"]) or "(nothing)"
-            station = recipes.station_name(r["tile"]) if "tile" in r else "by hand"
-            self.recipe_list.addItem(f"{out}\n    = {ing}    [{station}]")
-        self.recipe_status.setText(f"{len(hits)} recipe(s).")
+        recipes._CACHE = None
+        if not recipes.load().get("recipes"):
+            return                                   # nothing until recipes are extracted
+        if sprites.is_cached():
+            self._recipe_grid_ready = True
+            self._rebuild_recipe_grid()
+        else:
+            self._extract_sprites(after=self._after_reextract)
+
+    def _placeholder(self) -> QIcon:
+        if self._placeholder_icon is None:
+            pm = QPixmap(40, 40)
+            pm.fill(QColor(70, 70, 70))
+            self._placeholder_icon = QIcon(pm)
+        return self._placeholder_icon
+
+    def _icon_for(self, item_id: int) -> QIcon:
+        ic = self._icon_cache.get(item_id)
+        if ic is not None:
+            return ic
+        path = sprites.icon_path(item_id)
+        pm = QPixmap(path) if os.path.exists(path) else QPixmap()
+        if pm.isNull():
+            ic = self._placeholder()
+        else:
+            if pm.width() > 40 or pm.height() > 40:
+                pm = pm.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio,
+                               Qt.TransformationMode.FastTransformation)
+            ic = QIcon(pm)
+        self._icon_cache[item_id] = ic
+        return ic
+
+    def _recipe_item_ids(self, mode: str) -> list[int]:
+        recs = recipes.load().get("recipes", [])
+        ids: set[int] = set()
+        if mode == "Makes":
+            for r in recs:
+                ids.add(int(r["out"]))
+        else:                                        # Uses: items that are ingredients
+            for r in recs:
+                for t, _ in r.get("ing", []):
+                    ids.add(int(t))
+        return sorted(ids, key=lambda i: names.label(i).lower())
+
+    def _rebuild_recipe_grid(self, *_):
+        if not self._recipe_grid_ready:
+            return
+        mode = self.recipe_mode.currentText()
+        self._recipe_src_model.clear()
+        rows = []
+        for i in self._recipe_item_ids(mode):
+            label = names.label(i)
+            it = QStandardItem(self._icon_for(i), label)
+            it.setEditable(False)
+            it.setToolTip(f"{label}  (#{i})")
+            it.setData(i, ROLE_ITEM_ID)
+            it.setData(f"{label.lower()} #{i}", ROLE_SEARCH)
+            it.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+            rows.append(it)
+        self._recipe_src_model.invisibleRootItem().appendRows(rows)   # one batch insert
+        self._filter_recipe_grid()
+
+    def _filter_recipe_grid(self, *_):
+        if not self._recipe_grid_ready:
+            return
+        self._recipe_proxy.set_query(self.recipe_search.text().strip().lower())
+        shown = self._recipe_proxy.rowCount()
+        total = self._recipe_src_model.rowCount()
+        noun = "craftable item" if self.recipe_mode.currentText() == "Makes" else "ingredient"
+        self.recipe_status.setText(f"{shown} of {total} {noun}(s)"
+                                   + ("" if shown == total else " match"))
+
+    def _open_recipe_popup(self, proxy_index):
+        src = self._recipe_proxy.mapToSource(proxy_index)
+        item = self._recipe_src_model.itemFromIndex(src)
+        if item is None:
+            return
+        item_id = item.data(ROLE_ITEM_ID)
+        mode = self.recipe_mode.currentText()
+        recs = (recipes.by_output(str(item_id)) if mode == "Makes"
+                else recipes.using(str(item_id)))
+        RecipeDialog(item_id, recs, mode, self._icon_for, self).exec()
 
     def reextract_recipes(self):
         self.log.appendPlainText("$ terrariabonker extract-recipes")
@@ -476,10 +695,31 @@ class MainWindow(QWidget):
         def done(out):
             if out.strip():
                 self.log.appendPlainText(out.rstrip())
-            self._recipe_count_hint()
-            self.search_recipes()
+            recipes._CACHE = None
+            # recipes may reference new items -> refresh the icon cache, then rebuild
+            self._extract_sprites(after=self._after_reextract)
 
         self._spawn(client.extract_recipes_argv(), on_output=done)
+
+    def _after_reextract(self):
+        self._icon_cache.clear()
+        self._recipe_grid_ready = True
+        self._rebuild_recipe_grid()
+
+    def _extract_sprites(self, after=None, force=False):
+        self.recipe_status.setText("Extracting item icons (one-time, ~10s)…")
+        self.log.appendPlainText("$ terrariabonker extract-sprites")
+
+        def prog(line):
+            if "/" in line and line.split("/", 1)[0].isdigit():
+                self.recipe_status.setText(f"Extracting item icons… {line}")
+
+        def done(_out):
+            self._recipe_status_hint()
+            if after:
+                after()
+
+        self._spawn_user(client.extract_sprites_argv(force), on_output=done, on_progress=prog)
 
     def closeEvent(self, event):
         self._status_timer.stop()

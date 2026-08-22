@@ -46,9 +46,14 @@ holds no state; stopping it ends every effect.*
 - **Give items by name** — the editor dialog's item field autocompletes over all
   6,195 item names, extracted from the game's own `Terraria.exe` for the exact
   1.4.5.7 build.
-- **Recipe browser** — search what an item is **made from** or **used in** (with
-  ingredient counts and the crafting station), from ~3,600 recipes read out of the
-  running game's `Main.recipe[]` and cached — vanilla Terraria has no such browser.
+- **Recipe browser** — a crafting-panel-style **icon grid** of every craftable item,
+  with a search box that filters in real time; click an item for a popup detailing its
+  ingredients (icon + count) and crafting station. Toggle **Makes** (how an item is
+  crafted) / **Uses** (what an ingredient makes). Built from ~3,600 recipes read out of
+  the running game's `Main.recipe[]` and cached — vanilla Terraria has no such browser.
+  The item sprites are decoded from the game's own `Content/Images/*.xnb` (a
+  self-contained XNB + LZX decoder, no external tools) into a local, gitignored cache on
+  first use — reconstitutable on any machine from that machine's game files.
 - **Code-patch cheats** — global mining speed, item-independent placement reach,
   fast placement, **unified tool/interaction reach** (mining, tool use, chests,
   signs, and crafting-station range all extend together), **item pickup range**
@@ -104,7 +109,9 @@ credit for those hooks belongs to the ReGrind authors.
 - Terraria launched as the **Windows build under Proton** (not the native Linux
   build). Force Proton in Steam under Properties, Compatibility.
 - Python 3.10+ (system Python; `/usr/bin/python3`, not conda)
-- `numpy` and `PyQt6` (Arch/CachyOS: `python-numpy python-pyqt6`)
+- `numpy`, `PyQt6`, and `Pillow` (Arch/CachyOS: `python-numpy python-pyqt6
+  python-pillow`; or `pip install -r requirements.txt`). Pillow decodes the item
+  sprites for the recipe browser's icon cache.
 - `sudo`. Game memory access needs root (`kernel.yama.ptrace_scope=1`). The CLI
   re-execs under sudo; the GUI stays unprivileged and shells each action out
   through sudo. Passwordless sudo makes both seamless.
@@ -146,6 +153,7 @@ terrariabonker patch enable teleport              # map-ping teleport: double-cl
 terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
 
 terrariabonker extract-recipes     # read Main.recipe[] -> data/recipes.json (for the Recipes tab)
+terrariabonker extract-sprites     # decode item icons from Content/Images -> local cache
 ```
 
 `--value` overrides the enabled value; omit it to use the default (mining `0.2`,
@@ -174,10 +182,13 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   Click a filled cell to edit it in a dialog, or an empty cell to place a
   fully-statted item (item field autocompletes over all item names); the dialog can
   also clear a slot.
-- **Recipes** tab — search an item to see what it **Makes** (recipes producing it) or
-  what it's **Used** in, with ingredient counts and the crafting station. Reads a
-  cached recipe database (offline); **Re-extract from game** regenerates it from the
-  running game after an update.
+- **Recipes** tab — a crafting-panel-style **icon grid** of craftable items. Type in the
+  search box to filter the grid in real time (by name or ItemID); click an item for a
+  popup listing its ingredients (icon + count) and crafting station. The **Makes / Uses**
+  toggle switches between "how is this made" (outputs) and "what does this make"
+  (ingredients). On first open the item icons are decoded from the game's own files into a
+  local cache (a few seconds, one-time); **Re-extract from game** regenerates both the
+  recipe database and the icons after a game update.
 
 The window runs unprivileged and runs each action as a short `sudo` CLI call, so
 Qt never runs as root.
@@ -222,6 +233,8 @@ terrariabonker/
 │   ├── version.py              build detection and the compatibility gate
 │   ├── names.py                ItemID -> name lookup for the item browser
 │   ├── recipes.py              recipe extraction (from Main.recipe[]) + browse/search
+│   ├── xnb.py                  self-contained XNB + LZX + Texture2D decoder (item sprites)
+│   ├── sprites.py              item-icon cache (decode Content/Images -> ~/.cache)
 │   ├── data/items.json         ItemID name map (extracted from Terraria.exe)
 │   ├── data/recipes.json       recipe cache (extracted from the running game)
 ├── tools/extract_item_names/   dotnet tool that regenerates items.json from the exe

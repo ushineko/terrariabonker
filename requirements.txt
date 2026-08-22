@@ -1,0 +1,14 @@
+# terrariabonker runtime dependencies.
+#
+# Install with pip:            pip install -r requirements.txt
+# Or via distro packages (Arch/CachyOS, recommended — system python):
+#     sudo pacman -S python-numpy python-pyqt6 python-pillow
+#
+# numpy  — fast player-block scanning in the memory locator
+# PyQt6  — the GUI control panel
+# Pillow — decode the game's Item_<id>.xnb sprites into the local icon cache
+#          (the recipe browser rebuilds this cache from your own game files;
+#           no sprites are shipped)
+numpy
+PyQt6
+Pillow

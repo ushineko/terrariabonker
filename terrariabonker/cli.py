@@ -214,6 +214,30 @@ def cmd_extract_recipes(args) -> int:
     return 0
 
 
+def cmd_extract_sprites(args) -> int:
+    """Decode item icons from the game's Content/Images into the local cache. Unprivileged
+    (disk read + /proc/<pid>/maps only) — no sudo, so the cache lands in the user's home."""
+    from terrariabonker import sprites
+    from terrariabonker.proc import Mem, find_pid
+
+    mem = None
+    try:
+        mem = Mem(find_pid())                        # only to learn the content path
+    except Exception:
+        mem = None                                   # game closed: rely on persisted path
+
+    def prog(done, total):
+        print(f"{done}/{total}", flush=True)
+
+    try:
+        ok, failed, total = sprites.extract(mem=mem, force=args.force, progress=prog)
+    except RuntimeError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        return 1
+    print(f"[OK] icons: {ok} of {total} ({failed} skipped/failed) -> {sprites.cache_dir()}")
+    return 0
+
+
 def cmd_gui(args) -> int:
     try:
         from terrariabonker.gui.main_window import run
@@ -256,6 +280,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("gui", help="launch the graphical control panel")
     p.set_defaults(func=cmd_gui)
+
+    p = sub.add_parser("extract-sprites",
+                       help="decode item icons from the game into a local cache")
+    p.add_argument("--force", action="store_true", help="re-decode even if cached")
+    p.set_defaults(func=cmd_extract_sprites)
 
     p = sub.add_parser("version", help="report the game version and compatibility")
     p.set_defaults(func=cmd_version)

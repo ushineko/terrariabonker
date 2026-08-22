@@ -128,6 +128,10 @@ def extract_recipes_argv() -> list[str]:
     return ["extract-recipes"]
 
 
+def extract_sprites_argv(force: bool = False) -> list[str]:
+    return ["extract-sprites"] + (["--force"] if force else [])
+
+
 def freeze_argv(godmode: bool, mana: bool) -> list[str]:
     argv = ["freeze"]
     if godmode:

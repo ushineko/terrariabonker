@@ -11,7 +11,7 @@ echo "Installing $APP_NAME..."
 
 # 1. Check runtime dependencies before installing anything.
 MISSING=""
-for mod in numpy PyQt6; do
+for mod in numpy PyQt6 PIL; do
     if ! /usr/bin/python3 -c "import $mod" 2>/dev/null; then
         MISSING="$MISSING $mod"
     fi
@@ -19,7 +19,8 @@ done
 if [ -n "$MISSING" ]; then
     echo "Error: missing Python modules:$MISSING"
     echo "On Arch/CachyOS install them with:"
-    echo "  sudo pacman -S python-numpy python-pyqt6"
+    echo "  sudo pacman -S python-numpy python-pyqt6 python-pillow"
+    echo "or, from this directory:  pip install -r requirements.txt"
     exit 1
 fi
 
