@@ -16,7 +16,8 @@ import os
 import sys
 
 from PyQt6.QtCore import QProcess, QSize, QSortFilterProxyModel, Qt, QTimer
-from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap, QStandardItem, QStandardItemModel
+from PyQt6.QtGui import (QColor, QFont, QIcon, QPainter, QPixmap, QStandardItem,
+                         QStandardItemModel)
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
                              QLabel, QLineEdit, QListView, QPlainTextEdit,
@@ -145,6 +146,9 @@ class MainWindow(QWidget):
         self._cells: dict = {}               # inventory slot -> grid cell button
         self._all_rows: list[dict] = []      # every slot (incl. empty), for slot-finding
         self._item_names = sorted(names._NAMES.values())   # for the edit-dialog completer
+        self._icon_cache: dict[int, QIcon] = {}    # ItemID -> QIcon (shared: inventory + recipes)
+        self._pixmap_cache: dict[int, QPixmap] = {}  # ItemID -> raw sprite QPixmap (or null)
+        self._placeholder_icon = None
         self._build()
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self.refresh_status)
@@ -266,6 +270,7 @@ class MainWindow(QWidget):
         f = QFont(b.font())
         f.setPointSize(CELL_PT)             # a QFont, not a stylesheet, so cell
         b.setFont(f)                        # recolouring in _render_cell keeps it
+        b.setIconSize(QSize(CELL_H - 12, CELL_H - 12))   # sprite fills the cell (minus border)
         b.clicked.connect(lambda _=False, s=slot: self._on_cell_clicked(s))
         return b
 
@@ -497,12 +502,19 @@ class MainWindow(QWidget):
     def _render_cell(self, cell: QPushButton, row: dict):
         if invgrid.is_empty(row):
             cell.setText("")
+            cell.setIcon(QIcon())
             cell.setToolTip(invgrid.tooltip(row, ""))
             cell.setStyleSheet("QPushButton { color: gray; }")
             return
         name = names.label(row["type"])
-        badge = invgrid.stack_badge(row.get("stack", 0))
-        cell.setText(invgrid.abbrev(name) + (f"\n×{badge}" if badge else ""))
+        cell.setText("")
+        pm = self._pixmap_for(row["type"])
+        if pm.isNull():                                 # no sprite: fall back to abbrev text
+            badge = invgrid.stack_badge(row.get("stack", 0))
+            cell.setIcon(QIcon())
+            cell.setText(invgrid.abbrev(name) + (f"\n×{badge}" if badge else ""))
+        else:
+            cell.setIcon(self._cell_icon(row["type"], row.get("stack", 0)))
         cell.setToolTip(invgrid.tooltip(row, name))
         bg, border = invgrid.cell_colors(row.get("rare", 0))
         cell.setStyleSheet(
@@ -560,7 +572,10 @@ class MainWindow(QWidget):
         self.recipe_view.setMovement(QListView.Movement.Static)
         self.recipe_view.setUniformItemSizes(True)
         self.recipe_view.setIconSize(QSize(40, 40))
-        self.recipe_view.setGridSize(QSize(74, 86))
+        self.recipe_view.setGridSize(QSize(72, 74))
+        rf = QFont(self.recipe_view.font())
+        rf.setPointSize(8)                              # small enough that labels don't clip
+        self.recipe_view.setFont(rf)
         self.recipe_view.setWordWrap(True)
         self.recipe_view.setSpacing(2)
         self.recipe_view.setEditTriggers(QListView.EditTrigger.NoEditTriggers)
@@ -585,8 +600,6 @@ class MainWindow(QWidget):
         col.addLayout(row)
 
         self._recipe_grid_ready = False
-        self._icon_cache: dict[int, QIcon] = {}
-        self._placeholder_icon = None
         self._recipe_status_hint()
         return w
 
@@ -622,12 +635,20 @@ class MainWindow(QWidget):
             self._placeholder_icon = QIcon(pm)
         return self._placeholder_icon
 
+    def _pixmap_for(self, item_id: int) -> QPixmap:
+        """Raw sprite pixmap from the icon cache (may be null if not extracted/missing)."""
+        pm = self._pixmap_cache.get(item_id)
+        if pm is None:
+            path = sprites.icon_path(item_id)
+            pm = QPixmap(path) if os.path.exists(path) else QPixmap()
+            self._pixmap_cache[item_id] = pm
+        return pm
+
     def _icon_for(self, item_id: int) -> QIcon:
         ic = self._icon_cache.get(item_id)
         if ic is not None:
             return ic
-        path = sprites.icon_path(item_id)
-        pm = QPixmap(path) if os.path.exists(path) else QPixmap()
+        pm = self._pixmap_for(item_id)
         if pm.isNull():
             ic = self._placeholder()
         else:
@@ -637,6 +658,36 @@ class MainWindow(QWidget):
             ic = QIcon(pm)
         self._icon_cache[item_id] = ic
         return ic
+
+    def _cell_icon(self, item_id: int, stack: int) -> QIcon:
+        """Build an inventory-cell icon: the sprite with the stack count composited into
+        the bottom-right corner (Terraria-style). Falls back to the placeholder."""
+        base = self._pixmap_for(item_id)
+        size = CELL_H - 12                              # leave room for the rarity border
+        canvas = QPixmap(size, size)
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
+        if not base.isNull():
+            s = base.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.FastTransformation)
+            painter.drawPixmap((size - s.width()) // 2, (size - s.height()) // 2, s)
+        if stack and stack > 1:
+            f = QFont(self.font())
+            f.setPointSize(8)
+            f.setBold(True)
+            painter.setFont(f)
+            txt = str(stack)
+            painter.setPen(QColor(0, 0, 0))            # 1px outline for readability
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                painter.drawText(canvas.rect().adjusted(dx, dy, dx, dy),
+                                 int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom),
+                                 txt)
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(canvas.rect(),
+                             int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom),
+                             txt)
+        painter.end()
+        return QIcon(canvas)
 
     def _recipe_item_ids(self, mode: str) -> list[int]:
         recs = recipes.load().get("recipes", [])
@@ -658,11 +709,11 @@ class MainWindow(QWidget):
         rows = []
         for i in self._recipe_item_ids(mode):
             label = names.label(i)
-            it = QStandardItem(self._icon_for(i), label)
-            it.setEditable(False)
+            it = QStandardItem(self._icon_for(i), invgrid.abbrev(label))   # truncate; full
+            it.setEditable(False)                                          # name on hover
             it.setToolTip(f"{label}  (#{i})")
             it.setData(i, ROLE_ITEM_ID)
-            it.setData(f"{label.lower()} #{i}", ROLE_SEARCH)
+            it.setData(f"{label.lower()} #{i}", ROLE_SEARCH)               # filter on full
             it.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
             rows.append(it)
         self._recipe_src_model.invisibleRootItem().appendRows(rows)   # one batch insert

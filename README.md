@@ -177,8 +177,10 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   spot on the fullscreen map to warp there**. No Cheat Engine at runtime; a game
   restart clears them all.
 - **Inventory** tab — a grid mirroring the in-game inventory (Hotbar / Inventory /
-  Coins / Ammo). Each cell shows an abbreviated name and stack, is tinted by the
-  item's **rarity** (Terraria's own tooltip colours), and has a full-detail tooltip.
+  Coins / Ammo). Each cell shows the item's **sprite** with the stack count in the
+  corner (from the same icon cache as the recipe browser; items with no sprite fall back
+  to an abbreviated name), a border tinted by the item's **rarity** (Terraria's own
+  tooltip colours), and a full-detail tooltip.
   Click a filled cell to edit it in a dialog, or an empty cell to place a
   fully-statted item (item field autocompletes over all item names); the dialog can
   also clear a slot.
