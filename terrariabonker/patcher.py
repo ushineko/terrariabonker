@@ -177,22 +177,21 @@ INJECTIONS: dict[str, Injection] = {
     "tool_reach": Injection(
         "tool_reach", "Tool + interaction reach (GetRanges)", "getranges",
         0xCA, _b("8D 65 F4 5E 5F"), _force_xy,
-        note="forces the GetRanges output so mining/tool use and chest/sign reach "
-             "extend (code cave); a game restart clears it"),
+        note="extends mining, tool use, and chest/sign reach together; "
+             "a game restart clears it"),
     # Player.GrabItems: a call returns the grab range in eax, then `mov [ebp-54],eax`
     # stores it. Inject `imul eax,N` before that store to scale the pickup radius.
     # Overwrite `mov [ebp-54],eax; lea eax,[ebp-50]` (6 bytes), re-run in the stub.
     "pickup": Injection(
         "pickup", "Item pickup range (GrabItems)", "grabitems",
         0x0, _b("89 45 AC 8D 45 B0"), _imul_eax,
-        note="scales the item grab range by N (code cave); a game restart clears it"),
+        note="scales the item pickup range by N; a game restart clears it"),
     # GetSpawnRate epilogue (esi=out spawnRate, edi=out maxSpawns still live). Overwrite
     # `lea esp,[ebp-0C]; pop esi; pop edi` like GetRanges; force the two outputs.
     "spawn_rate": Injection(
         "spawn_rate", "Spawn rate (GetSpawnRate)", "get_spawn_rate",
         0x1EAA, _b("8D 65 F4 5E 5F"), _force_spawn,
-        note="forces spawnRate low + maxSpawns = N (active-enemy cap; 0 = peaceful); "
-             "code cave, cleared on restart"),
+        note="caps active enemies at N (0 = peaceful); a game restart clears it"),
 }
 
 
@@ -249,6 +248,7 @@ class Patcher:
         self._sites: dict[str, int] = {}      # anchor key -> resolved address
         self._enabled: set[str] = set()
         self._inj: dict[str, dict] = {}       # injection name -> {inject, cave, stub_len}
+        self._values: dict[str, float] = {}   # cheat name -> last applied value
         self._load_state()
 
     # --- state persistence -------------------------------------------------
@@ -261,6 +261,8 @@ class Patcher:
                 self._enabled = set(s.get("enabled", []))
                 self._inj = {k: {kk: int(vv) for kk, vv in v.items()}
                              for k, v in s.get("inj", {}).items()}
+                self._values = {k: v for k, v in s.get("values", {}).items()
+                                if k in _VALUE_SPECS}
         except (OSError, ValueError):
             pass
 
@@ -268,7 +270,14 @@ class Patcher:
         os.makedirs(os.path.dirname(_STATE), exist_ok=True)
         with open(_STATE, "w") as f:
             json.dump({"pid": self.mem.pid, "sites": self._sites,
-                       "enabled": sorted(self._enabled), "inj": self._inj}, f)
+                       "enabled": sorted(self._enabled), "inj": self._inj,
+                       "values": self._values}, f)
+
+    def _record_value(self, name: str, value: float | int | None) -> None:
+        """Remember the value last applied for a cheat so the UI can restore it."""
+        spec = _VALUE_SPECS.get(name)
+        if spec is not None:
+            self._values[name] = value if value is not None else spec.default
 
     # --- anchor resolution -------------------------------------------------
     def _exec_regions(self):
@@ -418,6 +427,7 @@ class Patcher:
             v = int(value) if value is not None else int(spec.default if spec else 30)
             self._enable_injection(INJECTIONS[name], v)
             self._enabled.add(name)
+            self._record_value(name, v)
             self._save_state()
             return
         cheat = CHEATS[name]
@@ -425,6 +435,7 @@ class Patcher:
         self.mem.write(site, cheat.patched)
         self._set_value(cheat, on=True, override=value)
         self._enabled.add(name)
+        self._record_value(name, value)
         self._save_state()
 
     def disable(self, name: str) -> None:
@@ -452,3 +463,10 @@ class Patcher:
 
     def status(self) -> dict[str, bool]:
         return {name: self.is_enabled(name) for name in PATCH_CATALOG}
+
+    def values(self) -> dict[str, float]:
+        """Last applied value per valued cheat (persisted across GUI restarts,
+        as long as the game process — and thus the state file's pid — is the same).
+        Falls back to each cheat's default when nothing has been applied yet."""
+        return {name: self._values.get(name, spec.default)
+                for name, spec in _VALUE_SPECS.items()}

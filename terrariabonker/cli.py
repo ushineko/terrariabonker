@@ -180,11 +180,13 @@ def cmd_patch(args) -> int:
     try:
         if args.action == "status":
             st = p.status()
+            vals = p.values()
             if args.json:
-                print(json.dumps(st))
+                print(json.dumps({"on": st, "values": vals}))
                 return 0
             for name, on in st.items():
-                print(f"  [{'x' if on else ' '}] {name:<11} {PATCH_CATALOG[name].label}")
+                v = f"  = {vals[name]}" if name in vals else ""
+                print(f"  [{'x' if on else ' '}] {name:<11} {PATCH_CATALOG[name].label}{v}")
         elif args.action in ("enable", "on"):
             p.enable(args.cheat, value=args.value)
             shown = f" (value {args.value})" if args.value is not None else ""

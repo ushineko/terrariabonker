@@ -127,6 +127,36 @@ def test_state_persists_across_instances(game, tmp_path):
     assert p2.is_enabled("fast_place")
 
 
+def test_values_default_before_any_apply(game):
+    _, p = game
+    # every valued cheat reports its ValueSpec default until one is applied
+    assert p.values() == {"mining": 0.2, "reach": 20, "tool_reach": 30,
+                          "pickup": 50, "spawn_rate": 15}
+    assert "fast_place" not in p.values()   # carries no value
+
+
+def test_applied_value_is_recorded_and_restored(game):
+    m, p = game
+    m.write(CODE + 0x700, ANCHORS["getranges"].raw)
+    inj = P.INJECTIONS["tool_reach"]
+    m.write(CODE + 0x700 + inj.inject_off, inj.overwrite)
+    p.enable("tool_reach", value=77)        # injection value
+    p.enable("reach", value=42)             # value-cheat override
+    assert p.values()["tool_reach"] == 77
+    assert p.values()["reach"] == 42
+    # a fresh instance (same pid) restores the recorded values from the state file
+    p2 = Patcher(m)
+    assert p2.values()["tool_reach"] == 77
+    assert p2.values()["reach"] == 42
+
+
+def test_value_survives_disable(game):
+    m, p = game
+    p.enable("reach", value=42)
+    p.disable("reach")                      # toggled off, but the value is remembered
+    assert p.values()["reach"] == 42
+
+
 def test_resolve_raises_when_anchor_missing(tmp_path, monkeypatch):
     from conftest import FakeMem
     monkeypatch.setattr(P, "_STATE", str(tmp_path / "s.json"))

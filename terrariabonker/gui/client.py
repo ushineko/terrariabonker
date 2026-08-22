@@ -102,10 +102,17 @@ def patch_status_argv() -> list[str]:
 
 
 def parse_patch_status(raw: str) -> dict | None:
+    """Normalize ``patch status --json`` into ``{"on": {name: bool},
+    "values": {name: number}}``. Accepts the legacy flat ``{name: bool}`` shape
+    (older CLI) by wrapping it with empty values."""
     try:
-        return json.loads(raw.strip().splitlines()[-1])
+        data = json.loads(raw.strip().splitlines()[-1])
     except (ValueError, IndexError):
         return None
+    if isinstance(data, dict) and "on" in data:
+        return {"on": dict(data.get("on") or {}),
+                "values": dict(data.get("values") or {})}
+    return {"on": dict(data), "values": {}}
 
 
 def patch_set_argv(cheat: str, on: bool, value: float | None = None) -> list[str]:

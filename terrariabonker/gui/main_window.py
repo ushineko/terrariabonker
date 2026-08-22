@@ -189,8 +189,8 @@ class MainWindow(QWidget):
         /proc; a game restart clears them. (The 'CE' tab is reserved for real CE
         instrumentation.)"""
         box = QGroupBox("Code patches")
-        box.setToolTip("Byte patches applied via /proc — no Cheat Engine needed at "
-                       "runtime. A game restart clears them.")
+        box.setToolTip("Cheats that patch the running game in memory. "
+                       "A game restart clears them.")
         g = QGridLayout(box)
         for row, (name, info) in enumerate(PATCH_CATALOG.items()):
             cb = QCheckBox(info.label)
@@ -247,9 +247,14 @@ class MainWindow(QWidget):
         st = client.parse_patch_status(raw)
         if st is None:
             return
+        on, vals = st["on"], st["values"]
         self._patch_filling = True
         for name, cb in self._patch_cbs.items():
-            cb.setChecked(bool(st.get(name)))
+            cb.setChecked(bool(on.get(name)))
+            spin = self._patch_vals.get(name)
+            if spin is not None and vals.get(name) is not None:
+                v = vals[name]
+                spin.setValue(float(v) if isinstance(spin, QDoubleSpinBox) else int(v))
         self._patch_filling = False
 
     def _spin(self, lo, hi, val):
