@@ -71,12 +71,23 @@ def _pat(hexstr: str) -> Pattern:
 
 # AOB anchors in executable memory (verified single-match on 1.4.5.7).
 ANCHORS: dict[str, Pattern] = {
-    # ResetEffects: blockRange reset (mov [edi+9F8],0), fld1, pickSpeed reset
-    # (fstp [edi+8D8]) sit adjacent — one anchor covers reach + mining.
-    "reset_block": _pat("C7 87 F8 09 00 00 00 00 00 00 D9 E8 D9 9F D8 08 00 00"),
-    # ApplyItemTime(Item,float): the fmulp … cvttsd2si … max(edi,1) tail.
+    # ResetEffects: blockRange reset (mov [edi+9F8],0 @ +0), fld1 (+10), pickSpeed reset
+    # (fstp [edi+8D8] @ +12) sit adjacent — one anchor covers reach (patch_off 0) and
+    # mining (patch_off 12). The two reset instructions are WILDCARDED because those are
+    # exactly the bytes reach/mining overwrite: if they were fixed, the anchor would stop
+    # matching once either cheat is applied (a cold-cache re-resolve then failed with
+    # "anchor not found"). Uniqueness comes from the invariant fld1 + the downstream
+    # field-clear run (mov byte [edi+866],0; [edi+870],0; [edi+871],1) which no cheat touches.
+    "reset_block": _pat("?? ?? ?? ?? ?? ?? ?? ?? ?? ?? D9 E8 ?? ?? ?? ?? ?? ?? "
+                        "C6 87 66 08 00 00 00 C6 87 70 08 00 00 00 C6 87 71 08 00 00 01"),
+    # ApplyItemTime(Item,float): the fmulp … cvttsd2si … max(edi,1) tail. fast_place
+    # overwrites the max(edi,1) at +20 (`mov eax,1; cmp edi,eax; cmovl edi,eax` ->
+    # `mov edi,4; nop*5`), so those 10 bytes are WILDCARDED — otherwise a cold-cache
+    # re-resolve fails once the cheat is applied ("anchor not found"). The invariant
+    # prefix (fmulp…mov edi,ecx…jle) plus the downstream store (mov [esp+4],edi;
+    # mov eax,[ebp+8]; mov [esp],eax) keep it unique.
     "place": _pat("DE C9 DD 5D F0 F2 0F 10 45 F0 F2 0F 2C C8 8B F9 85 C0 7E 0A "
-                  "B8 01 00 00 00 3B F8 0F 4C F8"),
+                  "?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 89 7C 24 04 8B 45 08 89 04 24"),
     # TileReachCheckSettings.GetRanges(this, out x, out y). Prologue + mono type-init
     # + the tileRangeX read and first imul/store, with the ASLR'd immediates
     # (type-init thunk, static addr) wildcarded to make it unique. Starts at the method
@@ -668,13 +679,21 @@ class Patcher:
         self._save_state()
 
     def is_enabled(self, name: str) -> bool:
-        """Ground truth: read the bytes at the patch site."""
+        """Ground truth: read the bytes at the patch site.
+
+        Resolves the anchor (cached; scans once on a cold cache) rather than only trusting
+        the cache, so status reflects the ACTUAL memory even after a state-file race dropped
+        the entry — the anchors wildcard their patched bytes, so the resolve succeeds
+        whether or not the cheat is applied. Returns False if the method isn't JIT-compiled
+        yet (anchor absent)."""
         if name in INJECTIONS:
             return self._injection_enabled(INJECTIONS[name])
         cheat = CHEATS[name]
-        if cheat.anchor not in self._sites:
+        try:
+            base = self._resolve(cheat.anchor)
+        except PatchError:
             return False
-        site = self._sites[cheat.anchor] + cheat.patch_off
+        site = base + cheat.patch_off
         return self.mem.read(site, len(cheat.patched)) == cheat.patched
 
     def status(self) -> dict[str, bool]:

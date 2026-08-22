@@ -212,6 +212,44 @@ def test_teleport_stub_is_stack_convention_agnostic():
     assert b"\x68\x44\x33\x22\x11" in body               # push this (little-endian)
 
 
+def test_anchor_resolves_whether_or_not_patched(game):
+    # Regression: the place/reset_block anchors wildcard the bytes the cheat overwrites,
+    # so a cold-cache re-resolve still finds the site once the cheat is applied (the old
+    # anchors included the patched bytes and raised "anchor not found" after a restart +
+    # a state-file race that dropped the cached site).
+    m, p = game
+    for anchor, cheat_name in (("place", "fast_place"), ("reset_block", "reach"),
+                               ("reset_block", "mining")):
+        cheat = CHEATS[cheat_name]
+        base = p._resolve(anchor)
+        site = base + cheat.patch_off
+        # pristine: original bytes at the site -> resolves
+        m.write(site, cheat.orig)
+        p._sites.pop(anchor, None)
+        assert p._resolve(anchor) == base
+        # patched: cheat bytes at the site -> STILL resolves (bytes are wildcarded)
+        m.write(site, cheat.patched)
+        p._sites.pop(anchor, None)
+        assert p._resolve(anchor) == base, f"{anchor} lost its match once {cheat_name} patched"
+        assert p.is_enabled(cheat_name)              # ground truth reads the patched bytes
+        m.write(site, cheat.orig)                    # restore for the next iteration
+        p._sites.pop(anchor, None)
+
+
+def test_is_enabled_reads_ground_truth_without_cache(game):
+    # status must reflect real memory even when the cache is cold (state race / new pid):
+    # is_enabled resolves rather than trusting the cache.
+    m, p = game
+    cheat = CHEATS["fast_place"]
+    site = p._resolve("place") + cheat.patch_off
+    m.write(site, cheat.patched)
+    p._sites.clear()                                 # simulate a lost cache
+    assert p.is_enabled("fast_place") is True
+    m.write(site, cheat.orig)
+    p._sites.clear()
+    assert p.is_enabled("fast_place") is False
+
+
 def test_enable_disable_fast_place(game):
     m, p = game
     site = CODE + 0x400 + CHEATS["fast_place"].patch_off
