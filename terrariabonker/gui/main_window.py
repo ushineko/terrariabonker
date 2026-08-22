@@ -143,6 +143,8 @@ class MainWindow(QWidget):
         self._patch_filling = False          # suppress patch-checkbox signals during refresh
         self._patch_cbs: dict = {}           # cheat name -> checkbox
         self._patch_vals: dict = {}          # cheat name -> value spinbox (valued cheats)
+        self._cheat_pending: dict = {}       # name -> (on, value): latest desired state
+        self._cheat_busy = False             # one enable/disable at a time (no state race)
         self._cells: dict = {}               # inventory slot -> grid cell button
         self._all_rows: list[dict] = []      # every slot (incl. empty), for slot-finding
         self._item_names = sorted(names._NAMES.values())   # for the edit-dialog completer
@@ -330,15 +332,42 @@ class MainWindow(QWidget):
     def _on_patch_toggled(self, name: str, on: bool):
         if self._patch_filling:
             return
-        self._run(client.patch_set_argv(name, on, value=self._patch_value(name)))
-        QTimer.singleShot(500, self.refresh_patches)
+        self._cheat_pending[name] = (on, self._patch_value(name))
+        self._pump_cheats()
 
     def _on_patch_value(self, name: str):
         """Re-apply a live patch when its value spinbox changes."""
         if self._patch_filling:
             return
         if self._patch_cbs[name].isChecked():
-            self._run(client.patch_set_argv(name, True, value=self._patch_value(name)))
+            self._cheat_pending[name] = (True, self._patch_value(name))
+            self._pump_cheats()
+
+    def _pump_cheats(self):
+        """Run queued enable/disable ops ONE AT A TIME. Each op is a separate sudo CLI
+        process that load-modify-saves the shared patch-state file; running them serially
+        (rather than spawning one per checkbox click) avoids concurrent writes clobbering
+        each other's records — the cause of the checkbox/state desync when toggling many
+        cheats at once. Repeated toggles of the same cheat coalesce to the latest state;
+        the checkboxes re-sync to real memory once the queue drains."""
+        if self._cheat_busy or not self._cheat_pending:
+            return
+        self._cheat_busy = True
+        name = next(iter(self._cheat_pending))
+        on, value = self._cheat_pending.pop(name)
+        verb = "enable" if on else "disable"
+        self.log.appendPlainText(f"$ terrariabonker patch {verb} {name}")
+
+        def done(out):
+            if out.strip():
+                self.log.appendPlainText(out.rstrip())
+            self._cheat_busy = False
+            if self._cheat_pending:
+                self._pump_cheats()          # next queued op
+            else:
+                self.refresh_patches()       # settled: sync checkboxes to memory
+
+        self._spawn(client.patch_set_argv(name, on, value=value), on_output=done)
 
     def refresh_patches(self):
         self._spawn(client.patch_status_argv(), on_output=self._render_patches)

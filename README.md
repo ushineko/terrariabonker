@@ -61,8 +61,9 @@ holds no state; stopping it ends every effect.*
   fast placement, **unified tool/interaction reach** (mining, tool use, chests,
   signs, and crafting-station range all extend together), **item pickup range**
   (grab items from far off-screen), **spawn-rate / enemy cap** (0 = peaceful), a
-  **drop-chance floor** (guaranteed or minimum-% common drops), and **map-ping
-  teleport** (double-click the fullscreen map to warp there): things a value-write
+  **drop-chance floor** (guaranteed or minimum-% common drops), **map-ping
+  teleport** (double-click the fullscreen map to warp there), and a **minion cap**
+  (raise the summon limit): things a value-write
   can't hold, applied by patching the game's JIT code through `/proc` — including
   code-cave injections for the reach, pickup, spawn, and drop hooks and a managed
   code-cave *call* into `Player.Teleport` for the map-ping warp (derived with
@@ -153,6 +154,7 @@ terrariabonker patch enable reach --value 30      # placement reach (extra tiles
 terrariabonker patch enable tool_reach --value 40 # unified mining/interaction/crafting reach
 terrariabonker patch enable pickup --value 50     # item pickup range (× grab radius)
 terrariabonker patch enable teleport              # map-ping teleport: double-click the map to warp
+terrariabonker patch enable max_minions --value 10 # raise the minion (summon) cap
 terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
 
 terrariabonker extract-recipes     # read Main.recipe[] -> data/recipes.json (for the Recipes tab)
@@ -175,8 +177,8 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
 - **Trainer** tab — godmode / infinite-mana toggles, heal / refill, max HP/mana,
   fast-mining, long-reach, and a **Code patches** section: checkbox toggles for the
   code-patch cheats (mining speed, placement reach, fast placement, tool/interaction
-  reach, item pickup range, spawn rate, drop-chance floor, and **map-ping teleport**)
-  with tunable value spinboxes where applicable. With teleport on, **double-click a
+  reach, item pickup range, spawn rate, drop-chance floor, **map-ping teleport**, and
+  **minion cap**) with tunable value spinboxes where applicable. With teleport on, **double-click a
   spot on the fullscreen map to warp there**. No Cheat Engine at runtime; a game
   restart clears them all.
 - **Inventory** tab — a grid mirroring the in-game inventory (Hotbar / Inventory /

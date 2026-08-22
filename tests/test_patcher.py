@@ -33,7 +33,7 @@ def test_status_all_off_initially(game):
     _, p = game
     assert p.status() == {"mining": False, "reach": False, "fast_place": False,
                           "tool_reach": False, "pickup": False, "spawn_rate": False,
-                          "loot": False, "teleport": False}
+                          "loot": False, "teleport": False, "max_minions": False}
 
 
 def test_tool_reach_injection_roundtrip(game):
@@ -212,6 +212,23 @@ def test_teleport_stub_is_stack_convention_agnostic():
     assert b"\x68\x44\x33\x22\x11" in body               # push this (little-endian)
 
 
+def test_max_minions_tunable_immediate_patch(game):
+    import struct as _s
+    m, p = game
+    m.write(CODE + 0x800, P.ANCHORS["reset_minions"].raw)   # plant the reset instruction
+    inj = CODE + 0x800 + CHEATS["max_minions"].patch_off     # the immediate at +6
+    m.write(inj, CHEATS["max_minions"].orig)                 # original value 1
+    assert not p.is_enabled("max_minions")
+    p.enable("max_minions", value=12)
+    assert _s.unpack("<i", m.read(inj, 4))[0] == 12          # immediate rewritten to the cap
+    assert p.is_enabled("max_minions")                       # ground truth: != original
+    p.enable("max_minions", value=25)                        # live re-tune
+    assert _s.unpack("<i", m.read(inj, 4))[0] == 25
+    p.disable("max_minions")
+    assert m.read(inj, 4) == CHEATS["max_minions"].orig      # restored to 1
+    assert not p.is_enabled("max_minions")
+
+
 def test_anchor_resolves_whether_or_not_patched(game):
     # Regression: the place/reset_block anchors wildcard the bytes the cheat overwrites,
     # so a cold-cache re-resolve still finds the site once the cheat is applied (the old
@@ -293,7 +310,8 @@ def test_values_default_before_any_apply(game):
     _, p = game
     # every valued cheat reports its ValueSpec default until one is applied
     assert p.values() == {"mining": 0.2, "reach": 20, "tool_reach": 30,
-                          "pickup": 50, "spawn_rate": 15, "loot": 100}
+                          "pickup": 50, "spawn_rate": 15, "loot": 100,
+                          "max_minions": 10}
     assert "fast_place" not in p.values()   # carries no value
 
 

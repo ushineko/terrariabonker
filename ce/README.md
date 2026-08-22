@@ -128,6 +128,8 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
 - `poc_itemcat.lua` — dump `Terraria.Item` damage-class / accessory flag offsets
   (`accessory 0x7D`, `melee 0x15D`, `magic 0x15E`, `ranged 0x15F`, `summon 0x160`) so the
   modifier editor can offer only item-appropriate prefixes.
+- `poc_minion.lua` — pin `Player.maxMinions` (`+0x3F8`) and its `ResetEffects` reset
+  (`mov [edi+3F8],1`) so the minion-cap cheat can rewrite that immediate to a tunable N.
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 

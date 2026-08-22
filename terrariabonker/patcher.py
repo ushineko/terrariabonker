@@ -18,10 +18,12 @@ Offsets are for Terraria 1.4.5.7.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import struct
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from terrariabonker.locate import (STATLIFE_FROM_OBJ, find_players,
@@ -134,6 +136,11 @@ ANCHORS: dict[str, Pattern] = {
     # target) is anchor_base - 0x32 (see Injection.call_target_off).
     "player_teleport": _pat("C7 83 F4 0B 00 00 64 00 00 00 C7 83 68 04 00 00 04 00 00 00 "
                             "83 FE 0A 0F 94 C0 0F B6 C0"),
+    # Player.ResetEffects: the per-frame `maxMinions = 1` reset (mov [edi+3F8],1). Its
+    # immediate (the reset value) is WILDCARDED so the anchor resolves whether or not the
+    # cap cheat is applied; uniqueness comes from the adjacent `mov [edi+A60],1` reset that
+    # follows it (edi = the player). The cheat rewrites the immediate to the desired cap.
+    "reset_minions": _pat("C7 87 F8 03 00 00 ?? ?? ?? ?? C7 87 60 0A 00 00 01 00 00 00"),
 }
 
 
@@ -150,6 +157,11 @@ class Cheat:
     on_value: float | int = 0
     off_value: float | int = 0
     note: str = ""
+    # Tunable in-place patch: when set, the patched bytes are BUILT from the value
+    # (e.g. an immediate inside the instruction) instead of being fixed. ``patched`` is
+    # then unused; enable writes ``make_patched(value)`` at the site, disable restores
+    # ``orig``, and is_enabled is true when the site differs from ``orig``.
+    make_patched: Callable[[int], bytes] | None = None
 
 
 CHEATS: dict[str, Cheat] = {
@@ -168,6 +180,14 @@ CHEATS: dict[str, Cheat] = {
         _b("B8 01 00 00 00 3B F8 0F 4C F8"), _b("BF 04 00 00 00 90 90 90 90 90"),
         value_off=None,
         note="forces itemTime=4 at the placement-timing read site"),
+    # Rewrite ResetEffects' `maxMinions = 1` reset to `maxMinions = N`, so N minion slots
+    # hold each frame (accessory bonuses still stack on top). patch_off=6 is the 4-byte
+    # immediate; make_patched packs N there. Ported in spirit from ReGrind-style stat caps.
+    "max_minions": Cheat(
+        "max_minions", "Minion cap (maxMinions)", "reset_minions", 6,
+        _b("01 00 00 00"), b"",                     # patched is built from the value
+        make_patched=lambda n: struct.pack("<i", max(1, int(n))),
+        note="raises the minion (summon) cap; a game restart clears it"),
 }
 
 
@@ -382,6 +402,7 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
     "pickup": ValueSpec("i32", 50, 2, 500, "× grab range"),
     "spawn_rate": ValueSpec("i32", 15, 0, 200, "max active enemies · 0 = peaceful"),
     "loot": ValueSpec("i32", 100, 1, 100, "% min drop chance · 100 = guaranteed"),
+    "max_minions": ValueSpec("i32", 10, 1, 255, "minion slots (base; +accessories)"),
 }
 
 
@@ -413,6 +434,22 @@ class Patcher:
         self._load_state()
 
     # --- state persistence -------------------------------------------------
+    @contextmanager
+    def _locked(self):
+        """Serialize a mutating operation across processes: hold an exclusive lock on the
+        state file and re-load the latest state under it, so two concurrent CLI
+        invocations (e.g. the GUI toggling several cheats at once) can't clobber each
+        other's records. The lock lives in the common layer, so it protects any caller."""
+        os.makedirs(os.path.dirname(_STATE), exist_ok=True)
+        lock = open(_STATE + ".lock", "a+")
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            self._load_state()                       # refresh under the lock, then modify
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
+
     def _load_state(self):
         try:
             with open(_STATE) as f:
@@ -428,10 +465,12 @@ class Patcher:
 
     def _save_state(self):
         os.makedirs(os.path.dirname(_STATE), exist_ok=True)
-        with open(_STATE, "w") as f:
+        tmp = _STATE + f".{os.getpid()}.tmp"          # atomic write: no torn reads for status
+        with open(tmp, "w") as f:
             json.dump({"pid": self.mem.pid, "sites": self._sites,
                        "enabled": sorted(self._enabled), "inj": self._inj,
                        "values": self._values}, f)
+        os.replace(tmp, _STATE)
 
     def _record_value(self, name: str, value: float | int | None) -> None:
         """Remember the value last applied for a cheat so the UI can restore it."""
@@ -648,35 +687,45 @@ class Patcher:
     def enable(self, name: str, value: float | int | None = None) -> None:
         """Patch the code site and set the field. ``value`` overrides the cheat's
         default ``on_value`` (ignored for cheats that carry no value, e.g. fast_place);
-        for an injection it is the forced range."""
-        if name in INJECTIONS:
-            spec = _VALUE_SPECS.get(name)
-            v = int(value) if value is not None else int(spec.default if spec else 30)
-            self._enable_injection(INJECTIONS[name], v)
+        for an injection it is the forced range. Runs under the state lock so concurrent
+        toggles serialize on the shared state file (see ``_locked``)."""
+        with self._locked():
+            if name in INJECTIONS:
+                spec = _VALUE_SPECS.get(name)
+                v = int(value) if value is not None else int(spec.default if spec else 30)
+                self._enable_injection(INJECTIONS[name], v)
+                self._enabled.add(name)
+                self._record_value(name, v)
+                self._save_state()
+                return
+            cheat = CHEATS[name]
+            site = self._resolve(cheat.anchor) + cheat.patch_off
+            if cheat.make_patched is not None:        # tunable in-place patch (value -> bytes)
+                spec = _VALUE_SPECS.get(name)
+                v = value if value is not None else (spec.default if spec else 1)
+                self.mem.write(site, cheat.make_patched(int(v)))
+                self._record_value(name, v)
+            else:
+                self.mem.write(site, cheat.patched)
+                self._set_value(cheat, on=True, override=value)
+                self._record_value(name, value)
             self._enabled.add(name)
-            self._record_value(name, v)
             self._save_state()
-            return
-        cheat = CHEATS[name]
-        site = self._resolve(cheat.anchor) + cheat.patch_off
-        self.mem.write(site, cheat.patched)
-        self._set_value(cheat, on=True, override=value)
-        self._enabled.add(name)
-        self._record_value(name, value)
-        self._save_state()
 
     def disable(self, name: str) -> None:
-        if name in INJECTIONS:
-            self._disable_injection(INJECTIONS[name])
+        with self._locked():
+            if name in INJECTIONS:
+                self._disable_injection(INJECTIONS[name])
+                self._enabled.discard(name)
+                self._save_state()
+                return
+            cheat = CHEATS[name]
+            site = self._resolve(cheat.anchor) + cheat.patch_off
+            self.mem.write(site, cheat.orig)          # restore original code / immediate
+            if cheat.make_patched is None:
+                self._set_value(cheat, on=False)
             self._enabled.discard(name)
             self._save_state()
-            return
-        cheat = CHEATS[name]
-        site = self._resolve(cheat.anchor) + cheat.patch_off
-        self.mem.write(site, cheat.orig)          # restore original code
-        self._set_value(cheat, on=False)
-        self._enabled.discard(name)
-        self._save_state()
 
     def is_enabled(self, name: str) -> bool:
         """Ground truth: read the bytes at the patch site.
@@ -694,6 +743,8 @@ class Patcher:
         except PatchError:
             return False
         site = base + cheat.patch_off
+        if cheat.make_patched is not None:           # tunable: enabled when != original
+            return self.mem.read(site, len(cheat.orig)) != cheat.orig
         return self.mem.read(site, len(cheat.patched)) == cheat.patched
 
     def status(self) -> dict[str, bool]:
