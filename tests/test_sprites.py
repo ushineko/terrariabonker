@@ -1,6 +1,47 @@
-"""Sprite cache: referenced-item set, cache paths, and content-dir persistence."""
+"""Sprite cache: referenced-item set, cache paths, content-dir persistence, de-animation."""
 
-from terrariabonker import recipes, sprites
+import numpy as np
+from PIL import Image
+
+from terrariabonker import names, recipes, sprites
+
+
+def _strip(width, frame_h, frames, content_h):
+    """A synthetic vertical animation: ``frames`` blocks of ``content_h`` opaque rows,
+    each in a ``frame_h``-tall slot (the remainder transparent, a separator)."""
+    h = frame_h * frames
+    a = np.zeros((h, width, 4), dtype=np.uint8)
+    for k in range(frames):
+        top = k * frame_h
+        a[top:top + content_h, :, :] = 255           # opaque content
+    return Image.fromarray(a, "RGBA")
+
+
+def test_deanimate_crops_vertical_strip_to_first_frame():
+    img = _strip(width=10, frame_h=12, frames=4, content_h=10)   # 10x48, 4 frames
+    out = sprites._deanimate(img)
+    assert out.size == (10, 12)                       # cropped to one frame
+
+
+def test_deanimate_leaves_single_frame_tall_item():
+    # one content block in a tall image (like a staff): not an animation -> unchanged
+    a = np.zeros((30, 10, 4), dtype=np.uint8)
+    a[5:25, :, :] = 255
+    img = Image.fromarray(a, "RGBA")
+    assert sprites._deanimate(img).size == (10, 30)
+
+
+def test_deanimate_leaves_non_strip_unchanged():
+    img = Image.new("RGBA", (32, 20), (255, 0, 0, 255))   # h < 2*w
+    assert sprites._deanimate(img).size == (32, 20)
+
+
+def test_all_item_ids_superset_of_referenced(monkeypatch):
+    monkeypatch.setattr(recipes, "_CACHE",
+                        {"recipes": [{"out": 8, "n": 1, "ing": [[23, 1]]}], "stations": {}})
+    ids = sprites.all_item_ids()
+    assert set(names._NAMES).issubset(ids)            # every named item is covered
+    assert {8, 23}.issubset(ids)                      # recipe items too
 
 
 def test_referenced_item_ids_union_of_outputs_and_ingredients(monkeypatch):

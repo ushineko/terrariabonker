@@ -149,6 +149,7 @@ class MainWindow(QWidget):
         self._icon_cache: dict[int, QIcon] = {}    # ItemID -> QIcon (shared: inventory + recipes)
         self._pixmap_cache: dict[int, QPixmap] = {}  # ItemID -> raw sprite QPixmap (or null)
         self._placeholder_icon = None
+        self._sprites_extracting = False           # guard against concurrent extraction
         self._build()
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self.refresh_status)
@@ -277,6 +278,8 @@ class MainWindow(QWidget):
     def _on_tab_changed(self, i: int):
         if i == 1:
             self.refresh_inventory()
+            if not sprites.is_cached():               # icons missing/stale: build them,
+                self._extract_sprites(after=self.refresh_inventory)   # then redraw the grid
         elif i == 2:
             self._ensure_recipe_grid()
 
@@ -758,7 +761,10 @@ class MainWindow(QWidget):
         self._rebuild_recipe_grid()
 
     def _extract_sprites(self, after=None, force=False):
-        self.recipe_status.setText("Extracting item icons (one-time, ~10s)…")
+        if self._sprites_extracting:                 # one extraction at a time
+            return
+        self._sprites_extracting = True
+        self.recipe_status.setText("Extracting item icons (one-time, ~15s)…")
         self.log.appendPlainText("$ terrariabonker extract-sprites")
 
         def prog(line):
@@ -766,6 +772,9 @@ class MainWindow(QWidget):
                 self.recipe_status.setText(f"Extracting item icons… {line}")
 
         def done(_out):
+            self._sprites_extracting = False
+            self._pixmap_cache.clear()               # drop any placeholders cached pre-extract
+            self._icon_cache.clear()
             self._recipe_status_hint()
             if after:
                 after()
