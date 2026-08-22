@@ -87,6 +87,12 @@ ANCHORS: dict[str, Pattern] = {
     # cmp [ebx],ebx` followed by the first get_Hitbox call (wildcarded). Starts at the
     # injection point (the store), so the injection offset is 0.
     "grabitems": _pat("89 45 AC 8D 45 B0 89 44 24 04 89 1C 24 39 1B E8 ?? ?? ?? ??"),
+    # Spawner.GetSpawnRate prologue: loads esi=out spawnRate ([ebp+10]), edi=out
+    # maxSpawns ([ebp+14]); then fldz/fstp and the first `mov [esi],[static]`. Same
+    # esi/edi-out shape as GetRanges — forced at the epilogue (offset 0x1EAA).
+    "get_spawn_rate": _pat("55 8B EC 53 57 56 83 EC 5C 8B 5D 0C 8B 75 10 8B 7D 14 "
+                           "B8 ?? ?? ?? ?? F7 00 01 00 00 00 74 05 E8 ?? ?? ?? ?? "
+                           "D9 EE D9 5D D4 8B 05 ?? ?? ?? ?? 89 06"),
 }
 
 
@@ -141,6 +147,12 @@ def _imul_eax(n: int) -> bytes:
     return b"\x69\xc0" + struct.pack("<i", n)          # imul eax,eax,imm32
 
 
+def _force_spawn(n: int) -> bytes:
+    """mov [esi], 6 ; mov [edi], N — force GetSpawnRate's outputs: a low spawnRate
+    (frequent) and maxSpawns = N (active-enemy cap; 0 = no spawns / peaceful)."""
+    return b"\xc7\x06" + _i32(6) + b"\xc7\x07" + _i32(n)
+
+
 @dataclass(frozen=True)
 class Injection:
     """A code-cave cheat: some cheats can't be done in place because the code we want
@@ -174,6 +186,13 @@ INJECTIONS: dict[str, Injection] = {
         "pickup", "Item pickup range (GrabItems)", "grabitems",
         0x0, _b("89 45 AC 8D 45 B0"), _imul_eax,
         note="scales the item grab range by N (code cave); a game restart clears it"),
+    # GetSpawnRate epilogue (esi=out spawnRate, edi=out maxSpawns still live). Overwrite
+    # `lea esp,[ebp-0C]; pop esi; pop edi` like GetRanges; force the two outputs.
+    "spawn_rate": Injection(
+        "spawn_rate", "Spawn rate (GetSpawnRate)", "get_spawn_rate",
+        0x1EAA, _b("8D 65 F4 5E 5F"), _force_spawn,
+        note="forces spawnRate low + maxSpawns = N (active-enemy cap; 0 = peaceful); "
+             "code cave, cleared on restart"),
 }
 
 
@@ -202,6 +221,7 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
     "reach": ValueSpec("i32", 20, 0, 100, "extra tiles"),
     "tool_reach": ValueSpec("i32", 30, 1, 200, "tiles · mining & interaction"),
     "pickup": ValueSpec("i32", 50, 2, 500, "× grab range"),
+    "spawn_rate": ValueSpec("i32", 15, 0, 200, "max active enemies · 0 = peaceful"),
 }
 
 

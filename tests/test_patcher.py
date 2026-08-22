@@ -32,7 +32,7 @@ def game(tmp_path, monkeypatch):
 def test_status_all_off_initially(game):
     _, p = game
     assert p.status() == {"mining": False, "reach": False, "fast_place": False,
-                          "tool_reach": False, "pickup": False}
+                          "tool_reach": False, "pickup": False, "spawn_rate": False}
 
 
 def test_tool_reach_injection_roundtrip(game):
@@ -68,6 +68,24 @@ def test_pickup_injection_uses_imul_stub(game):
     p.disable("pickup")
     assert m.read(inject, 6) == inj.overwrite
     assert not p.is_enabled("pickup")
+
+
+def test_spawn_rate_injection_forces_outputs(game):
+    m, p = game
+    m.write(CODE + 0x900, ANCHORS["get_spawn_rate"].raw)   # plant the prologue
+    inj = P.INJECTIONS["spawn_rate"]
+    inject = CODE + 0x900 + inj.inject_off
+    m.write(inject, inj.overwrite)
+    p.enable("spawn_rate", value=40)
+    assert m.read(inject, 1) == b"\xe9"
+    rec = p._inj["spawn_rate"]
+    # stub: mov [esi],6 (spawnRate) ; mov [edi],40 (maxSpawns) ; then the overwrite
+    assert m.read(rec["cave"], 2) == b"\xc7\x06"
+    assert struct.unpack("<i", m.read(rec["cave"] + 2, 4))[0] == 6
+    assert struct.unpack("<i", m.read(rec["cave"] + 8, 4))[0] == 40
+    p.disable("spawn_rate")
+    assert m.read(inject, 5) == inj.overwrite
+    assert not p.is_enabled("spawn_rate")
 
 
 def test_enable_disable_fast_place(game):

@@ -71,6 +71,7 @@ both — no Cheat Engine at runtime:
 | Per-item use-speed (`Item.useTime`), pick power | **Fast placement** (`ApplyItemTime` timing) |
 | Placement distance per item (`Item.tileBoost`) | **Tool + interaction reach** (`GetRanges`, code cave) |
 | | **Item pickup range** (`GrabItems`, code cave) |
+| | **Spawn rate** (`GetSpawnRate`, code cave; 0 = peaceful) |
 
 The code-patch sites were **derived with Cheat Engine's mono dissector** (see
 `ce/README.md`), but the trainer locates them by AOB and patches them itself. CE is

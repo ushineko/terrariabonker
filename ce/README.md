@@ -105,6 +105,8 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
 - `poc_recipe.lua` — enumerate `Terraria.Recipe` fields and validate the `Main.recipe[]`
   walk used by `recipes.py` to extract crafting recipes (createItem 0x8, requiredItem
   0xC, requiredTile 0x1C; Item createTile 0xA0 names stations).
+- `poc_spawner.lua` — dump `Spawner.GetSpawnRate` prologue/epilogue for the `spawn_rate`
+  code-cave cheat (force out spawnRate=esi / out maxSpawns=edi at +0x1EAA, ReGrind-style).
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 
