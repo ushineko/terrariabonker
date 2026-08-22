@@ -118,7 +118,19 @@ credit for those hooks belongs to the ReGrind authors.
   sprites for the recipe browser's icon cache.
 - `sudo`. Game memory access needs root (`kernel.yama.ptrace_scope=1`). The CLI
   re-execs under sudo; the GUI stays unprivileged and shells each action out
-  through sudo. Passwordless sudo makes both seamless.
+  through sudo. **Passwordless sudo is required for the GUI** — it runs each memory
+  action in a subprocess with no terminal, so it can't answer a password prompt;
+  without it, trainer/inventory actions do nothing (the GUI shows a warning banner,
+  but recipe browsing and item icons still work, and the CLI still works with an
+  interactive password prompt). To grant it, add a NOPASSWD rule via `sudo visudo`,
+  e.g.:
+
+  ```
+  youruser ALL=(root) NOPASSWD: /usr/bin/python3 /path/to/ag-scripts/terrariabonker/terrariabonker.py *
+  ```
+
+  (adjust the user and path). This lets only the trainer's entry point run as root
+  without a password.
 
 ## Installation
 

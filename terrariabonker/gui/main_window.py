@@ -13,6 +13,7 @@ keep alive, no GC landmines, and the child is a real OS process we can signal.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 
 from PyQt6.QtCore import QProcess, QSize, QSortFilterProxyModel, Qt, QTimer
@@ -38,8 +39,19 @@ CELL_PT = 8              # cell font point size — small enough that names don'
 
 
 def _cli_args(sub_args: list[str]) -> tuple[str, list[str]]:
-    """Build the ('sudo', [...]) argv to run a CLI subcommand under sudo."""
-    return "sudo", ["-E", sys.executable, ENTRY, *sub_args]
+    """Build the ('sudo', [...]) argv to run a CLI subcommand under sudo. ``-n`` is
+    non-interactive: without passwordless sudo the call fails FAST with a clear message
+    (in a QProcess there is no TTY to prompt on, so it would otherwise just do nothing)."""
+    return "sudo", ["-n", "-E", sys.executable, ENTRY, *sub_args]
+
+
+def _passwordless_sudo() -> bool:
+    """True if sudo runs without a password prompt (what the GUI's memory actions need)."""
+    try:
+        return subprocess.run(["sudo", "-n", "true"], capture_output=True,
+                              timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _cli_args_user(sub_args: list[str]) -> tuple[str, list[str]]:
@@ -158,6 +170,21 @@ class MainWindow(QWidget):
         self._status_timer.start(2000)
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
+        self._check_sudo()
+
+    def _check_sudo(self):
+        """Warn (don't block) when passwordless sudo is missing: memory features degrade,
+        but recipe browsing / item icons (unprivileged) still work."""
+        if _passwordless_sudo():
+            self.sudo_warn.hide()
+            return
+        self.sudo_warn.setText(
+            "<b>Memory features unavailable</b> — passwordless sudo is not configured. "
+            "The trainer edits game memory via <code>sudo</code>, and the GUI can't prompt "
+            "for a password, so trainer/inventory actions will do nothing. Add a NOPASSWD "
+            "sudoers rule for it (see the README's Requirements) and restart. "
+            "The recipe browser and item icons work without sudo.")
+        self.sudo_warn.show()
 
     # --- layout ------------------------------------------------------------
     def _build(self):
@@ -173,6 +200,17 @@ class MainWindow(QWidget):
         self.btn_launch.clicked.connect(self._launch_terraria)
         top.addWidget(self.btn_launch)
         root.addLayout(top)
+
+        # Shown only when passwordless sudo is missing: memory actions need it, and in a
+        # QProcess (no TTY) they would otherwise fail silently.
+        self.sudo_warn = QLabel()
+        self.sudo_warn.setWordWrap(True)
+        self.sudo_warn.setTextFormat(Qt.TextFormat.RichText)
+        self.sudo_warn.setStyleSheet(
+            "background-color: #5a1e1e; color: #ffdddd; border: 1px solid #a33;"
+            " border-radius: 4px; padding: 6px;")
+        self.sudo_warn.hide()
+        root.addWidget(self.sudo_warn)
 
         tabs = QTabWidget()
         tabs.addTab(self._trainer_tab(), "Trainer")
