@@ -102,6 +102,9 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
 - `poc_localplayer.lua` — dump `Main.get_LocalPlayer` to re-derive `Main.player` /
   `Main.myPlayer` statics for `resolve_local_player` (reading the ground-truth live
   player `Main.player[Main.myPlayer]`; see docs/discovery.md "The locator").
+- `poc_recipe.lua` — enumerate `Terraria.Recipe` fields and validate the `Main.recipe[]`
+  walk used by `recipes.py` to extract crafting recipes (createItem 0x8, requiredItem
+  0xC, requiredTile 0x1C; Item createTile 0xA0 names stations).
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 

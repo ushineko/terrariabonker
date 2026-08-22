@@ -117,6 +117,10 @@ def patch_set_argv(cheat: str, on: bool, value: float | None = None) -> list[str
     return argv
 
 
+def extract_recipes_argv() -> list[str]:
+    return ["extract-recipes"]
+
+
 def freeze_argv(godmode: bool, mana: bool) -> list[str]:
     argv = ["freeze"]
     if godmode:
@@ -131,6 +135,7 @@ def freeze_argv(godmode: bool, mana: bool) -> list[str]:
 COMMANDS: set[str] = {
     "status", "inventory", "set-hp", "set-mana", "set-max-hp", "set-max-mana",
     "set-stack", "set-item", "give", "fast-mining", "long-reach", "freeze", "patch",
+    "extract-recipes",
 }
 
 # argv samples exercised by the parity test to prove they parse cleanly.
@@ -147,4 +152,5 @@ SAMPLE_ARGVS: list[list[str]] = [
     patch_status_argv(), patch_set_argv("mining", True, value=0.2),
     patch_set_argv("reach", False), patch_set_argv("fast_place", True),
     patch_set_argv("tool_reach", True, value=40), patch_set_argv("pickup", True, value=50),
+    extract_recipes_argv(),
 ]

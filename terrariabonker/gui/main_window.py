@@ -17,12 +17,12 @@ import sys
 
 from PyQt6.QtCore import QProcess, Qt, QTimer
 from PyQt6.QtGui import QFont, QIcon
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QDialog, QDoubleSpinBox,
-                             QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-                             QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
-                             QTabWidget, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QCompleter, QDialog,
+                             QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
+                             QLabel, QLineEdit, QListWidget, QPlainTextEdit, QPushButton,
+                             QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
-from terrariabonker import names
+from terrariabonker import names, recipes
 from terrariabonker.gui import client, invgrid
 from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import PATCH_CATALOG
@@ -80,6 +80,7 @@ class MainWindow(QWidget):
         tabs = QTabWidget()
         tabs.addTab(self._trainer_tab(), "Trainer")
         tabs.addTab(self._inventory_tab(), "Inventory")
+        tabs.addTab(self._recipes_tab(), "Recipes")
         tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(tabs, 1)
 
@@ -406,6 +407,74 @@ class MainWindow(QWidget):
                 auto_reuse=r["auto_reuse"], use_time=r["use_time"],
                 use_anim=r["use_anim"], pick=r["pick"], tile_boost=r["tile_boost"],
                 defense=r["defense"], prefix=r["prefix"]))
+
+    # --- recipes tab -------------------------------------------------------
+    def _recipes_tab(self) -> QWidget:
+        w = QWidget()
+        col = QVBoxLayout(w)
+        bar = QHBoxLayout()
+        self.recipe_mode = QComboBox()
+        self.recipe_mode.addItems(["Makes", "Uses"])
+        self.recipe_mode.setToolTip("Makes: recipes that produce the item.\n"
+                                    "Uses: recipes that need it as an ingredient.")
+        bar.addWidget(self.recipe_mode)
+        self.recipe_search = QLineEdit(placeholderText="item name or ItemID…")
+        comp = QCompleter(self._item_names, self)
+        comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        comp.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.recipe_search.setCompleter(comp)
+        self.recipe_search.returnPressed.connect(self.search_recipes)
+        bar.addWidget(self.recipe_search, 1)
+        bar.addWidget(self._btn2("Search", self.search_recipes))
+        col.addLayout(bar)
+
+        self.recipe_list = QListWidget()
+        col.addWidget(self.recipe_list, 1)
+        self.recipe_status = QLabel()
+        self.recipe_status.setStyleSheet("color: gray")
+        col.addWidget(self.recipe_status)
+
+        row = QHBoxLayout()
+        row.addWidget(self._btn2("Re-extract from game", self.reextract_recipes))
+        note = QLabel("<i>Recipes are read from the running game once and cached "
+                      "(offline after that). Re-extract after a game update.</i>")
+        note.setWordWrap(True)
+        row.addWidget(note, 1)
+        col.addLayout(row)
+        self._recipe_count_hint()
+        return w
+
+    def _recipe_count_hint(self):
+        recipes._CACHE = None                       # reflect any fresh extraction
+        n = len(recipes.load().get("recipes", []))
+        self.recipe_status.setText(
+            f"{n} recipes cached." if n
+            else "No recipe cache yet — click 'Re-extract from game' with Terraria running.")
+
+    def search_recipes(self):
+        q = self.recipe_search.text().strip()
+        self.recipe_list.clear()
+        if not q:
+            return
+        hits = (recipes.by_output(q) if self.recipe_mode.currentText() == "Makes"
+                else recipes.using(q))
+        for r in hits:
+            out = f"{names.label(r['out'])} ×{r['n']}"
+            ing = " + ".join(f"{names.label(t)} ×{c}" for t, c in r["ing"]) or "(nothing)"
+            station = recipes.station_name(r["tile"]) if "tile" in r else "by hand"
+            self.recipe_list.addItem(f"{out}\n    = {ing}    [{station}]")
+        self.recipe_status.setText(f"{len(hits)} recipe(s).")
+
+    def reextract_recipes(self):
+        self.log.appendPlainText("$ terrariabonker extract-recipes")
+
+        def done(out):
+            if out.strip():
+                self.log.appendPlainText(out.rstrip())
+            self._recipe_count_hint()
+            self.search_recipes()
+
+        self._spawn(client.extract_recipes_argv(), on_output=done)
 
     def closeEvent(self, event):
         self._status_timer.stop()

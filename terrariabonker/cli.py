@@ -198,6 +198,20 @@ def cmd_patch(args) -> int:
     return 0
 
 
+def cmd_extract_recipes(args) -> int:
+    from terrariabonker import recipes as R
+    svc = _svc(guard=True, force=args.force)
+    try:
+        data = R.extract(svc.mem)
+    except R.RecipeError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        return 1
+    R.save(data)
+    print(f"[OK] extracted {len(data['recipes'])} recipes, "
+          f"{len(data['stations'])} station names -> {R._DATA}")
+    return 0
+
+
 def cmd_gui(args) -> int:
     try:
         from terrariabonker.gui.main_window import run
@@ -232,6 +246,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("status", help="find the player and show HP/mana")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("extract-recipes",
+                       help="read Main.recipe[] from the running game -> data/recipes.json")
+    force_flag(p)
+    p.set_defaults(func=cmd_extract_recipes)
 
     p = sub.add_parser("gui", help="launch the graphical control panel")
     p.set_defaults(func=cmd_gui)

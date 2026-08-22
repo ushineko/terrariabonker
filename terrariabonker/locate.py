@@ -26,6 +26,7 @@ import numpy as np
 NAME_OFF = -0x6C0        # Player.name (mono String*) relative to statLife
 BLOCK_LEN = 6            # ints in the life/mana signature
 STATLIFE_FROM_OBJ = 0x738   # Player.statLife offset within the Player object
+MAIN_PLAYER_OFF = 0xA7C     # Main.player field offset within Main's static-data block
 
 
 def _b(hexstr: str) -> bytes:
@@ -161,6 +162,33 @@ def _exec_regions(mem):
     return out
 
 
+def _find_localplayer_tail(mem) -> int | None:
+    """Address of the unique get_LocalPlayer index-and-return tail, or None. The two
+    `mov reg,[abs]` before it load Main.player (tail-0xA) and Main.myPlayer (tail-4)."""
+    tail = None
+    for start, end in _exec_regions(mem):
+        buf = mem.read(start, end - start)
+        i = buf.find(_LOCALPLAYER_TAIL)
+        while i != -1:
+            if i >= 0xC and buf[i - 0xC] == 0x8B and buf[i - 0xB] == 0x05 \
+                    and buf[i - 6] == 0x8B and buf[i - 5] == 0x0D:
+                if tail is not None:
+                    return None                      # not unique -> caller falls back
+                tail = start + i
+            i = buf.find(_LOCALPLAYER_TAIL, i + 1)
+    return tail
+
+
+def main_static_base(mem) -> int | None:
+    """Base of Terraria.Main's static-data block: ``Main.player`` static address minus
+    its field offset. Add a field's offset to read any Main static (e.g. Main.recipe at
+    +0xA68). None if get_LocalPlayer isn't found."""
+    tail = _find_localplayer_tail(mem)
+    if tail is None:
+        return None
+    return mem.read_u32(tail - 0xA) - MAIN_PLAYER_OFF
+
+
 def resolve_local_player(mem) -> PlayerBlock | None:
     """Resolve ``Main.player[Main.myPlayer]`` — the authoritative live player.
 
@@ -170,18 +198,7 @@ def resolve_local_player(mem) -> PlayerBlock | None:
     it references. Returns None if the pattern is missing (e.g. game updated), so
     callers fall back to the scan + heuristic.
     """
-    tail = None
-    for start, end in _exec_regions(mem):
-        buf = mem.read(start, end - start)
-        i = buf.find(_LOCALPLAYER_TAIL)
-        while i != -1:
-            # verify the two `mov eax,[abs]` / `mov ecx,[abs]` loads precede the tail
-            if i >= 0xC and buf[i - 0xC] == 0x8B and buf[i - 0xB] == 0x05 \
-                    and buf[i - 6] == 0x8B and buf[i - 5] == 0x0D:
-                if tail is not None:
-                    return None                      # not unique -> use the scan
-                tail = start + i
-            i = buf.find(_LOCALPLAYER_TAIL, i + 1)
+    tail = _find_localplayer_tail(mem)
     if tail is None:
         return None
     player_static = mem.read_u32(tail - 0xA)         # operand of mov eax,[Main.player]

@@ -44,6 +44,9 @@ holds no state; stopping it ends every effect.*
 - **Give items by name** — the editor dialog's item field autocompletes over all
   6,195 item names, extracted from the game's own `Terraria.exe` for the exact
   1.4.5.7 build.
+- **Recipe browser** — search what an item is **made from** or **used in** (with
+  ingredient counts and the crafting station), from ~3,600 recipes read out of the
+  running game's `Main.recipe[]` and cached — vanilla Terraria has no such browser.
 - **Code-patch cheats** — global mining speed, item-independent placement reach,
   fast placement, **unified tool/interaction reach** (mining, tool use, chests,
   signs, and crafting-station range all extend together), and **item pickup range**
@@ -117,6 +120,8 @@ terrariabonker patch enable reach --value 30      # placement reach (extra tiles
 terrariabonker patch enable tool_reach --value 40 # unified mining/interaction/crafting reach
 terrariabonker patch enable pickup --value 50     # item pickup range (× grab radius)
 terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
+
+terrariabonker extract-recipes     # read Main.recipe[] -> data/recipes.json (for the Recipes tab)
 ```
 
 `--value` overrides the enabled value; omit it to use the default (mining `0.2`,
@@ -143,6 +148,10 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   Click a filled cell to edit it in a dialog, or an empty cell to place a
   fully-statted item (item field autocompletes over all item names); the dialog can
   also clear a slot.
+- **Recipes** tab — search an item to see what it **Makes** (recipes producing it) or
+  what it's **Used** in, with ingredient counts and the crafting station. Reads a
+  cached recipe database (offline); **Re-extract from game** regenerates it from the
+  running game after an update.
 
 The window runs unprivileged and runs each action as a short `sudo` CLI call, so
 Qt never runs as root.
@@ -186,7 +195,9 @@ terrariabonker/
 │   ├── service.py              view-neutral core shared by CLI and GUI
 │   ├── version.py              build detection and the compatibility gate
 │   ├── names.py                ItemID -> name lookup for the item browser
+│   ├── recipes.py              recipe extraction (from Main.recipe[]) + browse/search
 │   ├── data/items.json         ItemID name map (extracted from Terraria.exe)
+│   ├── data/recipes.json       recipe cache (extracted from the running game)
 ├── tools/extract_item_names/   dotnet tool that regenerates items.json from the exe
 │   ├── cli.py                  argparse front end
 │   └── gui/
