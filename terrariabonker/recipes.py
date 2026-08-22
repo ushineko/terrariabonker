@@ -29,6 +29,8 @@ RECIPE_REQUIRED_ITEM = 0xC
 RECIPE_REQUIRED_TILE = 0x1C
 ITEM_TYPE = 0x6C
 ITEM_STACK = 0x88
+ITEM_CREATE_TILE = 0xA0          # Item.createTile (placeable tile id, or -1)
+ITEM_PLACE_STYLE = 0xA8          # Item.placeStyle (which style within that tile)
 ARR_LEN = 0xC
 ARR_DATA = 0x10
 LOCALIZEDTEXT_VALUE = 0xC        # LocalizedText._value (String*)
@@ -136,7 +138,7 @@ def extract(mem) -> dict:
     maxr = _ri(mem, arr + ARR_LEN) if arr else None
     if not arr or not maxr or not (0 < maxr <= 50000):
         raise RecipeError("Main.recipe array not found or implausible")
-    recipes, tiles = [], set()
+    recipes, tiles, tileicons = [], set(), {}
     for i in range(maxr):
         ro = _ru(mem, arr + ARR_DATA + i * 4)
         if not ro:
@@ -151,8 +153,14 @@ def extract(mem) -> dict:
         if tile is not None and tile >= 0:
             rec["tile"] = tile
             tiles.add(tile)
+        # Placeable outputs record their tile + style so a sprite-less item (e.g. a
+        # trapped chest, which has no Item_<id>.xnb) can be drawn from the tile sheet.
+        ct = _ri(mem, ci + ITEM_CREATE_TILE)
+        if ct is not None and ct >= 0 and str(ot) not in tileicons:
+            tileicons[str(ot)] = [ct, _ri(mem, ci + ITEM_PLACE_STYLE) or 0]
         recipes.append(rec)
-    return {"recipes": recipes, "stations": _tile_names(mem, tiles)}
+    return {"recipes": recipes, "stations": _tile_names(mem, tiles),
+            "tileicons": tileicons}
 
 
 def save(data: dict, path: str = _DATA) -> None:
@@ -175,6 +183,7 @@ def load(path: str = _DATA) -> dict:
             _CACHE = {}
         _CACHE.setdefault("recipes", [])
         _CACHE.setdefault("stations", {})
+        _CACHE.setdefault("tileicons", {})
     return _CACHE
 
 

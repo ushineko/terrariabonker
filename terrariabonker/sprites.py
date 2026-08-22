@@ -18,9 +18,10 @@ from terrariabonker import names, recipes, xnb
 from terrariabonker.version import KNOWN_VERSION
 
 _CACHE_ROOT = os.path.expanduser("~/.cache/terrariabonker/sprites")
-# Bump when the cached set changes so stale caches re-extract. "all" = every named item
-# (not just recipe-referenced), with animated strips reduced to their first frame.
-_SCOPE = "all-v1"
+# Bump when the cached set changes so stale caches re-extract. all-v1 = every named item
+# with animated strips reduced to their first frame; all-v2 adds tile-sheet icons for
+# sprite-less placeable items (trapped chests).
+_SCOPE = "all-v2"
 # Kept under ~/.cache (not ~/.config): extraction is unprivileged, and the config dir may
 # be root-owned from sudo memory commands, which would make this unwritable.
 _PATHS_FILE = os.path.expanduser("~/.cache/terrariabonker/paths.json")
@@ -95,6 +96,44 @@ def all_item_ids() -> set[int]:
     return set(names._NAMES) | referenced_item_ids()
 
 
+def _tile_icon(src: str, tile: int, style: int, sheet_cache: dict):
+    """Render a 32x32 icon for a placeable item that has no ``Item_<id>.xnb`` (chests) by
+    compositing the four 16x16 tiles of its 2x2 chest from ``Tiles_<tile>.xnb`` at the
+    given ``placeStyle``. Returns a PIL image, or None if the sheet/style is unavailable.
+
+    Tiles are 16px with 2px padding (18px pitch); a chest is 2x2 tiles = 36px pitch. Styles
+    run left-to-right and wrap by the sheet width (row pitch 38px). Compositing the four
+    tiles adjacently drops the internal padding so the chest is seamless."""
+    sheet = sheet_cache.get(tile)
+    if sheet is None:
+        path = os.path.join(src, f"Tiles_{tile}.xnb")
+        try:
+            sheet = xnb.read_item_texture(path) if os.path.exists(path) else False
+        except Exception:
+            sheet = False
+        sheet_cache[tile] = sheet
+    if not sheet:
+        return None
+    return _composite_chest(sheet, style)
+
+
+def _composite_chest(sheet, style: int):
+    """Composite the 2x2 chest at ``style`` from a Containers tile sheet into a 32x32 image
+    (the four 16x16 tiles placed adjacently, dropping the 2px inter-tile padding)."""
+    from PIL import Image
+
+    per_row = max(1, sheet.width // 36)
+    fx = (style % per_row) * 36
+    fy = (style // per_row) * 38
+    out = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    for sx, sy, dx, dy in ((0, 0, 0, 0), (18, 0, 16, 0), (0, 18, 0, 16), (18, 18, 16, 16)):
+        box = (fx + sx, fy + sy, fx + sx + 16, fy + sy + 16)
+        if box[2] <= sheet.width and box[3] <= sheet.height:
+            t = sheet.crop(box)
+            out.paste(t, (dx, dy), t)
+    return out
+
+
 def _deanimate(img):
     """Reduce an animated item's vertical sprite-sheet to its first frame.
 
@@ -145,6 +184,8 @@ def extract(mem=None, version: str = KNOWN_VERSION, item_ids=None,
     # A stale cache (older scope) must be rebuilt, not skipped — its PNGs may be wrong
     # (missing items, un-cropped animations). Treat a scope mismatch like ``force``.
     refresh = force or not is_cached(version)
+    tileicons = recipes.load().get("tileicons", {})   # itemID -> [createTile, placeStyle]
+    sheet_cache: dict = {}
     ok = failed = 0
     total = len(ids)
     for n, i in enumerate(ids):
@@ -152,12 +193,22 @@ def extract(mem=None, version: str = KNOWN_VERSION, item_ids=None,
         if not refresh and os.path.exists(dst):
             ok += 1
         else:
-            try:
-                img = _deanimate(xnb.read_item_texture(os.path.join(src, f"Item_{i}.xnb")))
+            img = None
+            xnb_path = os.path.join(src, f"Item_{i}.xnb")
+            if os.path.exists(xnb_path):
+                try:
+                    img = _deanimate(xnb.read_item_texture(xnb_path))
+                except Exception:                    # malformed/unsupported item sprite
+                    img = None
+            if img is None:                          # no item sprite (e.g. trapped chest):
+                ti = tileicons.get(str(i))           # draw it from the tile sheet
+                if ti:
+                    img = _tile_icon(src, ti[0], ti[1], sheet_cache)
+            if img is not None:
                 img.save(dst)
                 ok += 1
-            except Exception:                        # any malformed/unsupported sprite:
-                failed += 1                          # skip it, never abort the batch
+            else:
+                failed += 1
         if progress and (n % 100 == 0):
             progress(n + 1, total)
     with open(os.path.join(out_dir, ".done"), "w") as f:

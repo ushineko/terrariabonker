@@ -122,6 +122,9 @@ e.g. `D9 9F D8 08 00 00` → patch), with **CE optional at runtime** — use it 
   re-dumps `Main.TriggerPing` (the ping tile X/Y at `[ebp+08]/[ebp+0C]`). Feeds the
   `teleport` code-cave *call* in `patcher.py` (anchors `trigger_ping` at TriggerPing+0x2D
   and `player_teleport` at Teleport+0x32; the stub scales the tile coords ×16 to pixels).
+- `poc_itemplace.lua` — enumerate `Terraria.Item` fields to pin `createTile` (`0xA0`) and
+  `placeStyle` (`0xA8`), used to draw tile-sheet icons for sprite-less placeable items
+  (trapped chests) in the recipe browser.
 - `poc_patchsites.lua` — disassemble `ResetEffects`, flag the field-reset writes.
 - `poc_patch_pickspeed.lua` — the payoff: scan + patch the pickSpeed reset.
 

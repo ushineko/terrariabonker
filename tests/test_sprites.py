@@ -36,6 +36,21 @@ def test_deanimate_leaves_non_strip_unchanged():
     assert sprites._deanimate(img).size == (32, 20)
 
 
+def test_composite_chest_assembles_four_tiles(monkeypatch):
+    # a synthetic Containers sheet: style 1's four 16x16 tiles are R/G/B/white
+    sheet = Image.new("RGBA", (72, 38), (0, 0, 0, 0))
+    fx = 1 * 36
+    for sx, sy, col in ((0, 0, (255, 0, 0, 255)), (18, 0, (0, 255, 0, 255)),
+                        (0, 18, (0, 0, 255, 255)), (18, 18, (255, 255, 255, 255))):
+        sheet.paste(Image.new("RGBA", (16, 16), col), (fx + sx, sy))
+    out = sprites._composite_chest(sheet, 1)
+    assert out.size == (32, 32)
+    assert out.getpixel((0, 0)) == (255, 0, 0, 255)        # top-left tile
+    assert out.getpixel((16, 0)) == (0, 255, 0, 255)       # top-right, no padding gap
+    assert out.getpixel((0, 16)) == (0, 0, 255, 255)       # bottom-left
+    assert out.getpixel((16, 16)) == (255, 255, 255, 255)  # bottom-right
+
+
 def test_all_item_ids_superset_of_referenced(monkeypatch):
     monkeypatch.setattr(recipes, "_CACHE",
                         {"recipes": [{"out": 8, "n": 1, "ing": [[23, 1]]}], "stations": {}})
