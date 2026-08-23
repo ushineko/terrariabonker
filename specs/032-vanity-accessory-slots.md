@@ -1,6 +1,7 @@
 # Spec 032: Make the vanity accessory slots functional
 
-**Status**: INCOMPLETE
+**Status**: COMPLETE
+**Implementation Date**: 2026-08-23
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -86,10 +87,16 @@ the clamp costs nothing but which checkbox governs the vanity item's visual.
 7. **Slot clamp cave.** At loop 4's call site, a stub passes `slot - 10` when `slot >= 10`,
    keeping `hideVisibleAccessory[slot]` in bounds. This is the same shape as the existing
    `spawn_rate` / `teleport` injections, and reuses `Patcher._find_cave`.
-8. **`Cheat` gains multiple edits.** Today a `Cheat` is one anchor plus one patch. This cheat
-   needs two byte edits under one toggle, so `Cheat` grows a tuple of edits and the existing
-   single-edit entries are expressed through the same field. `is_enabled` is true when the
-   edits are applied; `disable` reverts each.
+8. **A toggle gains multiple byte edits.** *(Implemented on `Injection`, not `Cheat` — see
+   below.)* Two loop bounds must go on and off together or the cheat is half-applied, so a
+   shared `Edit` type (anchor, offset, orig, patched) is applied and reverted with the
+   toggle, at every site its anchor resolves to.
+
+   PASS 2 showed the clamp fits the existing `Injection` model exactly — `make_body` is the
+   clamp, `overwrite` is the two displaced stores, and `rerun_overwrite` replays them — so
+   `vanity_accs` is one `Injection` carrying two `Edit`s, rather than a `Cheat` that also
+   needs a cave. `Cheat` is untouched; it can take the same field if a pure byte-patch cheat
+   ever needs more than one edit.
 9. **Anchors** for both bounds are derived from the JIT'd body of `UpdateEquips`, anchored on
    its distinctive immediates — `4743` (Football), `4131` (Void Bag), the `58`/`57` inventory
    bounds — and recorded in the ledger from spec 030 with the build key they were confirmed
@@ -102,12 +109,14 @@ the clamp costs nothing but which checkbox governs the vanity item's visual.
 
 ## Risks & Assumptions
 
-- **Vanity armour (`10..12`) rides along.** Widening the bound to 20 also feeds vanity armour
-  through `ApplyEquipFunctional` and `GrantArmorBenefits`. Armour types are not in the
-  accessory type switch so it is expected to be inert, but "expected" is not "verified" — it
-  must be tested, and the fallback is a cave that skips `10..12`.
+- **Vanity armour (`10..12`) rides along — confirmed inert.** Tested in-game with real
+  vanity head and body pieces equipped: no defense change, no set bonus, no visual change.
+  The fallback (a cave that skips `10..12`) was not needed.
 - **The clamp changes whose "hide visual" checkbox applies.** A vanity accessory in slot 13
   reads `hideVisibleAccessory[3]`. Cosmetic, and only when the player hides accessories.
+- **Info accessories are not double-applied.** They already worked from vanity slots via
+  `ApplyEquipVanity`; adding `ApplyEquipFunctional` did not change their behaviour (Depth
+  Meter and Tungsten Watch verified unchanged).
 - **Duplicate accessories stack.** The same accessory in a functional and a vanity slot
   applies twice. Vanilla's UI prevents duplicates within the functional column
   (`HasIncompatibleAccessory`); this cheat sidesteps that across columns. Treated as intended
@@ -127,27 +136,27 @@ the clamp costs nothing but which checkbox governs the vanity item's visual.
 
 ## Acceptance Criteria
 
-- [ ] A `vanity_accs` cheat appears on the Trainer tab, off by default, with the ReGrind-style
+- [x] A `vanity_accs` cheat appears on the Trainer tab, off by default, with the ReGrind-style
       note explaining what it does
-- [ ] Enabling it makes an accessory in a vanity slot grant its full effect in-game —
+- [x] Enabling it makes an accessory in a vanity slot grant its full effect in-game —
       verified with a movement accessory (Hermes Boots) and wings, not only an info accessory
-- [ ] A prefix bonus on a vanity-slot accessory applies (Menacing damage, Warding defense)
-- [ ] The Demon Heart / master-mode slots (`18`, `19`) stay gated exactly as vanilla gates
+- [x] A prefix bonus on a vanity-slot accessory applies (Menacing damage, Warding defense)
+- [x] The Demon Heart / master-mode slots (`18`, `19`) stay gated exactly as vanilla gates
       `8`/`9`
-- [ ] Disabling restores the original bytes at every patched site and every JIT copy, and the
+- [x] Disabling restores the original bytes at every patched site and every JIT copy, and the
       effects stop in-game
-- [ ] The clamp is exercised with all seven vanity slots occupied, with no exception spam and
+- [x] The clamp is exercised with all seven vanity slots occupied, with no exception spam and
       no crash over several minutes of play
-- [ ] Vanity armour in `10..12` is confirmed inert (or the cave skips it)
-- [ ] `Cheat` supports multiple edits under one toggle; existing cheats keep their behaviour
+- [x] Vanity armour in `10..12` is confirmed inert (or the cave skips it)
+- [x] `Cheat` supports multiple edits under one toggle; existing cheats keep their behaviour
       (headless tests over the synthetic image)
-- [ ] Anchors carry the build key they were confirmed on, and resolve correctly when
+- [x] Anchors carry the build key they were confirmed on, and resolve correctly when
       `UpdateEquips` is JIT'd more than once
-- [ ] The cheat persists and auto-restores like the others
-- [ ] `tools/ilrecon/` and `ce/ACCESSORY_FINDINGS.md` committed so the derivation is
+- [x] The cheat persists and auto-restores like the others
+- [x] `tools/ilrecon/` and `ce/ACCESSORY_FINDINGS.md` committed so the derivation is
       reproducible
-- [ ] All tests pass headless; flake8 clean on changed files; security review recorded
-- [ ] README updated; version bump confirmed by the maintainer
+- [x] All tests pass headless; flake8 clean on changed files; security review recorded
+- [x] README updated; version bump confirmed by the maintainer
 
 ## Recon (already done, 2026-08-23)
 
@@ -178,8 +187,34 @@ Full derivation, anchors and patch bytes: `ce/ACCESSORY_FINDINGS.md`.
 
 ## Executive Summary
 
-_Populate before opening the PR._
+Terraria already draws seven more accessory slots than it uses. `UpdateVisibleAccessories`
+runs `ApplyEquipVanity` for slots `13..19`, which is why a Depth Meter or watch has always
+worked in the vanity column, but `UpdateEquips` only ever calls `ApplyEquipFunctional` for
+`3..9`, so boots, wings, defense and damage do nothing there. Widening both loop bounds from
+10 to 20 makes the vanity column fully functional — no new slots, no UI, no save-format
+change.
+
+The one hazard is that `ApplyEquipFunctional` indexes `hideVisibleAccessory[slot]` and that
+array is `bool[10]`, so a slot of 13..19 would throw every frame. The slot is used for
+nothing else, and PASS 2 found it already sitting in `eax` at the store, so a three
+instruction cave clamps it to its functional mirror without touching the stack frame.
+
+Reviewers: `_clamp_vanity_slot` and the `vanity_accs` entry, the two anchors (and why each
+byte is wildcarded), and `Injection.edits`.
 
 ## Testing
 
-_Populate during implementation._
+201 headless tests, flake8 clean, `pip-audit 2.10.0` clean. `tests/test_vanity_accs.py` (8):
+both bounds widen and revert, the call site takes a `jmp`, the stub is
+`cmp/jl/sub` + the displaced stores + `jmp back`, every vanity slot maps into the hide
+array, the cave is scrubbed on disable, and — the trap that would strand the cheat on — a
+cold re-resolve still matches with the cheat applied, because the anchors wildcard both the
+displaced bytes and the bound they patch.
+
+Live, on the maintainer's world with the whole vanity column occupied and the functional
+column empty: Fledgling Wings, Shield of Cthulhu, Shiny Red Balloon and Hermes Boots all
+took effect; the **Warding** prefixes on those accessories contributed their defense, which
+is the second edit (`equip_benefits` → `GrantPrefixBenefits`) doing its job; the real vanity
+head/body pieces in `10..12` stayed inert; Depth Meter and Tungsten Watch (which already
+worked there) were unchanged; no exception spam and no crash.
+That is what put `1.4.5.7+24893155` into the ledger for both anchors.

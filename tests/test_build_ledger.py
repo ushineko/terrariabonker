@@ -50,15 +50,32 @@ def test_build_key_survives_missing_pieces():
     assert ver.build_key(None, None) == "?+?"
 
 
-def test_every_anchor_is_verified_on_the_derivation_build():
+# Anchors derived after the original build, so they were never seen on it.
+LATER_ANCHORS = {"equip_apply", "equip_benefits"}
+
+
+def test_the_original_anchors_are_verified_on_the_derivation_build():
     for key, anchor in ANCHORS.items():
+        if key in LATER_ANCHORS:
+            continue
         assert ver.KNOWN_BUILD_KEY in anchor.verified, key
 
 
-def test_every_anchor_records_the_rebuild_it_was_reconfirmed_on():
-    """2026-08-23 rebuild: all nine cheats confirmed in-game on 24893155."""
+def test_the_original_anchors_record_the_rebuild_they_were_reconfirmed_on():
+    """2026-08-23 rebuild: those nine cheats were confirmed in-game on 24893155."""
     for key, anchor in ANCHORS.items():
+        if key in LATER_ANCHORS:
+            continue
         assert "1.4.5.7+24893155" in anchor.verified, key
+
+
+def test_a_later_anchor_claims_only_the_build_it_was_confirmed_on():
+    """Honesty is the point of the ledger: these were derived on the 24893155 rebuild and
+    confirmed in-game there, and were never seen on the original build — so they must not
+    inherit the default verification set."""
+    for key in LATER_ANCHORS:
+        assert ANCHORS[key].verified == frozenset({"1.4.5.7+24893155"}), key
+        assert ver.KNOWN_BUILD_KEY not in ANCHORS[key].verified, key
 
 
 def test_per_anchor_divergence_is_supported():

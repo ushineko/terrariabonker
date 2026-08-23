@@ -93,6 +93,20 @@ class Anchor:
 
 
 @dataclass(frozen=True)
+class Edit:
+    """One byte edit inside an anchor match, applied under some cheat's toggle.
+
+    Lets a single toggle change more than one site: making the vanity accessory slots
+    functional needs two loop bounds widened, in different parts of UpdateEquips, and
+    they must go on and off together or the cheat is half-applied.
+    """
+    anchor: str
+    off: int
+    orig: bytes
+    patched: bytes
+
+
+@dataclass(frozen=True)
 class Resolution:
     """What resolving one anchor produced, for status and for honest error text."""
     sites: tuple[int, ...]
@@ -170,6 +184,23 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # cap cheat is applied; uniqueness comes from the adjacent `mov [edi+A60],1` reset that
     # follows it (edi = the player). The cheat rewrites the immediate to the desired cap.
     "reset_minions": _pat("C7 87 F8 03 00 00 ?? ?? ?? ?? C7 87 60 0A 00 00 01 00 00 00"),
+    # UpdateEquips' accessory-effect loop: `for (k = 3; k < 10; k++) if
+    # (IsItemSlotUnlockedAndUsable(k)) ApplyEquipFunctional(k, GetEffectiveArmor(k))`.
+    # Matched from the item argument store through the loop bound, so ONE anchor covers
+    # both edits the vanity cheat needs. The slot argument is already in eax when it is
+    # stored, which is what lets the clamp stub avoid any frame-layout assumption.
+    # Wildcarded: the ebp displacements and call rel32s, the 7 bytes the stub displaces
+    # (+7..+13) and the loop bound itself (+27) — a cold re-resolve must still match once
+    # the cheat is applied. See ce/ACCESSORY_FINDINGS.md.
+    "equip_apply": _pat("89 44 24 08 8B 45 ?? ?? ?? ?? ?? ?? ?? ?? 90 E8 ?? ?? ?? ?? "
+                        "83 45 ?? 01 83 7D ?? ?? 7C ??"),
+    # UpdateEquips' benefit loop: `if (item.accessory) GrantPrefixBenefits(item);
+    # GrantArmorBenefits(item)` and its `i < 10` bound (+48, wildcarded because we patch
+    # it). The `movzx eax,[eax+7D]` accessory test is what makes this specific — the bare
+    # increment/compare tail matches unrelated code elsewhere in the process.
+    "equip_benefits": _pat("0F B6 40 7D 85 C0 74 ?? 8B 45 ?? 89 44 24 04 89 3C 24 8B C0 "
+                           "E8 ?? ?? ?? ?? 8B 45 ?? 89 44 24 04 89 3C 24 90 E8 ?? ?? ?? ?? "
+                           "83 45 ?? 01 83 7D ?? ??"),
 }
 
 # Builds every anchor here has been confirmed on, newest last. "Verified" means the AOB
@@ -185,8 +216,22 @@ _VERIFIED_BUILDS: tuple[str, ...] = (
 # Per-anchor divergence, for a build that breaks only some anchors: {anchor: (build, ...)}.
 _ALSO_VERIFIED: dict[str, tuple[str, ...]] = {}
 
+# Anchors with a different history to _VERIFIED_BUILDS — derived later, so never seen on
+# the original build. An empty tuple would mean "resolves, but not yet confirmed in-game
+# anywhere", which the panel reports as unproven rather than hiding.
+_VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
+    # 2026-08-23: derived on this build and confirmed in-game with the whole vanity column
+    # occupied — wings, Shield of Cthulhu, balloon and Hermes Boots all took effect, their
+    # Warding prefixes contributed defense (the equip_benefits edit), the vanity armour in
+    # 10..12 stayed inert, and the info accessories that already worked there (Depth Meter,
+    # Tungsten Watch) were unchanged.
+    "equip_apply": ("1.4.5.7+24893155",),
+    "equip_benefits": ("1.4.5.7+24893155",),
+}
+
 ANCHORS: dict[str, Anchor] = {
-    key: Anchor(pat, verified=frozenset({*_VERIFIED_BUILDS, *_ALSO_VERIFIED.get(key, ())}))
+    key: Anchor(pat, verified=frozenset(
+        _VERIFIED_INSTEAD.get(key, (*_VERIFIED_BUILDS, *_ALSO_VERIFIED.get(key, ())))))
     for key, pat in _RAW_ANCHORS.items()
 }
 
@@ -329,6 +374,21 @@ def _teleport_body(player_base: int, call_target: int) -> bytes:
             + b"\x89\x4c\x24\x04")              # mov [esp+04],ecx   / displaced instructions
 
 
+def _clamp_vanity_slot(_value: int = 0) -> bytes:
+    """Map a vanity accessory slot onto its functional mirror before the call.
+
+    ApplyEquipFunctional uses its slot argument for exactly one thing —
+    hideVisibleAccessory[slot] — and that array is bool[10], so passing 13..19 straight
+    through would throw IndexOutOfRange every frame. The slot is already in eax at the
+    injection point, so this needs nothing from the stack frame:
+
+        cmp eax,0xa      ; a vanity slot?
+        jl  +3
+        sub eax,0xa      ; 13..19 -> 3..9, the mirror whose hide-visual flag it follows
+    """
+    return _b("83 F8 0A 7C 03 83 E8 0A")
+
+
 def _norm_inj(v: dict) -> dict:
     """Normalize a persisted injection record to the multi-site shape
     ``{"sites": [{"inject", "cave"}], "stub_len"}`` — accepting the legacy flat
@@ -376,6 +436,9 @@ class Injection:
     # bytes themselves (``rerun_overwrite=False``).
     call_anchor: str | None = None
     call_target_off: int = 0
+    # Byte edits applied and reverted with this injection, for a cheat that is a cave
+    # plus a couple of in-place changes elsewhere (see Edit).
+    edits: tuple = ()
 
 
 INJECTIONS: dict[str, Injection] = {
@@ -409,6 +472,19 @@ INJECTIONS: dict[str, Injection] = {
         note="floors the drop chance of common enemy/grab-bag drops at N% "
              "(100 = guaranteed); a game restart clears it",
         rerun_overwrite=False, multi=True),
+    # Make the seven VANITY accessory slots functional (spec 032). Vanilla already runs
+    # ApplyEquipVanity for 13..19 — which is why info accessories like the Depth Meter
+    # already work there — but never ApplyEquipFunctional, so boots, wings, defense and
+    # damage do nothing. Widen both UpdateEquips loop bounds from 10 to 20 and clamp the
+    # slot before the call. No UI or save-format change: those slots already exist, are
+    # already drawn, and already hold only accessories.
+    "vanity_accs": Injection(
+        "vanity_accs", "Vanity accessories work (slots 13-19)", "equip_apply",
+        7, _b("89 44 24 04 89 3C 24"), _clamp_vanity_slot,
+        note="items in the vanity accessory column grant their full effects, doubling "
+             "the usable accessory slots; a game restart clears it",
+        edits=(Edit("equip_apply", 27, b"\x0a", b"\x14"),        # ApplyEquipFunctional loop
+               Edit("equip_benefits", 48, b"\x0a", b"\x14"))),   # prefix/armour benefits
     # Map-ping teleport (ported from the FearLess ReGrind table). Hook Main.TriggerPing
     # at +0x2D; the stub calls Player.Teleport(this, pingX, pingY, 0, 0), warping the
     # local player to any fullscreen-map ping. No tunable value (on/off). The call target
@@ -709,6 +785,7 @@ class Patcher:
             self.mem.write(cave, stub)
             self.mem.write(inject, b"\xe9" + self._rel32(inject + 5, cave))
             sites.append({"inject": inject, "cave": cave})
+        self._apply_edits(inj.edits, on=True)
         self._inj[inj.name] = {"sites": sites, "stub_len": stub_len}
         self._save_state()
 
@@ -724,8 +801,16 @@ class Patcher:
             self.mem.write(s["inject"], inj.overwrite)  # restore original bytes
             if s.get("cave"):
                 self.mem.write(s["cave"], b"\xcc" * stub_len)   # scrub the stub
+        self._apply_edits(inj.edits, on=False)
         self._inj.pop(inj.name, None)
         self._save_state()
+
+    def _apply_edits(self, edits, *, on: bool) -> None:
+        """Write every edit at every site its anchor resolves to (a method can be JIT'd
+        into more than one arena; see spec 030)."""
+        for e in edits:
+            for base in self._resolve_sites(e.anchor):
+                self.mem.write(base + e.off, e.patched if on else e.orig)
 
     def _injection_enabled(self, inj: Injection) -> bool:
         rec = self._inj.get(inj.name)

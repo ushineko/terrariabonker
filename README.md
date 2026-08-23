@@ -66,12 +66,29 @@ holds no state; stopping it ends every effect.*
   signs, and crafting-station range all extend together), **item pickup range**
   (grab items from far off-screen), **spawn-rate / enemy cap** (0 = peaceful), a
   **drop-chance floor** (guaranteed or minimum-% common drops), **map-ping
-  teleport** (double-click the fullscreen map to warp there), and a **minion cap**
-  (raise the summon limit): things a value-write
+  teleport** (double-click the fullscreen map to warp there), a **minion cap**
+  (raise the summon limit), and **working vanity accessories** (see below): things a
+  value-write
   can't hold, applied by patching the game's JIT code through `/proc` — including
   code-cave injections for the reach, pickup, spawn, and drop hooks and a managed
   code-cave *call* into `Player.Teleport` for the map-ping warp (derived with
   Cheat Engine, but no CE needed at runtime).
+
+### Working vanity accessories
+
+Terraria already draws seven more accessory slots than it uses. The vanity (social) column
+runs `ApplyEquipVanity`, which is why an info accessory like a Depth Meter or a watch has
+always worked there, but the game never runs `ApplyEquipFunctional` for those slots — so
+wings, boots, defense and damage do nothing in them.
+
+The **vanity accessories** cheat widens the two loops in `Player.UpdateEquips` that stop at
+slot 10 so they cover the vanity range as well, which doubles your usable accessory slots
+using slots the game already draws, already restricts to accessories, and already saves. A
+code cave maps a vanity slot onto its functional mirror before the call, because the game
+indexes a 10-entry array with that slot number.
+
+Vanity *armour* (the head/body/legs vanity slots) is unaffected, and info accessories that
+already worked in the column behave the same as before. Derivation: `ce/ACCESSORY_FINDINGS.md`.
 
 ## Two kinds of cheat: value edits and code patches
 
@@ -201,7 +218,8 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   fast-mining, long-reach, and a **Code patches** section: checkbox toggles for the
   code-patch cheats (mining speed, placement reach, fast placement, tool/interaction
   reach, item pickup range, spawn rate, drop-chance floor, **map-ping teleport**, and
-  **minion cap**) with tunable value spinboxes where applicable (fast placement offers
+  **minion cap**, **vanity accessories**) with tunable value spinboxes where applicable
+  (fast placement offers
   **Fast / Faster / Hyper** presets). With teleport on, **double-click a
   spot on the fullscreen map to warp there**. No Cheat Engine at runtime; a game
   restart clears them all.
