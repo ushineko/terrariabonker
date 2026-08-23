@@ -5,7 +5,9 @@ APP_NAME="terrariabonker"
 DESKTOP_FILE="$APP_NAME.desktop"
 INSTALL_DIR="$HOME/.local/share/applications"
 BIN_DIR="$HOME/.local/bin"
-SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/terrariabonker.py"
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_PATH="$APP_DIR/terrariabonker.py"
+ICON_PATH="$APP_DIR/assets/terrariabonker.svg"
 
 echo "Installing $APP_NAME..."
 
@@ -38,10 +40,13 @@ chmod +x "$SCRIPT_PATH"
 ln -sfn "$SCRIPT_PATH" "$BIN_DIR/$APP_NAME"
 echo "Installed CLI symlink: $BIN_DIR/$APP_NAME -> $SCRIPT_PATH"
 
-# 4. Install desktop file (opens a terminal running godmode).
-if [ -f "./$DESKTOP_FILE" ]; then
+# 4. Install desktop file, resolving Exec/Icon to this install location so the
+#    entry works regardless of where the repo is cloned.
+if [ -f "$APP_DIR/$DESKTOP_FILE" ]; then
     mkdir -p "$INSTALL_DIR"
-    cp "./$DESKTOP_FILE" "$INSTALL_DIR/"
+    sed -e "s|__SCRIPT__|$SCRIPT_PATH|g" \
+        -e "s|__ICON__|$ICON_PATH|g" \
+        "$APP_DIR/$DESKTOP_FILE" > "$INSTALL_DIR/$DESKTOP_FILE"
     chmod +x "$INSTALL_DIR/$DESKTOP_FILE"
     echo "Installed desktop file: $INSTALL_DIR/$DESKTOP_FILE"
 fi

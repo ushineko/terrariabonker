@@ -1,8 +1,8 @@
 [Desktop Entry]
 Name=terrariabonker
 Comment=Live-memory trainer and item editor for Terraria (Proton)
-Exec=/usr/bin/python3 /home/nverenin/git/ag-scripts/terrariabonker/terrariabonker.py gui
-Icon=/home/nverenin/git/ag-scripts/terrariabonker/assets/terrariabonker.svg
+Exec=/usr/bin/python3 __SCRIPT__ gui
+Icon=__ICON__
 Terminal=false
 Type=Application
 Categories=Game;Utility;
