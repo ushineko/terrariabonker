@@ -756,8 +756,17 @@ class Patcher:
         return {name: self.is_enabled(name) for name in PATCH_CATALOG}
 
     def values(self) -> dict[str, float]:
-        """Last applied value per valued cheat (persisted across GUI restarts,
-        as long as the game process — and thus the state file's pid — is the same).
-        Falls back to each cheat's default when nothing has been applied yet."""
-        return {name: self._values.get(name, spec.default)
-                for name, spec in _VALUE_SPECS.items()}
+        """Value per valued cheat, preferring the live per-pid value, then the saved
+        cross-session profile, then the spec default. The profile fallback means the GUI
+        shows the user's saved values on a FRESH game (before/independent of restore),
+        instead of resetting the spinboxes to defaults."""
+        saved = profile.cheats()
+        out = {}
+        for name, spec in _VALUE_SPECS.items():
+            if name in self._values:
+                out[name] = self._values[name]
+            elif saved.get(name) is not None:
+                out[name] = saved[name]
+            else:
+                out[name] = spec.default
+        return out

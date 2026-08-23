@@ -157,6 +157,7 @@ class MainWindow(QWidget):
         self._patch_vals: dict = {}          # cheat name -> value spinbox (valued cheats)
         self._cheat_pending: dict = {}       # name -> (on, value): latest desired state
         self._cheat_busy = False             # one enable/disable at a time (no state race)
+        self._cheat_inflight = None          # the cheat currently being applied (skip in render)
         self._cells: dict = {}               # inventory slot -> grid cell button
         self._all_rows: list[dict] = []      # every slot (incl. empty), for slot-finding
         self._item_names = sorted(names._NAMES.values())   # for the edit-dialog completer
@@ -395,6 +396,7 @@ class MainWindow(QWidget):
         self._cheat_busy = True
         name = next(iter(self._cheat_pending))
         on, value = self._cheat_pending.pop(name)
+        self._cheat_inflight = name          # don't let a refresh override it mid-apply
         verb = "enable" if on else "disable"
         self.log.appendPlainText(f"$ terrariabonker patch {verb} {name}")
 
@@ -402,6 +404,7 @@ class MainWindow(QWidget):
             if out.strip():
                 self.log.appendPlainText(out.rstrip())
             self._cheat_busy = False
+            self._cheat_inflight = None
             if self._cheat_pending:
                 self._pump_cheats()          # next queued op
             else:
@@ -417,8 +420,15 @@ class MainWindow(QWidget):
         if st is None:
             return
         on, vals = st["on"], st["values"]
+        # A cheat that's queued or mid-apply hasn't been confirmed yet — leave its checkbox
+        # as the user set it, so an in-flight status refresh can't flicker it off/on.
+        busy = set(self._cheat_pending)
+        if self._cheat_inflight:
+            busy.add(self._cheat_inflight)
         self._patch_filling = True
         for name, cb in self._patch_cbs.items():
+            if name in busy:
+                continue
             cb.setChecked(bool(on.get(name)))
             spin = self._patch_vals.get(name)
             if spin is not None and vals.get(name) is not None:
@@ -577,7 +587,10 @@ class MainWindow(QWidget):
                     f"[auto-restore] cheats={rep['cheats']} items={rep['items']} "
                     f"pending={rep['pending']} skipped={rep['skipped']}")
             self.refresh_patches()
-            if rep["pending"] and self._restore_attempts < 5:   # method not JIT-ready yet
+            # Retry while anything is unresolved: cheats whose method hasn't JIT-compiled
+            # yet, or items skipped because the inventory wasn't loaded at world-entry. A
+            # genuinely-moved item stays skipped and just exhausts the retry budget.
+            if (rep["pending"] or rep["skipped"]) and self._restore_attempts < 8:
                 QTimer.singleShot(2000, self._do_restore)
 
         self._spawn(client.restore_argv(), on_output=done)
