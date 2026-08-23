@@ -194,6 +194,18 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # the cheat is applied. See ce/ACCESSORY_FINDINGS.md.
     "equip_apply": _pat("89 44 24 08 8B 45 ?? ?? ?? ?? ?? ?? ?? ?? 90 E8 ?? ?? ?? ?? "
                         "83 45 ?? 01 83 7D ?? ?? 7C ??"),
+    # SmartCursorHelper.SmartCursorLookup, at the tail where the search box it just got
+    # from GetTileRegion is clamped against the world edges: four (load field, clamp to
+    # 10..maxTiles-10, store field) blocks writing SmartCursorUsageInfo through esi
+    # (reachableStartX +0x30, EndX +0x34, StartY +0x38, EndY +0x3C). Matched from the
+    # StartY block through the final EndY store, which is what the cheat displaces (+69,
+    # wildcarded) together with the `test ebx,ebx` whose flags the following je needs.
+    # See ce/SMARTCURSOR_FINDINGS.md.
+    "smart_cursor": _pat("8B 46 38 8B 0D ?? ?? ?? ?? 83 E9 0A 89 4C 24 08 "
+                         "C7 44 24 04 0A 00 00 00 89 04 24 90 E8 ?? ?? ?? ?? 89 46 38 "
+                         "8B 46 3C 8B 0D ?? ?? ?? ?? 83 E9 0A 89 4C 24 08 "
+                         "C7 44 24 04 0A 00 00 00 89 04 24 90 E8 ?? ?? ?? ?? "
+                         "?? ?? ?? ?? ?? 74 ??"),
     # UpdateEquips' FIRST loop, which already walks the whole inventory every frame
     # (vanilla uses it to refresh info/mechanical accessories, which is why a Depth Meter
     # works from your bag today). Matched from `mov eax,[edi+D4]` (Player.inventory, the
@@ -241,6 +253,10 @@ _VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
     # moved out of a vanity slot into the bag (the GrantPrefixBenefits call), and disabling
     # restored the displaced bytes and stopped the effects with the game still running.
     "inventory_scan": ("1.4.5.7+24893155",),
+    # 2026-08-23: confirmed in-game with reach/tool_reach at 75 — the stutter (triggerable
+    # by merely holding Shift, i.e. the per-frame search, not the placing) is gone, while
+    # manual placement reach and tool/interaction reach are unchanged.
+    "smart_cursor": ("1.4.5.7+24893155",),
 }
 
 ANCHORS: dict[str, Anchor] = {
@@ -406,6 +422,62 @@ def _clamp_vanity_slot(_value: int = 0) -> bytes:
     return _b("83 F8 0A 7C 03 83 E8 0A")
 
 
+def _shrink_smart_cursor(n: int) -> bytes:
+    """Shrink the smart cursor's search box to the player-to-cursor span plus n tiles.
+
+    SmartCursorLookup sizes that box from GetTileRegion, which calls the GetRanges that
+    `tool_reach` forces and then adds `blockRange` — so both reach cheats inflate it, and
+    it is an AREA: 121 tiles a frame at vanilla-ish reach, 22,801 at 75, roughly 90,000
+    with both stacked. That is the auto-place stutter.
+
+    Two earlier shapes were wrong, both found in play:
+
+    * Centred on the player, the box stopped containing the cursor once it moved past n.
+      The same four fields are also the "is the target in reach" test right after this
+      point, so smart placement dropped out entirely ("moving the mouse starts placing
+      without smart enabled").
+    * Centred on the cursor, the cursor stayed inside but the span back toward the player
+      was cut out, and the search works outward from the player — so it failed again as
+      soon as the two were more than n apart.
+
+    So cover both ends: take the original box's midpoint as the player tile (GetTileRegion
+    built the box around the player, so the midpoint is where they are), take the cursor
+    from screenTargetX/Y, and keep min-n .. max+n of the pair, intersected with the
+    original box so it can only ever shrink. The area becomes the on-screen separation
+    plus a margin instead of the reach squared.
+
+    The clamp has to be here rather than in GetTileRegion, which has nine callers
+    including IsInTileInteractionRange and AdjTiles — the ones tool_reach exists to
+    extend. esi holds the SmartCursorUsageInfo; eax/ecx are dead (the following code
+    reloads both). The displaced `test ebx,ebx` is reproduced LAST so the je after our
+    jump back sees the flags it expects.
+    """
+    n = max(1, int(n))
+
+    def axis(target_off: int, start_off: int, end_off: int) -> bytes:
+        S, E, T = bytes([start_off]), bytes([end_off]), bytes([target_off])
+        return (b"\x8b\x46" + S            # mov eax,[esi+start]
+                + b"\x03\x46" + E          # add eax,[esi+end]
+                + b"\xd1\xf8"              # sar eax,1        -> player tile (midpoint)
+                + b"\x8b\x4e" + T          # mov ecx,[esi+target]   cursor tile
+                + b"\x3b\xc1"              # cmp eax,ecx
+                + b"\x7e\x01"              # jle +1
+                + b"\x91"                   # xchg eax,ecx     -> eax=min, ecx=max
+                + b"\x2d" + _i32(n)         # sub eax,n        -> lo
+                + b"\x81\xc1" + _i32(n)    # add ecx,n        -> hi
+                + b"\x3b\x46" + S          # cmp eax,[esi+start]
+                + b"\x7e\x03"              # jle keep         (start = max(start, lo))
+                + b"\x89\x46" + S          # mov [esi+start],eax
+                + b"\x3b\x4e" + E          # cmp ecx,[esi+end]
+                + b"\x7d\x03"              # jge keep         (end = min(end, hi))
+                + b"\x89\x4e" + E)         # mov [esi+end],ecx
+
+    return (b"\x89\x46\x3c"          # mov [esi+3C],eax   (displaced store, first)
+            + axis(0x28, 0x30, 0x34)   # X: screenTargetX vs reachableStartX/EndX
+            + axis(0x2c, 0x38, 0x3c)   # Y: screenTargetY vs reachableStartY/EndY
+            + b"\x85\xdb")            # test ebx,ebx       (displaced, last: flags)
+
+
 def _inventory_accs_body(patcher, _inj) -> bytes:
     """Stub for "accessories work from the inventory", injected in UpdateEquips' first
     loop where the Item* is already in eax.
@@ -554,6 +626,16 @@ INJECTIONS: dict[str, Injection] = {
              "the usable accessory slots; a game restart clears it",
         edits=(Edit("equip_apply", 27, b"\x0a", b"\x14"),        # ApplyEquipFunctional loop
                Edit("equip_benefits", 48, b"\x0a", b"\x14"))),   # prefix/armour benefits
+    # Smart-cursor search radius (spec 034). Keeps placement/tool reach at whatever the
+    # user set while stopping the smart cursor from scanning a box that size every frame.
+    "smart_cursor": Injection(
+        "smart_cursor", "Smart cursor search radius", "smart_cursor",
+        69, _b("89 46 3C 85 DB"), _shrink_smart_cursor,
+        note="limits how far the SMART CURSOR searches for a target (holding Shift to "
+             "auto-place). It scans this radius SQUARED every frame, and the reach cheats "
+             "size it — at reach 75 that is 22,801 tiles per frame, which stutters. Does "
+             "not affect manual placement, tool or interaction reach",
+        rerun_overwrite=False),
     # Accessories take effect from the INVENTORY (spec 033). UpdateEquips' first loop
     # already walks all 58 slots every frame; this hooks the point where the Item* is in
     # eax and runs the accessory machinery on the ones that are accessories.
@@ -610,6 +692,7 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
     "spawn_rate": ValueSpec("i32", 15, 0, 200, "max active enemies · 0 = peaceful"),
     "loot": ValueSpec("i32", 100, 1, 100, "% min drop chance · 100 = guaranteed"),
     "max_minions": ValueSpec("i32", 10, 1, 255, "minion slots (base; +accessories)"),
+    "smart_cursor": ValueSpec("i32", 20, 3, 200, "tiles · searched area is this squared"),
     # itemTime presets (lower = faster placement). "Fast" is the original behaviour.
     "fast_place": ValueSpec("i32", 4, 1, 4, "placement speed",
                             presets=(("Fast", 4), ("Faster", 2), ("Hyper", 1))),
@@ -619,7 +702,7 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
 # How the patches are grouped in the UI, in display order. A cheat missing from here
 # falls into the last section, so adding one never hides it.
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Build", ("mining", "reach", "fast_place", "tool_reach")),
+    ("Build", ("mining", "reach", "fast_place", "tool_reach", "smart_cursor")),
     ("Combat", ("max_minions", "spawn_rate", "loot")),
     ("Accessories", ("vanity_accs", "inventory_accs")),
     ("Misc", ("pickup", "teleport")),

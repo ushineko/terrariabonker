@@ -51,7 +51,7 @@ def test_build_key_survives_missing_pieces():
 
 
 # Anchors derived after the original build, so they were never seen on it.
-LATER_ANCHORS = {"equip_apply", "equip_benefits", "inventory_scan"}
+LATER_ANCHORS = {"equip_apply", "equip_benefits", "inventory_scan", "smart_cursor"}
 
 
 def test_the_original_anchors_are_verified_on_the_derivation_build():

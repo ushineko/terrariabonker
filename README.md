@@ -67,7 +67,8 @@ holds no state; stopping it ends every effect.*
   (grab items from far off-screen), **spawn-rate / enemy cap** (0 = peaceful), a
   **drop-chance floor** (guaranteed or minimum-% common drops), **map-ping
   teleport** (double-click the fullscreen map to warp there), a **minion cap**
-  (raise the summon limit), **working vanity accessories** and **accessories from your
+  (raise the summon limit), a **smart-cursor radius** clamp (large reach makes auto-place
+  scan a huge area every frame), **working vanity accessories** and **accessories from your
   inventory** (see below): things a value-write
   can't hold, applied by patching the game's JIT code through `/proc` — including
   code-cave injections for the reach, pickup, spawn, and drop hooks and a managed

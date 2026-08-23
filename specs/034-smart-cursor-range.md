@@ -1,6 +1,8 @@
 # Spec 034: Clamp the smart-cursor search range
 
-**Status**: INCOMPLETE
+**Status**: INCOMPLETE (1 criterion open: the not-yet-JIT-compiled path,
+pending a fresh game launch)
+**Implementation Date**: 2026-08-23
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -67,15 +69,19 @@ IL_0170: stfld SmartCursorUsageInfo::reachableStartX
 ```
 
 `loc.0` is a reference (`ldloc.0` + `ldflda`), so the four values are int fields at fixed
-offsets from an object pointer — a stub can shrink the box with arithmetic alone, needing no
-game state:
+offsets from an object pointer (`screenTargetX +0x28`, `screenTargetY +0x2C`,
+`reachableStartX +0x30`, `EndX +0x34`, `StartY +0x38`, `EndY +0x3C`, through `esi`) — a stub
+can shrink the box with arithmetic alone, needing no game state:
 
 ```
-    cx = (startX + endX) / 2 ;  startX = cx - N ;  endX = cx + N
-    cy = (startY + endY) / 2 ;  startY = cy - N ;  endY = cy + N
+    px = (startX + endX) / 2            ; the player tile: GetTileRegion centred the box there
+    startX = max(startX, min(px, cursorX) - N)
+    endX   = min(endX,   max(px, cursorX) + N)
+    ... the same for Y, using screenTargetY
 ```
 
-Clamping the *result* rather than the input is what keeps placement and tool reach untouched.
+Clamping the *result* rather than the input keeps placement and tool reach untouched, and
+spanning player-to-cursor rather than one point is what makes it behave (see Risks).
 
 ## Requirements
 
@@ -91,9 +97,11 @@ Clamping the *result* rather than the input is what keeps placement and tool rea
 ### Technical
 
 6. **Injection after the region is computed**, inside `SmartCursorLookup` — after
-   `GetTileRegion` returns and (preferably) after the existing world-edge clamps, so this
-   clamp is the last word. The stub rewrites the four `SmartCursorUsageInfo` fields to a box
-   of ±N around their own midpoint.
+   `GetTileRegion` returns and after the existing world-edge clamps, so this clamp is the
+   last word. The stub narrows the four `SmartCursorUsageInfo` fields to the span between the
+   player and the cursor plus N, intersected with the original box so it can only shrink.
+   The displaced `test ebx,ebx` is reproduced **last**, because the instruction after the
+   jump back branches on its flags.
 7. **Field offsets and the register holding the info object** come from PASS 2 on the JIT'd
    body; the four fields are adjacent in the class, so one base register plus four
    displacements is expected.
@@ -113,9 +121,16 @@ Clamping the *result* rather than the input is what keeps placement and tool rea
 - **Shrinking the box changes behaviour, not just cost**: the smart cursor will not reach as
   far as it did. That is the point, but it means the cheat is not purely an optimisation and
   belongs under the user's control with a visible value.
-- **Midpoint arithmetic assumes the box is centred on the player.** `GetTileRegion` builds it
-  from the player's position, and the world-edge clamps can skew it near a map edge; there
-  the clamp yields a smaller or off-centre box, which is harmless.
+- **Those four fields serve three purposes, and only one is visible in the IL.** They are the
+  search extent, the "is the cursor within reach" test five instructions later, and the
+  working area of a search that runs outward from the player. Two clamp shapes were written
+  and rejected in play because of this: a player-centred box stopped containing the cursor
+  ("moving the mouse starts placing without smart enabled"), and a cursor-centred box cut out
+  the span back toward the player. The shipped shape spans both ends.
+- **The player tile is taken as the original box's midpoint.** `GetTileRegion` centres the box
+  on the player, so this holds except near a world edge where the clamps skew it; there the
+  result is a slightly off-centre box, which is harmless because the intersection means it
+  can only ever be smaller than what vanilla would have searched.
 - **Interaction with `tool_reach`**: this does not undo it. Tile interaction, chests, signs
   and crafting stations keep the extended range, because `GetTileRegion` itself is untouched.
 - **Rollback.** `git revert`; the cheat is off by default and disable restores the displaced
@@ -123,28 +138,62 @@ Clamping the *result* rather than the input is what keeps placement and tool rea
 
 ## Acceptance Criteria
 
-- [ ] A smart-cursor range cheat appears in the **Build** section, off by default, tunable,
+- [x] A smart-cursor range cheat appears in the **Build** section, off by default, tunable,
       with a note explaining the quadratic cost
-- [ ] With `reach`/`tool_reach` at 75 and this cheat on, holding Shift to auto-place no longer
+- [x] With `reach`/`tool_reach` at 75 and this cheat on, holding Shift to auto-place no longer
       stutters (the maintainer's original repro)
-- [ ] Manual placement reach, tool reach, chest/sign interaction and remote crafting stations
+- [x] Manual placement reach, tool reach, chest/sign interaction and remote crafting stations
       are all unaffected while it is on
-- [ ] Changing the value changes the search box live, without a re-enable
-- [ ] Disabling restores the displaced bytes and the original smart-cursor behaviour returns
-- [ ] The anchor still resolves with the cheat applied (cold re-resolve)
-- [ ] Behaviour is sane when the method has not been JIT-compiled yet: reported honestly, and
-      it applies once the smart cursor is first used
-- [ ] Measured: CPU with the cheat on is materially below the same scenario with it off,
-      using the interleaved A/B method from spec 033 (a single-block comparison is not
-      trustworthy — the game's own workload drifts more than the effect)
-- [ ] Anchor carries the build key it was confirmed on
-- [ ] All tests pass headless; flake8 clean on changed files; security review recorded
-- [ ] README updated; version bump confirmed by the maintainer
+- [x] Changing the value changes the search box live, without a re-enable
+- [x] Disabling restores the displaced bytes and the original smart-cursor behaviour returns
+- [x] The anchor still resolves with the cheat applied (cold re-resolve)
+- [ ] Behaviour when the method has not been JIT-compiled yet — NOT VERIFIED. It was
+      already compiled in the session this was built in, so the path was never exercised.
+      By design it reports "matched nothing" honestly (spec 030) and auto-restore retries,
+      but that is reasoning, not evidence. Confirm on the next fresh game launch
+- [x] The stutter is gone in play, maintainer-confirmed, with reach/tool_reach still at 75.
+      Note it was triggerable by *holding Shift alone*, i.e. by the per-frame search rather
+      than by placing. The interleaved CPU measurement used for spec 033 was deliberately
+      not run: it needs the workload sustained for ~80s, which here means holding Shift
+      throughout, and the subjective result is unambiguous
+- [x] Anchor carries the build key it was confirmed on
+- [x] All tests pass headless; flake8 clean on changed files; security review recorded
+- [x] README updated; version bumped to 0.24.0 (maintainer confirmed)
 
 ## Executive Summary
 
-_Populate before opening the PR._
+Holding Shift to auto-place collapsed the frame rate with the reach cheats set high, because
+`SmartCursorLookup` sizes its search region from `GetTileRegion` — which calls the
+`GetRanges` that `tool_reach` forces, then adds `blockRange`. The region is an area, so reach
+75 means 22,801 tiles scanned per frame, and both cheats stack into it. The cheat clamps that
+region without touching reach itself.
+
+The clamp could not go in `GetTileRegion` (nine callers, including the tile-interaction and
+crafting-station checks `tool_reach` exists to extend), so it goes at the tail of
+`SmartCursorLookup`, rewriting the four `reachable*` fields after the game's own world-edge
+clamps.
+
+What the IL did not show, and two rejected shapes did: those four fields serve three
+purposes — the search extent, the "is the cursor in reach" test five instructions later, and
+the working area for a search that runs outward from the player. A player-centred box broke
+the second; a cursor-centred box broke the third. The shipped shape spans both ends, plus a
+margin, intersected with the original so it can only shrink.
+
+Reviewers: `_shrink_smart_cursor` and the two rejected shapes documented in its docstring.
 
 ## Testing
 
-_Populate during implementation._
+226 headless tests, flake8 clean, `pip-audit 2.10.0` clean. `tests/test_smart_cursor.py`
+(11): the displaced store is reproduced first and the displaced `test ebx,ebx` last (the
+following `je` branches on its flags); the radius is baked in four times per stub; a
+zero/negative radius floors to 1; only the four `reachable*` fields are touched; enable
+installs a jump and disable restores; retuning rewrites the stub without a re-enable; the
+anchor still resolves with the cheat applied; and it lands in the Build section.
+
+The stub was disassembled against the live game before each of the three attempts.
+
+Live, maintainer-verified with `reach`/`tool_reach` left at 75: the stutter is gone — and it
+had been triggerable by holding Shift alone, i.e. by the per-frame search rather than by
+placing — while manual placement reach and tool/interaction reach are unchanged. Smart
+placement itself behaves normally at range, which the first two clamp shapes broke in two
+different ways (see the Executive Summary).

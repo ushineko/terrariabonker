@@ -39,7 +39,8 @@ def test_status_all_off_initially(game):
     assert p.status() == {"mining": False, "reach": False, "fast_place": False,
                           "tool_reach": False, "pickup": False, "spawn_rate": False,
                           "loot": False, "teleport": False, "max_minions": False,
-                          "vanity_accs": False, "inventory_accs": False}
+                          "vanity_accs": False, "inventory_accs": False,
+                          "smart_cursor": False}
 
 
 def test_tool_reach_injection_roundtrip(game):
@@ -321,7 +322,8 @@ def test_values_default_before_any_apply(game):
     # every valued cheat reports its ValueSpec default until one is applied
     assert p.values() == {"mining": 0.2, "reach": 20, "tool_reach": 30,
                           "pickup": 50, "spawn_rate": 15, "loot": 100,
-                          "max_minions": 10, "fast_place": 4}   # Fast preset default
+                          "max_minions": 10, "fast_place": 4,   # Fast preset default
+                          "smart_cursor": 20}
 
 
 def test_applied_value_is_recorded_and_restored(game):
