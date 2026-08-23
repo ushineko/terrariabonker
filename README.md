@@ -14,7 +14,11 @@ side, to re-derive patch offsets after a game update — see
 *This edits your own single-player game in memory. It writes nothing to disk and
 holds no state; stopping it ends every effect.*
 
-![terrariabonker inventory editor showing the item grid for a running Terraria game](assets/screenshot.png)
+![Trainer tab: godmode and infinite-mana freezes, HP/mana stat edits, tool reach, and the code-patch list with per-patch values](assets/screenshot-trainer.png)
+
+![Inventory tab: the item grid mirroring the in-game layout, with sprite icons, rarity tinting, and a slot tooltip showing ItemID, stack, damage, rarity and use time](assets/screenshot-inventory.png)
+
+![Recipes tab: the craftable-item browser with a recipe dialog open on Zenith, listing its crafting station and every ingredient](assets/screenshot-recipes.png)
 
 ## Table of Contents
 
