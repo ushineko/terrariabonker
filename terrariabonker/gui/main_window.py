@@ -681,28 +681,49 @@ class MainWindow(QWidget):
                     {"slot": slot, "type": 0})
 
     def _on_cell_clicked(self, slot: int):
-        dlg = ItemEditDialog(self, self._row_for(slot), self._item_names)
+        row = self._row_for(slot)
+        orig_type = int(row.get("type", 0))
+        dlg = ItemEditDialog(self, row, self._item_names)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         if dlg.cleared:
-            self._run(client.set_item_argv(slot, 0))
+            self._write_slot(client.set_item_argv(slot, 0, expect_type=orig_type))
         elif dlg.resolved:
-            self._apply_item_edit(slot, dlg.resolved, dlg._orig_type)
+            self._apply_item_edit(slot, dlg.resolved, orig_type)
         QTimer.singleShot(600, self.refresh_inventory)
 
     def _apply_item_edit(self, slot: int, r: dict, orig_type: int):
         """Apply the dialog result. A type change (incl. placing into an empty
         slot) sends only type + stack so the ContentSamples template supplies real
-        stats; a same-item edit sends the full field set."""
+        stats; a same-item edit sends the full field set. Either way the write
+        carries ``--expect-type``: the slot must still hold what the dialog was
+        opened on, or the CLI refuses it (see spec 029)."""
         t = r["type"]
         if t != orig_type:
-            self._run(client.set_item_argv(slot, t, stack=r["stack"]))
+            self._write_slot(client.set_item_argv(slot, t, stack=r["stack"],
+                                                  expect_type=orig_type))
         else:
-            self._run(client.set_item_argv(
+            self._write_slot(client.set_item_argv(
                 slot, t, stack=r["stack"], damage=r["damage"],
                 auto_reuse=r["auto_reuse"], use_time=r["use_time"],
                 use_anim=r["use_anim"], pick=r["pick"], tile_boost=r["tile_boost"],
-                defense=r["defense"], prefix=r["prefix"]))
+                defense=r["defense"], prefix=r["prefix"], expect_type=orig_type))
+
+    def _write_slot(self, sub_args: list[str]):
+        """A slot write, which the stale-snapshot guard may refuse. On refusal the
+        grid is re-read at once so the next attempt edits the truth."""
+        self.log.appendPlainText(f"$ terrariabonker {' '.join(sub_args)}")
+
+        def done(out):
+            if out.strip():
+                self.log.appendPlainText(out.rstrip())
+            if "[ERROR]" in out:
+                msg = out.split("[ERROR]", 1)[1].strip() or "the write was refused"
+                QMessageBox.warning(self, "Slot changed in-game", msg)
+                self.refresh_inventory()
+            self.refresh_status()
+
+        self._spawn(sub_args, on_output=done)
 
     # --- recipes tab -------------------------------------------------------
     def _recipes_tab(self) -> QWidget:

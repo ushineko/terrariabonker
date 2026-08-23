@@ -127,7 +127,7 @@ def cmd_set_item(args) -> int:
     kwargs = dict(stack=args.stack, damage=args.damage, auto_reuse=args.auto_reuse,
                   use_time=args.use_time, use_anim=args.use_anim, pick=args.pick,
                   tile_boost=args.tile_boost, defense=args.defense, prefix=args.prefix)
-    svc.set_item(args.slot, args.type, **kwargs)
+    svc.set_item(args.slot, args.type, expect_type=args.expect_type, **kwargs)
     # Record the edit in the cross-session profile so auto-restore can re-apply it (Terraria
     # only saves type/stack/prefix, regenerating the rest from the type on load).
     if args.type:
@@ -361,6 +361,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--defense", type=int, default=None, help="defense the item grants")
     p.add_argument("--prefix", type=int, default=None,
                    help="modifier tier byte (0 none; e.g. Legendary/Warding/Menacing)")
+    p.add_argument("--expect-type", type=int, default=None,
+                   help="ItemID the slot is believed to hold; refuse the write if it "
+                        "changed in-game (guards against editing a stale snapshot)")
     force_flag(p)
     p.set_defaults(func=cmd_set_item)
 

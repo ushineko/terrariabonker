@@ -62,8 +62,11 @@ def set_stack_argv(slot: int, value: int) -> list[str]:
 
 def set_item_argv(slot: int, item_type: int, *, stack=None, damage=None,
                   auto_reuse=None, use_time=None, use_anim=None, pick=None,
-                  tile_boost=None, defense=None, prefix=None) -> list[str]:
+                  tile_boost=None, defense=None, prefix=None,
+                  expect_type=None) -> list[str]:
     argv = ["set-item", str(slot), str(item_type)]
+    if expect_type is not None:
+        argv += ["--expect-type", str(expect_type)]
     if stack is not None:
         argv += ["--stack", str(stack)]
     if damage is not None:

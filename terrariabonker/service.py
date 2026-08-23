@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from terrariabonker import names
 from terrariabonker import version as ver
 from terrariabonker.inventory import INVENTORY_SLOTS, ITEM_TYPE, Inventory, Slot
 from terrariabonker.locate import find_players, pick_live, resolve_local_player
@@ -240,9 +241,23 @@ class Service:
 
     def set_item(self, slot: int, item_type: int, *, stack=None, damage=None,
                  auto_reuse=None, use_time=None, use_anim=None, pick=None,
-                 tile_boost=None, defense=None, prefix=None) -> None:
+                 tile_boost=None, defense=None, prefix=None,
+                 expect_type: int | None = None) -> None:
         invs = self._all_inventories()
         cur = invs[0].read_slot(slot)
+        # Stale-snapshot guard: the caller states what it believed the slot held. If the
+        # game moved items since that snapshot, writing would template the caller's stale
+        # item over whatever is really there, destroying it. Refuse instead.
+        if expect_type is not None:
+            if cur is None:
+                raise ServiceError(
+                    f"slot {slot} could not be read to verify it still holds "
+                    f"{names.label(expect_type)} — refusing to write")
+            if cur.type != expect_type:
+                raise ServiceError(
+                    f"slot {slot} now holds {names.label(cur.type)}, not "
+                    f"{names.label(expect_type)} — it changed in-game. "
+                    "Refresh and try again.")
         # Only re-template when the item type actually changes (field tweaks on the
         # same item must not wipe the edits, and must stay scan-free/fast).
         changed = cur is None or item_type != cur.type
