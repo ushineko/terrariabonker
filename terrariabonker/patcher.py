@@ -194,6 +194,15 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # the cheat is applied. See ce/ACCESSORY_FINDINGS.md.
     "equip_apply": _pat("89 44 24 08 8B 45 ?? ?? ?? ?? ?? ?? ?? ?? 90 E8 ?? ?? ?? ?? "
                         "83 45 ?? 01 83 7D ?? ?? 7C ??"),
+    # UpdateEquips' FIRST loop, which already walks the whole inventory every frame
+    # (vanilla uses it to refresh info/mechanical accessories, which is why a Depth Meter
+    # works from your bag today). Matched from `mov eax,[edi+D4]` (Player.inventory, the
+    # same field inventory.py reaches as statLife-0x664) through the bounds check and the
+    # `lea eax,[eax+ecx*4+0x10]` element address, to the point where the Item* is in eax.
+    # The five bytes at +22 are the ones the stub displaces, so they are wildcarded — a
+    # cold re-resolve has to work while the cheat is applied.
+    "inventory_scan": _pat("8B 87 D4 00 00 00 8B 4D ?? 39 48 0C 0F 86 ?? ?? ?? ?? "
+                           "8D 44 88 10 ?? ?? ?? ?? ?? 89 45 ??"),
     # UpdateEquips' benefit loop: `if (item.accessory) GrantPrefixBenefits(item);
     # GrantArmorBenefits(item)` and its `i < 10` bound (+48, wildcarded because we patch
     # it). The `movzx eax,[eax+7D]` accessory test is what makes this specific — the bare
@@ -227,6 +236,11 @@ _VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
     # Tungsten Watch) were unchanged.
     "equip_apply": ("1.4.5.7+24893155",),
     "equip_benefits": ("1.4.5.7+24893155",),
+    # 2026-08-23: confirmed in-game — accessories carried in the inventory granted their
+    # effects without being equipped, their Warding prefixes kept contributing defense when
+    # moved out of a vanity slot into the bag (the GrantPrefixBenefits call), and disabling
+    # restored the displaced bytes and stopped the effects with the game still running.
+    "inventory_scan": ("1.4.5.7+24893155",),
 }
 
 ANCHORS: dict[str, Anchor] = {
@@ -266,7 +280,10 @@ CHEATS: dict[str, Cheat] = {
         "reach", "Placement reach (blockRange)", "reset_block", 0,
         _b("C7 87 F8 09 00 00 00 00 00 00"), _b("90 90 90 90 90 90 90 90 90 90"),
         value_off=0x2C0, value_kind="i32", on_value=20, off_value=0,
-        note="NOPs the blockRange reset; item-independent extended reach"),
+        note="NOPs the blockRange reset; item-independent extended reach. Large values "
+             "also enlarge the SMART CURSOR search: it scans a box of this radius every "
+             "frame (75 = 151x151 tiles), so lower it if holding Shift to auto-place "
+             "stutters"),
     # Force a low itemTime at the placement-timing read site: `mov edi,N; nop*5`. N is the
     # itemTime (lower = faster), tunable via presets (Fast=4 / Faster=2 / Hyper=1).
     "fast_place": Cheat(
@@ -389,6 +406,53 @@ def _clamp_vanity_slot(_value: int = 0) -> bytes:
     return _b("83 F8 0A 7C 03 83 E8 0A")
 
 
+def _inventory_accs_body(patcher, _inj) -> bytes:
+    """Stub for "accessories work from the inventory", injected in UpdateEquips' first
+    loop where the Item* is already in eax.
+
+    Vanilla walks the inventory there every frame but only refreshes info and mechanical
+    accessories. This calls the three methods an equipped accessory goes through —
+    ApplyEquipFunctional (the effects), GrantPrefixBenefits (Menacing/Warding/...) and
+    GrantArmorBenefits (per-item extras) — for the items that are actually accessories.
+
+    ``item.accessory`` (+0x7D) is tested first: the loop runs 58 times a frame and
+    ApplyEquipFunctional is an 11.6 KB method, so calling it for every stack of dirt would
+    be pure waste. Typically only a handful of items pass.
+
+    Slot 0 is passed because the slot argument is used for one thing only —
+    ``hideVisibleAccessory[slot]``, a bool[10] (see spec 032's clamp).
+
+    Register discipline follows the teleport stub: pushad/popad around everything, the
+    Item* parked in esi, and esp restored from ebx after each call so the stub is correct
+    whether mono cleaned the arguments or not.
+    """
+    def call(target: int) -> bytes:
+        return (b"\xb8" + _u32(target)      # mov eax, <method entry>
+                + b"\xff\xd0"               # call eax
+                + b"\x8b\xe3")               # mov esp,ebx   (restore, either convention)
+
+    apply_fn = patcher._call_target("equip_apply", 15)       # ApplyEquipFunctional
+    prefix_fn = patcher._call_target("equip_benefits", 20)   # GrantPrefixBenefits
+    armor_fn = patcher._call_target("equip_benefits", 36)    # GrantArmorBenefits
+
+    guarded = (b"\x60"                       # pushad
+               + b"\x8b\xf0"                 # mov esi,eax        (Item*)
+               + b"\x8b\xdc"                 # mov ebx,esp
+               # ApplyEquipFunctional(this, slot=0, item) - args pushed right to left
+               + b"\x56" + b"\x6a\x00" + b"\x57" + call(apply_fn)
+               # GrantPrefixBenefits(this, item)
+               + b"\x56" + b"\x57" + call(prefix_fn)
+               # GrantArmorBenefits(this, item)
+               + b"\x56" + b"\x57" + call(armor_fn)
+               + b"\x61")                     # popad  (eax is the Item* again)
+
+    return (b"\x8b\x00"                      # mov eax,[eax]      (displaced) -> Item*
+            + b"\x80\x78\x7d\x00"            # cmp byte [eax+7D],0  item.accessory
+            + b"\x74" + bytes([len(guarded)])  # je skip
+            + guarded
+            + b"\x8b\x40\x6c")               # mov eax,[eax+6C]   (displaced) item.type
+
+
 def _norm_inj(v: dict) -> dict:
     """Normalize a persisted injection record to the multi-site shape
     ``{"sites": [{"inject", "cave"}], "stub_len"}`` — accepting the legacy flat
@@ -439,6 +503,10 @@ class Injection:
     # Byte edits applied and reverted with this injection, for a cheat that is a cave
     # plus a couple of in-place changes elsewhere (see Edit).
     edits: tuple = ()
+    # Builds the stub body from live state (resolved call targets and the like) rather
+    # than from a value: ``build_body(patcher, injection) -> bytes``. Such a stub
+    # reproduces its own displaced bytes, so ``rerun_overwrite`` does not apply.
+    build_body: Callable | None = None
 
 
 INJECTIONS: dict[str, Injection] = {
@@ -450,7 +518,8 @@ INJECTIONS: dict[str, Injection] = {
         "tool_reach", "Tool + interaction reach (GetRanges)", "getranges",
         0xCA, _b("8D 65 F4 5E 5F"), _force_xy,
         note="extends mining, tool use, and chest/sign reach together; "
-             "a game restart clears it"),
+             "a game restart clears it. GetRanges also sizes the SMART CURSOR search "
+             "box, so this stacks with placement reach when auto-placing with Shift"),
     # Player.GrabItems: a call returns the grab range in eax, then `mov [ebp-54],eax`
     # stores it. Inject `imul eax,N` before that store to scale the pickup radius.
     # Overwrite `mov [ebp-54],eax; lea eax,[ebp-50]` (6 bytes), re-run in the stub.
@@ -485,6 +554,15 @@ INJECTIONS: dict[str, Injection] = {
              "the usable accessory slots; a game restart clears it",
         edits=(Edit("equip_apply", 27, b"\x0a", b"\x14"),        # ApplyEquipFunctional loop
                Edit("equip_benefits", 48, b"\x0a", b"\x14"))),   # prefix/armour benefits
+    # Accessories take effect from the INVENTORY (spec 033). UpdateEquips' first loop
+    # already walks all 58 slots every frame; this hooks the point where the Item* is in
+    # eax and runs the accessory machinery on the ones that are accessories.
+    "inventory_accs": Injection(
+        "inventory_accs", "Accessories work from inventory", "inventory_scan",
+        22, _b("8B 00 8B 40 6C"), None,
+        note="accessories anywhere in your inventory grant their effects without being "
+             "equipped; a game restart clears it",
+        rerun_overwrite=False, build_body=_inventory_accs_body),
     # Map-ping teleport (ported from the FearLess ReGrind table). Hook Main.TriggerPing
     # at +0x2D; the stub calls Player.Teleport(this, pingX, pingY, 0, 0), warping the
     # local player to any fullscreen-map ping. No tunable value (on/off). The call target
@@ -521,6 +599,7 @@ class PatchInfo:
     note: str
     value: ValueSpec | None
     kind: str            # "cheat" | "injection"
+    section: str = "Misc"   # grouping for the UI (see SECTIONS)
 
 
 _VALUE_SPECS: dict[str, ValueSpec] = {
@@ -537,13 +616,33 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
 }
 
 
+# How the patches are grouped in the UI, in display order. A cheat missing from here
+# falls into the last section, so adding one never hides it.
+SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Build", ("mining", "reach", "fast_place", "tool_reach")),
+    ("Combat", ("max_minions", "spawn_rate", "loot")),
+    ("Accessories", ("vanity_accs", "inventory_accs")),
+    ("Misc", ("pickup", "teleport")),
+)
+
+
+def _section_of(name: str) -> str:
+    for section, names in SECTIONS:
+        if name in names:
+            return section
+    return SECTIONS[-1][0]
+
+
 def _build_catalog() -> dict[str, PatchInfo]:
     out: dict[str, PatchInfo] = {}
     for n, c in CHEATS.items():
-        out[n] = PatchInfo(n, c.label, c.note, _VALUE_SPECS.get(n), "cheat")
+        out[n] = PatchInfo(n, c.label, c.note, _VALUE_SPECS.get(n), "cheat", _section_of(n))
     for n, inj in INJECTIONS.items():
-        out[n] = PatchInfo(n, inj.label, inj.note, _VALUE_SPECS.get(n), "injection")
-    return out
+        out[n] = PatchInfo(n, inj.label, inj.note, _VALUE_SPECS.get(n), "injection",
+                           _section_of(n))
+    # Present them grouped, so the CLI listing and the panel agree on order.
+    order = {name: i for i, (_s, names) in enumerate(SECTIONS) for name in names}
+    return dict(sorted(out.items(), key=lambda kv: order.get(kv[0], len(order))))
 
 
 PATCH_CATALOG: dict[str, PatchInfo] = _build_catalog()
@@ -743,6 +842,17 @@ class Patcher:
         unsigned two's complement so it is correct regardless of jump direction."""
         return struct.pack("<I", (target - src_after) & 0xFFFFFFFF)
 
+    def _call_target(self, anchor_key: str, call_off: int) -> int:
+        """Entry point of the method invoked by the ``call rel32`` at ``call_off`` within
+        an anchor match: ``(site + 5) + rel32``.
+
+        Cheaper and steadier than anchoring each callee's own prologue — these call sites
+        are already anchored and verified for other cheats.
+        """
+        site = self._resolve(anchor_key) + call_off
+        rel = struct.unpack("<i", self.mem.read(site + 1, 4))[0]
+        return (site + 5 + rel) & 0xFFFFFFFF
+
     def _teleport_stub_body(self, inj: Injection) -> bytes:
         """Build the managed-call stub body: resolve the call target from ``call_anchor``
         and bake the local player object base. The Player object base (Teleport's ``this``)
@@ -756,7 +866,9 @@ class Patcher:
         return _teleport_body(player_base, target)
 
     def _enable_injection(self, inj: Injection, value: int) -> None:
-        if inj.call_anchor is not None:                    # managed-call injection
+        if inj.build_body is not None:                     # stub built from live state
+            body = inj.build_body(self, inj)
+        elif inj.call_anchor is not None:                  # managed-call injection
             body = self._teleport_stub_body(inj)
         else:
             body = inj.make_body(int(value))               # injected code

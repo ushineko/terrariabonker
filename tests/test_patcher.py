@@ -39,7 +39,7 @@ def test_status_all_off_initially(game):
     assert p.status() == {"mining": False, "reach": False, "fast_place": False,
                           "tool_reach": False, "pickup": False, "spawn_rate": False,
                           "loot": False, "teleport": False, "max_minions": False,
-                          "vanity_accs": False}
+                          "vanity_accs": False, "inventory_accs": False}
 
 
 def test_tool_reach_injection_roundtrip(game):

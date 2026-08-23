@@ -51,7 +51,7 @@ def test_build_key_survives_missing_pieces():
 
 
 # Anchors derived after the original build, so they were never seen on it.
-LATER_ANCHORS = {"equip_apply", "equip_benefits"}
+LATER_ANCHORS = {"equip_apply", "equip_benefits", "inventory_scan"}
 
 
 def test_the_original_anchors_are_verified_on_the_derivation_build():
@@ -69,13 +69,24 @@ def test_the_original_anchors_record_the_rebuild_they_were_reconfirmed_on():
         assert "1.4.5.7+24893155" in anchor.verified, key
 
 
-def test_a_later_anchor_claims_only_the_build_it_was_confirmed_on():
-    """Honesty is the point of the ledger: these were derived on the 24893155 rebuild and
-    confirmed in-game there, and were never seen on the original build — so they must not
-    inherit the default verification set."""
+def test_a_later_anchor_never_inherits_the_default_verification():
+    """Honesty is the point of the ledger: anchors derived after the original build were
+    never seen on it, so they must not pick up the default set."""
+    for key in LATER_ANCHORS:
+        assert ver.KNOWN_BUILD_KEY not in ANCHORS[key].verified, key
+
+
+def test_confirmed_later_anchors_claim_only_the_build_they_were_proven_on():
     for key in LATER_ANCHORS:
         assert ANCHORS[key].verified == frozenset({"1.4.5.7+24893155"}), key
-        assert ver.KNOWN_BUILD_KEY not in ANCHORS[key].verified, key
+
+
+def test_an_anchor_claims_a_build_only_once_it_is_confirmed_in_game():
+    """The ledger records proof, not derivation: every entry here was watched working
+    in-game on the build it names."""
+    for key, anchor in ANCHORS.items():
+        for build in anchor.verified:
+            assert build.startswith("1.4.5.7+"), (key, build)
 
 
 def test_per_anchor_divergence_is_supported():
@@ -255,3 +266,30 @@ def test_restore_summary_survives_an_unknown_profile():
 def test_restore_summary_reports_refused_cheats_separately():
     lines = client.restore_summary({"skipped": ["cheat:teleport"]})
     assert len(lines) == 1 and "teleport" in lines[0] and "refused" in lines[0]
+
+
+# --- how the panel groups the cheats ---------------------------------------
+
+def test_every_cheat_lands_in_a_section():
+    from terrariabonker.patcher import PATCH_CATALOG, SECTIONS
+    known = {s for s, _ in SECTIONS}
+    for name, info in PATCH_CATALOG.items():
+        assert info.section in known, name
+
+
+def test_a_cheat_missing_from_the_section_map_is_not_hidden():
+    """Adding a cheat and forgetting the map must not drop it out of the panel."""
+    from terrariabonker.patcher import SECTIONS, _section_of
+    assert _section_of("not_a_real_cheat") == SECTIONS[-1][0]
+
+
+def test_the_catalog_is_ordered_by_section():
+    """The panel emits a heading when the section changes, so the catalog has to be
+    grouped or headings would repeat."""
+    from terrariabonker.patcher import PATCH_CATALOG
+    seen, order = set(), []
+    for info in PATCH_CATALOG.values():
+        if not order or order[-1] != info.section:
+            assert info.section not in seen, f"{info.section} appears in two runs"
+            seen.add(info.section)
+            order.append(info.section)

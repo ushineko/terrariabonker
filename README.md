@@ -67,8 +67,8 @@ holds no state; stopping it ends every effect.*
   (grab items from far off-screen), **spawn-rate / enemy cap** (0 = peaceful), a
   **drop-chance floor** (guaranteed or minimum-% common drops), **map-ping
   teleport** (double-click the fullscreen map to warp there), a **minion cap**
-  (raise the summon limit), and **working vanity accessories** (see below): things a
-  value-write
+  (raise the summon limit), **working vanity accessories** and **accessories from your
+  inventory** (see below): things a value-write
   can't hold, applied by patching the game's JIT code through `/proc` — including
   code-cave injections for the reach, pickup, spawn, and drop hooks and a managed
   code-cave *call* into `Player.Teleport` for the map-ping warp (derived with
@@ -88,7 +88,14 @@ code cave maps a vanity slot onto its functional mirror before the call, because
 indexes a 10-entry array with that slot number.
 
 Vanity *armour* (the head/body/legs vanity slots) is unaffected, and info accessories that
-already worked in the column behave the same as before. Derivation: `ce/ACCESSORY_FINDINGS.md`.
+already worked in the column behave the same as before.
+
+A companion cheat, **accessories work from inventory**, goes further: accessories anywhere in
+your inventory grant their effects without being equipped, prefix bonuses included. It hooks
+the loop the game already runs over every inventory slot each frame and tests `item.accessory`
+before doing any work, so ordinary items cost nothing measurable. Both cheats can be on at
+once, and the same accessory in two places applies twice — the game has no reason to dedupe a
+case it never expected. Derivation: `ce/ACCESSORY_FINDINGS.md`.
 
 ## Two kinds of cheat: value edits and code patches
 
@@ -218,7 +225,8 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   fast-mining, long-reach, and a **Code patches** section: checkbox toggles for the
   code-patch cheats (mining speed, placement reach, fast placement, tool/interaction
   reach, item pickup range, spawn rate, drop-chance floor, **map-ping teleport**, and
-  **minion cap**, **vanity accessories**) with tunable value spinboxes where applicable
+  **minion cap**, **vanity accessories**, **inventory accessories**) with tunable value
+  spinboxes where applicable
   (fast placement offers
   **Fast / Faster / Hyper** presets). With teleport on, **double-click a
   spot on the fullscreen map to warp there**. No Cheat Engine at runtime; a game

@@ -369,7 +369,21 @@ class MainWindow(QWidget):
         box.setToolTip("Cheats that patch the running game in memory. "
                        "A game restart clears them.")
         g = QGridLayout(box)
-        for row, (name, info) in enumerate(PATCH_CATALOG.items()):
+        row = 0
+        # Grouped by section (see patcher.SECTIONS) — the flat list outgrew being scannable
+        # once there were eleven of them. The catalog is already ordered by section, so a
+        # heading is emitted whenever the section changes.
+        current = None
+        for name, info in PATCH_CATALOG.items():
+            if info.section != current:
+                current = info.section
+                head = QLabel(current)
+                head.setStyleSheet("color: #c8c8c8; font-weight: bold;")
+                if row:
+                    g.setRowMinimumHeight(row, 14)     # a little air above each heading
+                    row += 1
+                g.addWidget(head, row, 0, 1, 3)
+                row += 1
             cb = QCheckBox(info.label)
             cb.setToolTip(info.note)
             cb.toggled.connect(lambda on, n=name: self._on_patch_toggled(n, on))
@@ -389,6 +403,7 @@ class MainWindow(QWidget):
                 unit = QLabel(info.value.unit)
                 unit.setStyleSheet("color: gray")
                 g.addWidget(unit, row, 2)
+            row += 1
         g.setColumnStretch(0, 1)
         return box
 
