@@ -96,6 +96,7 @@ class Service:
         """Drop cached locate results; the next call rescans from scratch."""
         self._blocks = None
         self._anchor = None
+        self._compat = None
 
     @classmethod
     def connect(cls) -> "Service":
@@ -107,14 +108,23 @@ class Service:
 
     # --- build gate --------------------------------------------------------
     def _build_info(self):
-        """(version, buildid, level, msg), detected once — a running process cannot
-        change build, and this is on the status-poll path."""
-        if self._compat is None:
-            version = ver.detect_version(self.mem)
-            buildid = ver.read_buildid(self.mem.exe_path())
-            level, msg = ver.compatibility(version, buildid)
-            self._compat = (version, buildid, level, msg)
-        return self._compat
+        """(version, buildid, level, msg). Cached only once it reads as a real build.
+
+        The version is scanned out of process memory, and during game startup the CLR's
+        own "2.0.50727" can outnumber Terraria's before the game loads its own string.
+        Caching that would pin the build at "incompatible" for the life of this Service,
+        which wedges every mutating op behind require_compatible() — restore included.
+        So an unknown/incompatible reading is re-detected on the next call instead.
+        """
+        if self._compat is not None:
+            return self._compat
+        version = ver.detect_version(self.mem)
+        buildid = ver.read_buildid(self.mem.exe_path())
+        level, msg = ver.compatibility(version, buildid)
+        info = (version, buildid, level, msg)
+        if level in ("exact", "hotfix"):
+            self._compat = info
+        return info
 
     def compatibility(self) -> tuple[str, str]:
         return self._build_info()[2:]

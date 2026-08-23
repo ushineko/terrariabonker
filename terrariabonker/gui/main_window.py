@@ -622,6 +622,10 @@ class MainWindow(QWidget):
         def done(out):
             rep = client.parse_restore(out)
             if rep is None:
+                # A refusal (e.g. require_compatible on a misread build) used to vanish
+                # here, so auto-restore looked like it simply never ran.
+                if "[ERROR]" in out:
+                    self.log.appendPlainText(f"[auto-restore FAILED] {out.strip()}")
                 return
             if rep["cheats"] or rep["items"] or rep["pending"]:
                 self.log.appendPlainText(

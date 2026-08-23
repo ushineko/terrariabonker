@@ -253,3 +253,43 @@ def test_cache_rescans_when_ground_truth_is_unavailable(monkeypatch):
     svc._resolve_live = lambda: None                # anchor gone / mid world-load
     svc.players()
     assert len(calls) == 2, "an unconfirmable cache must be rescanned, not reused"
+
+
+def _svc_with_versions(monkeypatch, versions):
+    """A Service whose version detection yields the given readings in order."""
+    seq = list(versions)
+    monkeypatch.setattr("terrariabonker.service.ver.detect_version",
+                        lambda mem: seq.pop(0) if seq else "1.4.5.7")
+    monkeypatch.setattr("terrariabonker.service.ver.read_buildid", lambda p: None)
+    svc = Service(_Mem())
+    svc.mem.exe_path = lambda: None
+    return svc
+
+
+def test_a_startup_misread_build_is_not_cached(monkeypatch):
+    """Regression: the CLR's own "2.0.50727" can win the memory scan while the game is
+    still loading. Caching it pinned the build at "incompatible" for the life of the
+    worker, so require_compatible() refused restore, patches and item edits forever."""
+    svc = _svc_with_versions(monkeypatch, ["2.0.50727", "1.4.5.7"])
+    assert svc.compatibility()[0] == "incompatible"
+    assert svc.compatibility()[0] in ("exact", "hotfix"), "must re-detect, not cache the misread"
+
+
+def test_a_good_build_reading_is_cached(monkeypatch):
+    """The perf win still stands once the reading is trustworthy."""
+    calls = []
+    monkeypatch.setattr("terrariabonker.service.ver.detect_version",
+                        lambda mem: calls.append(1) or "1.4.5.7")
+    monkeypatch.setattr("terrariabonker.service.ver.read_buildid", lambda p: None)
+    svc = Service(_Mem())
+    svc.mem.exe_path = lambda: None
+    svc.compatibility()
+    svc.compatibility()
+    assert len(calls) == 1
+
+
+def test_invalidate_also_drops_the_build_reading(monkeypatch):
+    svc = _svc_with_versions(monkeypatch, ["1.4.5.7", "1.4.5.7"])
+    svc.compatibility()
+    svc.invalidate()
+    assert svc._compat is None
