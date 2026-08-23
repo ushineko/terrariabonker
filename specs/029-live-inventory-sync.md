@@ -1,6 +1,7 @@
 # Spec 029: Live inventory sync + stale-write guard
 
-**Status**: INCOMPLETE
+**Status**: COMPLETE
+**Implementation Date**: 2026-08-23
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -118,31 +119,52 @@ possible — ticks would overlap ~3 deep.
       behaviour exactly
 - [x] The GUI sends `--expect-type` for every slot edit; on refusal it shows the message,
       refreshes the grid, and does not write
-- [ ] `terrariabonker serve` answers newline-delimited JSON requests, one response per line,
+- [x] `terrariabonker serve` answers newline-delimited JSON requests, one response per line,
       matching request `id`; unknown/unallowlisted subcommands are refused without executing
-- [ ] The helper exits on stdin EOF (no orphaned root process) and re-locates across a game
+- [x] The helper exits on stdin EOF (no orphaned root process) and re-locates across a game
       pid change
-- [ ] `Service` reuses a validated locate cache; a corrupted/moved `life_addr` forces a
+- [x] `Service` reuses a validated locate cache; a corrupted/moved `life_addr` forces a
       rescan (headless test asserts the rescan happens rather than reading a stale address)
-- [ ] The GUI drives the helper from the Qt event loop only (no threads), and falls back to
+- [x] The GUI drives the helper from the Qt event loop only (no threads), and falls back to
       per-action CLI spawn when the helper is unavailable — including the no-passwordless-sudo
       case from spec 025
-- [ ] Inventory auto-syncs at 1 Hz while the tab is visible, pauses while an edit dialog is
+- [x] Inventory auto-syncs at 1 Hz while the tab is visible, pauses while an edit dialog is
       open, and never overlaps an in-flight request
-- [ ] Clicking a slot re-reads that slot before the dialog opens; the dialog is populated
+- [x] Clicking a slot re-reads that slot before the dialog opens; the dialog is populated
       from the fresh read, and falls back to the cached row if the read fails
-- [ ] Only changed cells re-render (pure `invgrid` diff, unit-tested); hovering a slot for
+- [x] Only changed cells re-render (pure `invgrid` diff, unit-tested); hovering a slot for
       several seconds keeps its tooltip
-- [ ] Measured on a live game: an inventory tick through the helper costs < 20 ms (recorded
+- [x] Measured on a live game: an inventory tick through the helper costs < 20 ms (recorded
       in the validation report), versus 2734 ms today
-- [ ] All tests pass headless; flake8 clean on changed files; security review recorded
-- [ ] README updated (auto-sync behaviour, `serve`); version bumped to 0.20.0 (maintainer
+- [x] All tests pass headless; flake8 clean on changed files; security review recorded
+- [x] README updated (auto-sync behaviour, `serve`); version bumped to 0.20.0 (maintainer
       confirmed) in `terrariabonker/__init__.py`, About dialog/titlebar, and README
 
 ## Executive Summary
 
-_Populate before opening the PR._
+The inventory grid now follows the game at 1 Hz, and a write built from a stale snapshot is
+refused instead of overwriting the slot. The sync was only affordable after fixing what a
+read actually costs: locating the player was ~99% of it (two full memory scans per call,
+2734 ms for an inventory read), because every GUI action spawned a fresh CLI process that
+re-located from scratch. A long-lived `serve` worker keeps those results warm behind cheap
+validation, taking a request to ~3 ms and the idle GUI from ~172% of a core to 2.5%.
+
+Reviewers: `Service._blocks_valid` (what makes a cached address trustworthy against a GC'd
+heap — including that no ground truth means rescan), the `SERVE_OPS` allowlist and the
+worker loop in `cli.py`, and `Service.set_item`'s `expect_type` guard.
 
 ## Testing
 
-_Populate during implementation._
+155 headless tests (from 119), flake8 clean on changed files, `pip-audit 2.10.0` clean.
+New: `test_stale_write_guard.py` (9, each refusal asserting memory is byte-unchanged),
+`test_serve_worker.py` (17, protocol + allowlist + cache validation), `test_gui_helper.py`
+(4, fallback and callback lifecycle), `test_gui_imports.py` (1), plus diff-render and
+dead-anchor cases. Live: worker cold 2799 ms then 2.8-3.5 ms warm; guard refused a stale
+write against the running game; the GUI's grid tracked in-game item movement and the guard
+fired in the editor (maintainer-verified); a SIGKILLed GUI leaves no orphaned root worker
+(the worker exits ~1 s later on stdin EOF).
+
+A Codex review pass on the working tree produced six findings; five were fixed (cache
+trusted without ground truth, dead anchor raising instead of signalling, stacked edit
+dialogs, sprites never repainting after extraction, dependency scan unrecorded) and one was
+declined with reasons. See the validation report.

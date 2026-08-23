@@ -69,3 +69,28 @@ def test_pick_live_prefers_below_max_when_static():
     assert len(players) == 2
     live = pick_live(m, players, samples=2, dt=0.0)
     assert live is not None and live.life_addr == other
+
+
+def test_local_player_at_returns_none_when_the_anchor_stops_reading():
+    """A cached anchor that goes bad must read as None so the caller re-finds it.
+
+    Reads return None on failure; feeding that straight into the next read raised an
+    uncaught TypeError, which broke every served request instead of relocalizing
+    (codex review, P2).
+    """
+    from conftest import FakeMem
+    from terrariabonker.locate import local_player_at
+    m = FakeMem(0x40000000, 0x1000)                 # anchor points outside the image
+    assert local_player_at(m, 0x40000000 + 0x900) is None
+
+
+def test_local_player_at_returns_none_on_a_null_player_array():
+    from conftest import FakeMem
+    from terrariabonker.locate import local_player_at
+    m = FakeMem(0x40000000, 0x2000)
+    anchor = 0x40000000 + 0x100
+    m.poke_i32(anchor - 0xA, 0x40000000 + 0x800)    # statics resolve...
+    m.poke_i32(anchor - 4, 0x40000000 + 0x804)
+    m.poke_i32(0x40000000 + 0x800, 0)               # ...but Main.player is null
+    m.poke_i32(0x40000000 + 0x804, 0)
+    assert local_player_at(m, anchor) is None

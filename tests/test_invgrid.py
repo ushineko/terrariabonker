@@ -115,3 +115,22 @@ class RarityColorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_changed_rows_reports_only_what_moved():
+    """The 1 Hz sync must not repaint untouched cells: that resets icon + tooltip."""
+    prev = {0: {"slot": 0, "type": 2, "stack": 10},
+            1: {"slot": 1, "type": 0}}
+    rows = [{"slot": 0, "type": 2, "stack": 10},        # unchanged
+            {"slot": 1, "type": 5, "stack": 1}]         # filled in-game
+    assert invgrid.changed_rows(prev, rows) == [rows[1]]
+
+
+def test_changed_rows_notices_fields_only_the_tooltip_shows():
+    prev = {0: {"slot": 0, "type": 2, "stack": 10, "damage": 5}}
+    rows = [{"slot": 0, "type": 2, "stack": 10, "damage": 9}]
+    assert invgrid.changed_rows(prev, rows) == rows
+
+
+def test_changed_rows_treats_unseen_slots_as_changed():
+    assert invgrid.changed_rows({}, [{"slot": 3, "type": 1}]) == [{"slot": 3, "type": 1}]

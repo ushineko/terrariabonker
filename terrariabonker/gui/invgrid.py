@@ -130,3 +130,13 @@ def tooltip(row: dict, name: str) -> str:
     lines.append("Auto-reuse " + ("on" if row.get("auto_reuse") else "off"))
     lines.append(f"Use time {row.get('use_time')}")
     return "\n".join(lines)
+
+
+def changed_rows(prev: dict[int, dict], rows: list[dict]) -> list[dict]:
+    """Rows that differ from what is currently on screen, keyed by slot.
+
+    The grid re-reads every second; re-rendering an unchanged cell resets its icon
+    and tooltip, which cancels a hover the user is reading. Comparing the whole row
+    keeps any field the tooltip shows (damage, defense, prefix, use time) honest.
+    """
+    return [r for r in rows if prev.get(r.get("slot")) != r]

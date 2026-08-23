@@ -212,7 +212,11 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   tooltip colours), and a full-detail tooltip.
   Click a filled cell to edit it in a dialog, or an empty cell to place a
   fully-statted item (item field autocompletes over all item names); the dialog can
-  also clear a slot. **Persistence note:** Terraria saves an item as only its
+  also clear a slot. The grid **syncs with the game about once a second** while the tab
+  is open, so it follows items you move in-game; opening a slot re-reads it first. A
+  write also states which item it expected, and is **refused** if the slot changed
+  underneath it ("slot 12 now holds Zenith, not Copper Pickaxe") rather than
+  overwriting whatever is really there. **Persistence note:** Terraria saves an item as only its
   **type + stack + modifier** and regenerates the rest (damage, use-time, pickaxe
   power, defense, reach, auto-reuse) from the type on load — so those stat edits are
   session-only as far as the game is concerned. Auto-restore bridges this: it
@@ -227,8 +231,12 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   local cache (a few seconds, one-time); **Re-extract from game** regenerates both the
   recipe database and the icons after a game update.
 
-The window runs unprivileged and runs each action as a short `sudo` CLI call, so
-Qt never runs as root.
+The window runs unprivileged and never runs Qt as root. It keeps one long-lived
+`terrariabonker serve` worker under `sudo` and sends it JSON lines, because locating the
+player is ~99% of a read's cost: a one-shot CLI read takes ~2.7 s, a warm request ~3 ms.
+That is what makes the live sync affordable. Without passwordless sudo (or if the worker
+stops) it falls back to a short `sudo` CLI call per action and the grid stays manual —
+the **Refresh** button and the reload after an edit.
 
 ## Version safety
 
@@ -278,9 +286,10 @@ terrariabonker/
 │   ├── data/prefixes.json      modifier-id name map (extracted from Terraria.exe)
 │   ├── data/recipes.json       recipe cache (extracted from the running game)
 ├── tools/extract_item_names/   dotnet tool that regenerates items.json from the exe
-│   ├── cli.py                  argparse front end
+│   ├── cli.py                  argparse front end (incl. the `serve` worker)
 │   └── gui/
 │       ├── main_window.py      PyQt6 control panel
+│       ├── helper.py           long-lived `serve` worker transport (Qt event loop)
 │       ├── client.py           CLI-argv builders + output parsers (CLI/GUI parity)
 │       ├── invgrid.py          Qt-free grid layout / label / tooltip helpers
 │       └── item_dialog.py      modal per-item editor

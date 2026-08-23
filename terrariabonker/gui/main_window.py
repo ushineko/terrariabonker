@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
 
 from terrariabonker import __version__, names, prefixes, profile, recipes, sprites
 from terrariabonker.gui import client, invgrid
+from terrariabonker.gui.helper import Helper
 from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import PATCH_CATALOG
 
@@ -165,12 +166,26 @@ class MainWindow(QWidget):
         self._pixmap_cache: dict[int, QPixmap] = {}  # ItemID -> raw sprite QPixmap (or null)
         self._placeholder_icon = None
         self._sprites_extracting = False           # guard against concurrent extraction
+        self._rendered: dict = {}                  # slot -> row currently on screen
+        self._inv_inflight = False                 # one outstanding sync request at a time
+        self._dialog_open = False                  # pause syncing while the editor is up
+        self._opening_slot = False                 # a pre-dialog slot read is outstanding
         self._restore_pid = None                   # last game pid we auto-restored to
         self._restore_attempts = 0                 # retry budget for lazily-JIT'd cheats
         self._build()
+        # One long-lived privileged worker keeps the locate caches warm, so repeated
+        # reads cost ~3 ms instead of ~2.7 s. Without it every call spawns its own CLI.
+        self.helper = Helper(self, *_cli_args(["serve"]), on_note=self.log.appendPlainText)
+        if _passwordless_sudo():
+            self.helper.start()
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self.refresh_status)
         self._status_timer.start(2000)
+        # Live inventory sync: the grid follows the game so an edit is never built on a
+        # stale snapshot (the write-time guard catches what slips through the gap).
+        self._inv_timer = QTimer(self)
+        self._inv_timer.timeout.connect(self._sync_inventory)
+        self._inv_timer.start(1000)
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
         self._check_sudo()
@@ -219,6 +234,7 @@ class MainWindow(QWidget):
         root.addWidget(self.sudo_warn)
 
         tabs = QTabWidget()
+        self.tabs = tabs
         tabs.addTab(self._trainer_tab(), "Trainer")
         tabs.addTab(self._inventory_tab(), "Inventory")
         tabs.addTab(self._recipes_tab(), "Recipes")
@@ -421,10 +437,10 @@ class MainWindow(QWidget):
             else:
                 self.refresh_patches()       # settled: sync checkboxes to memory
 
-        self._spawn(client.patch_set_argv(name, on, value=value), on_output=done)
+        self._call(client.patch_set_argv(name, on, value=value), on_output=done)
 
     def refresh_patches(self):
-        self._spawn(client.patch_status_argv(), on_output=self._render_patches)
+        self._call(client.patch_status_argv(), on_output=self._render_patches)
 
     def _render_patches(self, raw: str):
         st = client.parse_patch_status(raw)
@@ -471,6 +487,13 @@ class MainWindow(QWidget):
         return b
 
     # --- process plumbing --------------------------------------------------
+    def _call(self, sub_args: list[str], on_output=None):
+        """Run a CLI subcommand: through the warm worker when it is up, else by
+        spawning it one-shot (no passwordless sudo, worker died, command not served)."""
+        if self.helper.request(sub_args, on_output or (lambda _out: None)):
+            return None
+        return self._spawn(sub_args, on_output=on_output)
+
     def _spawn(self, sub_args: list[str], on_output=None) -> QProcess:
         """Start a CLI subcommand under sudo, tracking it so it can't be GC'd
         mid-run (the cause of one-shot actions silently doing nothing)."""
@@ -535,7 +558,7 @@ class MainWindow(QWidget):
                 self.log.appendPlainText(out.rstrip())
             self.refresh_status()
 
-        self._spawn(sub_args, on_output=done)
+        self._call(sub_args, on_output=done)
 
     def _restart_freeze(self):
         if self._freeze is not None:
@@ -565,7 +588,7 @@ class MainWindow(QWidget):
             self._status_busy = False
             self._render_status(out)
 
-        self._spawn(client.status_argv(), on_output=done)
+        self._call(client.status_argv(), on_output=done)
 
     def _render_status(self, raw: str):
         d = client.parse_status(raw)
@@ -611,7 +634,7 @@ class MainWindow(QWidget):
             if (rep["pending"] or rep["skipped"]) and self._restore_attempts < 8:
                 QTimer.singleShot(2000, self._do_restore)
 
-        self._spawn(client.restore_argv(), on_output=done)
+        self._call(client.restore_argv(), on_output=done)
 
     def _about(self):
         QMessageBox.about(
@@ -639,7 +662,34 @@ class MainWindow(QWidget):
 
     # --- inventory tab (grid) ----------------------------------------------
     def refresh_inventory(self):
-        self._spawn(client.inventory_argv(), on_output=self._fill_grid)
+        self._call(client.inventory_argv(), on_output=self._fill_grid)
+
+    def _inventory_visible(self) -> bool:
+        return self.tabs.currentIndex() == self.tabs.indexOf(self.tabs.widget(1))
+
+    def _sync_inventory(self):
+        """The 1 Hz tick: keep the grid tracking the game.
+
+        Only runs through the warm worker. A one-shot read costs ~2.7 s, so polling it
+        at 1 Hz would just pile overlapping scans onto a core forever; without the
+        worker the grid stays manual (Refresh, and the reload after an edit), and the
+        write-time guard still makes a stale edit safe.
+
+        Skipped while the tab is hidden (nothing to see), while the edit dialog is up
+        (the row under it must not move), and while a request is already out.
+        """
+        if not self.helper.available or self._inv_inflight or self._dialog_open:
+            return
+        if not self._inventory_visible():
+            return
+        self._inv_inflight = True
+
+        def done(raw):
+            self._inv_inflight = False
+            self._fill_grid(raw)
+
+        if not self.helper.request(client.inventory_argv(), done):
+            self._inv_inflight = False           # worker went away between checks
 
     def _fill_grid(self, raw: str):
         rows = client.parse_inventory(raw)
@@ -647,8 +697,23 @@ class MainWindow(QWidget):
             return
         self._all_rows = rows
         by_slot = {r["slot"]: r for r in rows}
-        for slot, cell in self._cells.items():
-            self._render_cell(cell, by_slot.get(slot, {"slot": slot, "type": 0}))
+        full = [by_slot.get(slot, {"slot": slot, "type": 0}) for slot in self._cells]
+        # Re-render only what moved: repainting an unchanged cell resets its icon and
+        # tooltip, which would cancel a hover the user is reading at 1 Hz.
+        for row in invgrid.changed_rows(self._rendered, full):
+            self._render_cell(self._cells[row["slot"]], row)
+            self._rendered[row["slot"]] = dict(row)
+
+    def _invalidate_icons(self):
+        """Drop the icon caches AND the rendered-cell snapshot.
+
+        After a sprite extraction the inventory rows are byte-identical, so the
+        no-flicker diff would skip every cell and the freshly decoded sprites would
+        never appear — cells stay on their text placeholders until an item changes.
+        """
+        self._pixmap_cache.clear()
+        self._icon_cache.clear()
+        self._rendered.clear()
 
     def _render_cell(self, cell: QPushButton, row: dict):
         if invgrid.is_empty(row):
@@ -681,10 +746,35 @@ class MainWindow(QWidget):
                     {"slot": slot, "type": 0})
 
     def _on_cell_clicked(self, slot: int):
+        """Re-read the slot before opening the editor so the dialog starts from truth,
+        not from an up-to-a-second-old row. Falls back to the cached row if the read
+        fails or the worker is not up."""
+        if self._dialog_open or self._opening_slot:
+            return                      # Qt pumps events during a modal: no stacked dialogs
+        if self.helper.available:
+            self._opening_slot = True
+
+            def fresh(raw):
+                self._opening_slot = False
+                if client.parse_inventory(raw) is not None:
+                    self._fill_grid(raw)
+                self._open_item_dialog(slot)
+
+            if self.helper.request(client.inventory_argv(), fresh):
+                return
+            self._opening_slot = False
+        self._open_item_dialog(slot)
+
+    def _open_item_dialog(self, slot: int):
         row = self._row_for(slot)
         orig_type = int(row.get("type", 0))
         dlg = ItemEditDialog(self, row, self._item_names)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        self._dialog_open = True
+        try:
+            accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        finally:
+            self._dialog_open = False
+        if not accepted:
             return
         if dlg.cleared:
             self._write_slot(client.set_item_argv(slot, 0, expect_type=orig_type))
@@ -723,7 +813,7 @@ class MainWindow(QWidget):
                 self.refresh_inventory()
             self.refresh_status()
 
-        self._spawn(sub_args, on_output=done)
+        self._call(sub_args, on_output=done)
 
     # --- recipes tab -------------------------------------------------------
     def _recipes_tab(self) -> QWidget:
@@ -937,7 +1027,7 @@ class MainWindow(QWidget):
         self._spawn(client.extract_recipes_argv(), on_output=done)
 
     def _after_reextract(self):
-        self._icon_cache.clear()
+        self._invalidate_icons()
         self._recipe_grid_ready = True
         self._rebuild_recipe_grid()
 
@@ -954,8 +1044,7 @@ class MainWindow(QWidget):
 
         def done(_out):
             self._sprites_extracting = False
-            self._pixmap_cache.clear()               # drop any placeholders cached pre-extract
-            self._icon_cache.clear()
+            self._invalidate_icons()                 # drop placeholders + force a full redraw
             self._recipe_status_hint()
             if after:
                 after()
@@ -964,6 +1053,8 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event):
         self._status_timer.stop()
+        self._inv_timer.stop()
+        self.helper.stop()
         for proc in list(self._procs):
             try:
                 proc.terminate()

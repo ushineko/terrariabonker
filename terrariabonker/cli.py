@@ -9,7 +9,10 @@ drift; ``--json`` is the contract the GUI's ``gui.client`` consumes.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
+import os
 import sys
 from dataclasses import asdict
 
@@ -19,7 +22,16 @@ from terrariabonker.service import Service, ServiceError
 from terrariabonker.trainer import Freezer
 
 
+# Set by ``serve`` to a Service that keeps its locate caches warm across requests.
+# One-shot CLI runs leave it None and behave exactly as before.
+_WARM: Service | None = None
+
+
 def _svc(guard: bool = False, force: bool = False) -> Service:
+    if _WARM is not None:
+        if guard:
+            _WARM.require_compatible(force)
+        return _WARM
     elevate()                                # no-op if already root; re-execs otherwise
     svc = Service.connect()
     if guard:
@@ -136,6 +148,90 @@ def cmd_set_item(args) -> int:
     else:
         profile.clear_item(args.slot)
     print(f"[OK] set slot {args.slot} to type {args.type}")
+    return 0
+
+
+# Subcommands the long-lived worker will run. Everything else is refused: the GUI
+# itself, the blocking freeze loop, the raw memory debug pokes, and the slow
+# unprivileged disk work the GUI already runs without sudo.
+SERVE_OPS = frozenset({
+    "status", "version", "inventory", "inv", "set-hp", "set-max-hp", "set-mana",
+    "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
+    "fast-mining", "long-reach",
+})
+
+
+def _serve_reply(rid, ok: bool, out: str) -> None:
+    """One response per line on stdout; the stream is the protocol, so flush it."""
+    print(json.dumps({"id": rid, "ok": ok, "out": out}), flush=True)
+
+
+def _serve_once(parser, argv: list[str]) -> tuple[bool, str]:
+    """Run one already-allowlisted argv against the warm Service, capturing its
+    output the way the GUI's merged-channels subprocess would see it."""
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            try:
+                args = parser.parse_args(argv)
+            except SystemExit:                      # argparse rejected the argv
+                return False, (buf.getvalue() or "[ERROR] bad arguments")
+            if not getattr(args, "func", None):
+                return False, "[ERROR] no such command"
+            rc = args.func(args)
+        return rc == 0, buf.getvalue()
+    except ServiceError as e:
+        return False, buf.getvalue() + f"[ERROR] {e}"
+    except Exception as e:                          # never let one request kill the worker
+        return False, buf.getvalue() + f"[ERROR] {type(e).__name__}: {e}"
+
+
+def cmd_serve(args) -> int:
+    """Long-lived privileged worker for the GUI.
+
+    Reads one JSON request per line on stdin -- ``{"id": N, "argv": [...]}`` -- runs the
+    argv through this same parser against a Service whose locate caches stay warm, and
+    writes one JSON response per line: ``{"id": N, "ok": bool, "out": str}``.
+
+    The point is cost: locating the player is ~99% of a read (a full memory scan), so a
+    one-shot CLI run pays ~2.7 s while a warm request costs ~2.5 ms. That is what makes
+    the GUI's 1 Hz inventory sync affordable.
+
+    It exits on stdin EOF, so it cannot outlive the GUI that started it.
+    """
+    global _WARM
+    elevate()                                # no-op when the GUI already started us under sudo
+    parser = build_parser()
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        rid = None
+        try:
+            req = json.loads(line)
+            rid = req.get("id")
+            argv = req["argv"]
+            if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
+                raise ValueError("argv must be a list of strings")
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            _serve_reply(rid, False, f"[ERROR] malformed request: {e}")
+            continue
+        if not argv or argv[0] not in SERVE_OPS:
+            _serve_reply(rid, False,
+                         f"[ERROR] {argv[0] if argv else '(empty)'} is not served here")
+            continue
+        # Drop the warm Service when the game went away, so the next request reconnects
+        # to whatever is running now (game restart => new pid).
+        if _WARM is not None and not os.path.exists(f"/proc/{_WARM.mem.pid}"):
+            _WARM = None
+        if _WARM is None:
+            try:
+                _WARM = Service.connect()
+            except ServiceError as e:
+                _serve_reply(rid, False, f"[ERROR] {e}")
+                continue
+        ok, out = _serve_once(parser, argv)
+        _serve_reply(rid, ok, out)
     return 0
 
 
@@ -303,6 +399,10 @@ def build_parser() -> argparse.ArgumentParser:
     force_flag(p)
     p.add_argument("--json", action="store_true", help="machine-readable report")
     p.set_defaults(func=cmd_restore)
+
+    p = sub.add_parser("serve",
+                       help="long-lived JSON worker for the GUI (stdin/stdout protocol)")
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("gui", help="launch the graphical control panel")
     p.set_defaults(func=cmd_gui)

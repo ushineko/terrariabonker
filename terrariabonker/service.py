@@ -21,7 +21,8 @@ import numpy as np
 from terrariabonker import names
 from terrariabonker import version as ver
 from terrariabonker.inventory import INVENTORY_SLOTS, ITEM_TYPE, Inventory, Slot
-from terrariabonker.locate import find_players, pick_live, resolve_local_player
+from terrariabonker.locate import (find_localplayer_anchor, find_players, local_player_at,
+                                   pick_live, read_block)
 from terrariabonker.player import Player
 from terrariabonker.proc import Mem, ProcError, find_pid
 
@@ -84,6 +85,17 @@ class Service:
 
     def __init__(self, mem: Mem):
         self.mem = mem
+        # Locating is ~99% of a read's cost (a full scan per call), so a long-lived
+        # caller (the `serve` worker) keeps the results and re-validates them cheaply.
+        # A one-shot CLI run locates once and exits, so it is unaffected.
+        self._blocks = None                  # cached find_players() result
+        self._anchor = None                  # cached Main.get_LocalPlayer anchor
+        self._compat = None                  # build never changes while the process lives
+
+    def invalidate(self) -> None:
+        """Drop cached locate results; the next call rescans from scratch."""
+        self._blocks = None
+        self._anchor = None
 
     @classmethod
     def connect(cls) -> "Service":
@@ -94,10 +106,18 @@ class Service:
             raise ServiceError(str(e)) from e
 
     # --- build gate --------------------------------------------------------
+    def _build_info(self):
+        """(version, buildid, level, msg), detected once — a running process cannot
+        change build, and this is on the status-poll path."""
+        if self._compat is None:
+            version = ver.detect_version(self.mem)
+            buildid = ver.read_buildid(self.mem.exe_path())
+            level, msg = ver.compatibility(version, buildid)
+            self._compat = (version, buildid, level, msg)
+        return self._compat
+
     def compatibility(self) -> tuple[str, str]:
-        version = ver.detect_version(self.mem)
-        buildid = ver.read_buildid(self.mem.exe_path())
-        return ver.compatibility(version, buildid)
+        return self._build_info()[2:]
 
     def require_compatible(self, force: bool = False) -> None:
         """Raise on an incompatible build unless forced (for mutating ops)."""
@@ -108,17 +128,53 @@ class Service:
 
     # --- locating ----------------------------------------------------------
     def players(self):
+        if self._blocks is not None and self._blocks_valid(self._blocks):
+            return self._blocks
         blocks = find_players(self.mem)
         if not blocks:
+            self._blocks = None
             raise ServiceError("no player found. Load into a world first.")
+        self._blocks = blocks
         return blocks
+
+    def _blocks_valid(self, blocks) -> bool:
+        """Cheap re-validation of cached addresses (a few reads, no scan).
+
+        The managed heap is GC'd, so a cached ``life_addr`` can stop being a player
+        block. Two things must hold: every cached address still reads back as the same
+        named player, and the live player (ground truth) is still one of them — the
+        latter catches a world reload that moved the player to a new object, which
+        would otherwise leave writes landing on dead copies.
+        """
+        for b in blocks:
+            fresh = read_block(self.mem, b.life_addr)
+            if fresh is None or fresh.name != b.name:
+                return False
+        live = self._resolve_live()
+        if live is None:
+            # No ground truth (anchor gone, or Main.player[myPlayer] is null mid-load):
+            # a dead copy can still read back as the same named player, so the cache
+            # cannot be confirmed. Fail safe and rescan rather than write to a corpse.
+            return False
+        return live.life_addr in {b.life_addr for b in blocks}
+
+    def _resolve_live(self):
+        """Ground truth through a cached anchor, re-finding it if it stops resolving."""
+        if self._anchor is not None:
+            blk = local_player_at(self.mem, self._anchor)
+            if blk is not None:
+                return blk
+        self._anchor = find_localplayer_anchor(self.mem)
+        if self._anchor is None:
+            return None
+        return local_player_at(self.mem, self._anchor)
 
     def _select_live(self, blocks):
         """Pick the live player copy. Ground truth first (Main.player[myPlayer], works
         even while paused); fall back to the activity heuristic, then richest inventory.
         The heuristic's max-inventory fallback is unreliable — a frozen snapshot can
         hold more items than the live player — so ground truth is strongly preferred."""
-        live = resolve_local_player(self.mem)
+        live = self._resolve_live()
         if live is not None:
             return live
         live = pick_live(self.mem, blocks)
@@ -192,10 +248,11 @@ class Service:
 
     # --- reads -------------------------------------------------------------
     def snapshot(self, with_inventory: bool = True) -> Snapshot:
-        blocks = find_players(self.mem)
-        version = ver.detect_version(self.mem)
-        buildid = ver.read_buildid(self.mem.exe_path())
-        level, msg = ver.compatibility(version, buildid)
+        try:
+            blocks = self.players()          # cached + validated; [] when none loaded
+        except ServiceError:
+            blocks = []
+        version, buildid, level, msg = self._build_info()
         player = inv_slots = None
         inv_slots = []
         if blocks:

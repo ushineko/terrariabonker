@@ -129,7 +129,7 @@ def find_players(mem) -> list[PlayerBlock]:
     return found
 
 
-def _read_block(mem, life_addr: int) -> PlayerBlock | None:
+def read_block(mem, life_addr: int) -> PlayerBlock | None:
     """Build a validated PlayerBlock from a statLife address, or None."""
     raw = mem.read(life_addr - 8, BLOCK_LEN * 4)     # statLifeMax2 sits at life-8
     if len(raw) < BLOCK_LEN * 4:
@@ -189,6 +189,37 @@ def main_static_base(mem) -> int | None:
     return mem.read_u32(tail - 0xA) - MAIN_PLAYER_OFF
 
 
+def find_localplayer_anchor(mem) -> int | None:
+    """The expensive half of ``resolve_local_player``: AOB-locate ``Main.get_LocalPlayer``.
+
+    Split out so a long-lived caller can find it once and keep it (see
+    ``local_player_at``). Returns the anchor address, or None if the pattern is gone.
+    """
+    return _find_localplayer_tail(mem)
+
+
+def local_player_at(mem, anchor: int) -> PlayerBlock | None:
+    """The cheap half: read ``Main.player[Main.myPlayer]`` through a known anchor.
+
+    Four pointer reads, no scanning. Because it re-reads the statics every time it
+    self-corrects when the managed heap moves the Player object, so a cached anchor
+    stays usable across a GC. Returns None if the anchor no longer resolves, which is
+    the caller's signal to re-find it.
+    """
+    player_static = mem.read_u32(anchor - 0xA)      # operand of mov eax,[Main.player]
+    myplayer_static = mem.read_u32(anchor - 4)      # operand of mov ecx,[Main.myPlayer]
+    if not player_static or not myplayer_static:
+        return None                                 # anchor no longer readable
+    arr = mem.read_u32(player_static)
+    idx = mem.read_i32(myplayer_static)
+    if not arr or idx is None or not (0 <= idx < 256):
+        return None
+    obj = mem.read_u32(arr + idx * 4 + 0x10)        # Player[] szarray data at +0x10
+    if not obj:
+        return None
+    return read_block(mem, obj + STATLIFE_FROM_OBJ)
+
+
 def resolve_local_player(mem) -> PlayerBlock | None:
     """Resolve ``Main.player[Main.myPlayer]`` — the authoritative live player.
 
@@ -198,19 +229,10 @@ def resolve_local_player(mem) -> PlayerBlock | None:
     it references. Returns None if the pattern is missing (e.g. game updated), so
     callers fall back to the scan + heuristic.
     """
-    tail = _find_localplayer_tail(mem)
-    if tail is None:
+    anchor = find_localplayer_anchor(mem)
+    if anchor is None:
         return None
-    player_static = mem.read_u32(tail - 0xA)         # operand of mov eax,[Main.player]
-    myplayer_static = mem.read_u32(tail - 4)         # operand of mov ecx,[Main.myPlayer]
-    arr = mem.read_u32(player_static)
-    idx = mem.read_i32(myplayer_static)
-    if not arr or not (0 <= idx < 256):
-        return None
-    obj = mem.read_u32(arr + idx * 4 + 0x10)         # Player[] szarray data at +0x10
-    if not obj:
-        return None
-    return _read_block(mem, obj + STATLIFE_FROM_OBJ)
+    return local_player_at(mem, anchor)
 
 
 def pick_live(mem, players: list[PlayerBlock], samples: int = 6, dt: float = 0.08):
