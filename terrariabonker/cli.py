@@ -122,11 +122,19 @@ def cmd_set_stack(args) -> int:
 
 
 def cmd_set_item(args) -> int:
+    from terrariabonker import profile
     svc = _svc(guard=True, force=args.force)
-    svc.set_item(args.slot, args.type, stack=args.stack, damage=args.damage,
-                 auto_reuse=args.auto_reuse, use_time=args.use_time,
-                 use_anim=args.use_anim, pick=args.pick, tile_boost=args.tile_boost,
-                 defense=args.defense, prefix=args.prefix)
+    kwargs = dict(stack=args.stack, damage=args.damage, auto_reuse=args.auto_reuse,
+                  use_time=args.use_time, use_anim=args.use_anim, pick=args.pick,
+                  tile_boost=args.tile_boost, defense=args.defense, prefix=args.prefix)
+    svc.set_item(args.slot, args.type, **kwargs)
+    # Record the edit in the cross-session profile so auto-restore can re-apply it (Terraria
+    # only saves type/stack/prefix, regenerating the rest from the type on load).
+    if args.type:
+        profile.set_item(args.slot, {"type": args.type,
+                                     **{k: v for k, v in kwargs.items() if v is not None}})
+    else:
+        profile.clear_item(args.slot)
     print(f"[OK] set slot {args.slot} to type {args.type}")
     return 0
 
@@ -214,6 +222,18 @@ def cmd_extract_recipes(args) -> int:
     return 0
 
 
+def cmd_restore(args) -> int:
+    """Re-apply the saved profile (desired cheats + item edits) to the running game."""
+    svc = _svc(guard=True, force=args.force)
+    rep = svc.restore()
+    if args.json:
+        print(json.dumps(rep))
+        return 0
+    print(f"[OK] restored cheats={rep['cheats']} items={rep['items']} "
+          f"pending={rep['pending']} skipped={rep['skipped']}")
+    return 0
+
+
 def cmd_extract_sprites(args) -> int:
     """Decode item icons from the game's Content/Images into the local cache. Unprivileged
     (disk read + /proc/<pid>/maps only) — no sudo, so the cache lands in the user's home."""
@@ -277,6 +297,12 @@ def build_parser() -> argparse.ArgumentParser:
                        help="read Main.recipe[] from the running game -> data/recipes.json")
     force_flag(p)
     p.set_defaults(func=cmd_extract_recipes)
+
+    p = sub.add_parser("restore",
+                       help="re-apply the saved profile (cheats + item edits) to the game")
+    force_flag(p)
+    p.add_argument("--json", action="store_true", help="machine-readable report")
+    p.set_defaults(func=cmd_restore)
 
     p = sub.add_parser("gui", help="launch the graphical control panel")
     p.set_defaults(func=cmd_gui)

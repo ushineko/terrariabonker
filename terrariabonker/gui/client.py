@@ -124,6 +124,17 @@ def patch_set_argv(cheat: str, on: bool, value: float | None = None) -> list[str
     return argv
 
 
+def restore_argv() -> list[str]:
+    return ["restore", "--json"]
+
+
+def parse_restore(raw: str) -> dict | None:
+    try:
+        return json.loads(raw.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+
+
 def extract_recipes_argv() -> list[str]:
     return ["extract-recipes"]
 

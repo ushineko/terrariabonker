@@ -16,7 +16,10 @@ NAME_AT = BASE + 0x40
 @pytest.fixture
 def game(tmp_path, monkeypatch):
     from conftest import FakeMem
+
+    from terrariabonker import profile
     monkeypatch.setattr(P, "_STATE", str(tmp_path / "patches.json"))
+    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))   # isolate profile
     m = FakeMem(BASE, 0x8000)
     # a player so value writes (mining/reach) have somewhere to go
     m.plant_mono_string(NAME_AT, "hero")

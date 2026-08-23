@@ -287,6 +287,41 @@ class Service:
         from terrariabonker.patcher import Patcher
         return Patcher(self.mem)
 
+    def restore(self) -> dict:
+        """Re-apply the cross-session profile (desired cheats + item edits) to this game.
+
+        Cheats first: each is re-enabled with its saved value; a cheat whose method isn't
+        JIT-compiled yet raises and is reported as pending (not fatal) so the caller can
+        retry. Items: re-apply an edit only when the slot still holds the same item type
+        (re-applying stats to the same item) — a differing type means the player changed it,
+        so skip to avoid clobbering; empty markers are never auto-cleared. Returns a report
+        ``{"cheats": [...], "items": [...], "pending": [...], "skipped": [...]}``."""
+        from terrariabonker import profile
+        from terrariabonker.patcher import PatchError
+        report = {"cheats": [], "items": [], "pending": [], "skipped": []}
+        p = self.patcher()
+        for name, value in profile.cheats().items():
+            try:
+                p.enable(name, value)
+                report["cheats"].append(name)
+            except PatchError:
+                report["pending"].append(name)            # method not JIT-ready yet; retry
+            except (KeyError, ServiceError):
+                report["skipped"].append(f"cheat:{name}")
+        cur = {s.slot: s for s in self.inventory()}
+        for slot_s, kw in profile.items().items():
+            slot, itype = int(slot_s), int(kw.get("type", 0))
+            if not itype:
+                continue                                  # empty marker: never auto-clear
+            c = cur.get(slot)
+            if c is not None and c.type == itype:         # same item -> re-apply the edits
+                self.set_item(slot, itype,
+                              **{k: v for k, v in kw.items() if k != "type"})
+                report["items"].append(slot)
+            else:
+                report["skipped"].append(f"item:slot{slot}")  # item changed; don't clobber
+        return report
+
     def fast_mining(self, use_time: int = 8, use_anim: int = 13, pick: int = 200) -> list[int]:
         hit = []
         for inv in self._all_inventories():

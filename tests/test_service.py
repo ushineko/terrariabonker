@@ -101,3 +101,18 @@ def test_give_item_raises_when_full():
         assert False, "expected ServiceError on full inventory"
     except ServiceError:
         pass
+
+
+def test_restore_reapplies_matching_items_only(monkeypatch, tmp_path):
+    # restore re-applies an item edit only when the slot still holds the same item type
+    # (re-applying stats), and skips a slot whose item changed (no clobber).
+    from terrariabonker import profile
+    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
+    svc = Service(_game([(3507, 1), (2, 250)]))     # slot0=type 3507, slot1=type 2
+    profile.set_item(0, {"type": 3507, "damage": 200})   # matches slot0
+    profile.set_item(1, {"type": 999, "damage": 50})     # slot1 is type 2 -> mismatch
+    rep = svc.restore()
+    assert rep["cheats"] == [] and rep["pending"] == []
+    assert 0 in rep["items"]
+    assert "item:slot1" in rep["skipped"]
+    assert svc.inventory()[0].damage == 200         # re-applied to the same item

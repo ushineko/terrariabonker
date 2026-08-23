@@ -169,6 +169,7 @@ terrariabonker patch enable teleport              # map-ping teleport: double-cl
 terrariabonker patch enable max_minions --value 10 # raise the minion (summon) cap
 terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
 
+terrariabonker restore             # re-apply the saved profile (cheats + item edits) to the game
 terrariabonker extract-recipes     # read Main.recipe[] -> data/recipes.json (for the Recipes tab)
 terrariabonker extract-sprites     # decode item icons from Content/Images -> local cache
 ```
@@ -183,6 +184,12 @@ game build (see below).
 
 Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
 
+- **Auto-restore** — the panel remembers your desired cheats (and their values) and your
+  per-slot item edits in a cross-session profile, and re-applies them automatically when a
+  fresh game is detected (launched from the panel or restarted externally). Cheats whose
+  method compiles lazily (e.g. fast placement, only after you first use an item) are retried
+  for a few seconds. This is what makes item stat-edits effectively persist across save/exit
+  (see the Inventory note below).
 - **Launch Terraria** — a header button starts the game through Steam when it
   isn't already running. It runs unprivileged (Steam refuses to run as root), so
   unlike the memory actions it does not go through sudo.
@@ -200,7 +207,13 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   tooltip colours), and a full-detail tooltip.
   Click a filled cell to edit it in a dialog, or an empty cell to place a
   fully-statted item (item field autocompletes over all item names); the dialog can
-  also clear a slot.
+  also clear a slot. **Persistence note:** Terraria saves an item as only its
+  **type + stack + modifier** and regenerates the rest (damage, use-time, pickaxe
+  power, defense, reach, auto-reuse) from the type on load — so those stat edits are
+  session-only as far as the game is concerned. Auto-restore bridges this: it
+  re-applies your edits to the same item when the game reloads, so they effectively
+  persist (only for the same item type in that slot — a slot whose item you changed
+  in-game is left alone).
 - **Recipes** tab — a crafting-panel-style **icon grid** of craftable items. Type in the
   search box to filter the grid in real time (by name or ItemID); click an item for a
   popup listing its ingredients (icon + count) and crafting station. The **Makes / Uses**
@@ -252,6 +265,7 @@ terrariabonker/
 │   ├── version.py              build detection and the compatibility gate
 │   ├── names.py                ItemID -> name lookup for the item browser
 │   ├── prefixes.py             modifier names + per-class applicability + good/bad quality
+│   ├── profile.py              cross-session desired config (cheats + item edits) for auto-restore
 │   ├── recipes.py              recipe extraction (from Main.recipe[]) + browse/search
 │   ├── xnb.py                  self-contained XNB + LZX + Texture2D decoder (item sprites)
 │   ├── sprites.py              item-icon cache (decode Content/Images -> ~/.cache)

@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout,
                              QWidget)
 
-from terrariabonker import names, prefixes, recipes, sprites
+from terrariabonker import names, prefixes, profile, recipes, sprites
 from terrariabonker.gui import client, invgrid
 from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import PATCH_CATALOG
@@ -164,6 +164,8 @@ class MainWindow(QWidget):
         self._pixmap_cache: dict[int, QPixmap] = {}  # ItemID -> raw sprite QPixmap (or null)
         self._placeholder_icon = None
         self._sprites_extracting = False           # guard against concurrent extraction
+        self._restore_pid = None                   # last game pid we auto-restored to
+        self._restore_attempts = 0                 # retry budget for lazily-JIT'd cheats
         self._build()
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self.refresh_status)
@@ -547,6 +549,38 @@ class MainWindow(QWidget):
             f"<b>{d.get('name')}</b> — HP {d.get('hp')}/{d.get('max_hp')} · "
             f"Mana {d.get('mana')}/{d.get('max_mana')} · "
             f"PID {d.get('pid')} · Terraria {d.get('version')}{god}")
+        self._maybe_restore(d)
+
+    def _maybe_restore(self, d: dict):
+        """Auto-restore the saved profile when a fresh in-world game is detected (any new
+        pid). Retries a few times for cheats whose method JITs lazily (e.g. fast-placement,
+        which compiles only when an item is first used)."""
+        pid = d.get("pid")
+        if pid is None or not d.get("name"):        # need a located player (game in-world)
+            return
+        if not (profile.cheats() or profile.items()):
+            return                                   # nothing saved to restore
+        if pid != self._restore_pid:
+            self._restore_pid = pid
+            self._restore_attempts = 0
+            self._do_restore()
+
+    def _do_restore(self):
+        self._restore_attempts += 1
+
+        def done(out):
+            rep = client.parse_restore(out)
+            if rep is None:
+                return
+            if rep["cheats"] or rep["items"] or rep["pending"]:
+                self.log.appendPlainText(
+                    f"[auto-restore] cheats={rep['cheats']} items={rep['items']} "
+                    f"pending={rep['pending']} skipped={rep['skipped']}")
+            self.refresh_patches()
+            if rep["pending"] and self._restore_attempts < 5:   # method not JIT-ready yet
+                QTimer.singleShot(2000, self._do_restore)
+
+        self._spawn(client.restore_argv(), on_output=done)
 
     def _launch_terraria(self):
         """Start Terraria through Steam. Unprivileged and detached — Steam

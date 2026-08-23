@@ -26,6 +26,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from terrariabonker import profile
 from terrariabonker.locate import (STATLIFE_FROM_OBJ, find_players,
                                    resolve_local_player)
 
@@ -697,6 +698,7 @@ class Patcher:
                 self._enabled.add(name)
                 self._record_value(name, v)
                 self._save_state()
+                profile.set_cheat(name, True, self._values.get(name))
                 return
             cheat = CHEATS[name]
             site = self._resolve(cheat.anchor) + cheat.patch_off
@@ -711,6 +713,7 @@ class Patcher:
                 self._record_value(name, value)
             self._enabled.add(name)
             self._save_state()
+            profile.set_cheat(name, True, self._values.get(name))
 
     def disable(self, name: str) -> None:
         with self._locked():
@@ -718,6 +721,7 @@ class Patcher:
                 self._disable_injection(INJECTIONS[name])
                 self._enabled.discard(name)
                 self._save_state()
+                profile.set_cheat(name, False)
                 return
             cheat = CHEATS[name]
             site = self._resolve(cheat.anchor) + cheat.patch_off
@@ -726,6 +730,7 @@ class Patcher:
                 self._set_value(cheat, on=False)
             self._enabled.discard(name)
             self._save_state()
+            profile.set_cheat(name, False)
 
     def is_enabled(self, name: str) -> bool:
         """Ground truth: read the bytes at the patch site.
