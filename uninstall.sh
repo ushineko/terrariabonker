@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Configuration
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="terrariabonker"
 DESKTOP_FILE="$APP_NAME.desktop"
 INSTALL_DIR="$HOME/.local/share/applications"
@@ -34,6 +35,11 @@ fi
 
 if command -v update-desktop-database >/dev/null; then
     update-desktop-database "$INSTALL_DIR"
+fi
+
+# Take the KWin window-position rule back out (no-op if it was never added).
+if [ -f "$APP_DIR/tools/kwin_rule.py" ]; then
+    python3 "$APP_DIR/tools/kwin_rule.py" --remove || true
 fi
 
 echo "Done."

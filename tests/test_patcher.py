@@ -25,8 +25,8 @@ def game(tmp_path, monkeypatch):
     m.plant_mono_string(NAME_AT, "hero")
     m.plant_player(LIFE, [100, 100, 80, 20, 20, 20], NAME_AT)
     # plant the anchors at known spots in the "code" region
-    m.write(CODE + 0x100, ANCHORS["reset_block"].raw)
-    m.write(CODE + 0x400, ANCHORS["place"].raw)
+    m.write(CODE + 0x100, ANCHORS["reset_block"].pattern.raw)
+    m.write(CODE + 0x400, ANCHORS["place"].pattern.raw)
     # pristine "off" baseline at the wildcarded patch site (raw has 0s there)
     m.write(CODE + 0x400 + CHEATS["fast_place"].patch_off, CHEATS["fast_place"].orig)
     p = Patcher(m)
@@ -43,7 +43,7 @@ def test_status_all_off_initially(game):
 
 def test_tool_reach_injection_roundtrip(game):
     m, p = game
-    m.write(CODE + 0x700, ANCHORS["getranges"].raw)     # plant the method prologue
+    m.write(CODE + 0x700, ANCHORS["getranges"].pattern.raw)     # plant the method prologue
     inj = P.INJECTIONS["tool_reach"]
     inject = CODE + 0x700 + inj.inject_off
     m.write(inject, inj.overwrite)                        # original bytes at the site
@@ -61,7 +61,7 @@ def test_tool_reach_injection_roundtrip(game):
 
 def test_pickup_injection_uses_imul_stub(game):
     m, p = game
-    m.write(CODE + 0x900, ANCHORS["grabitems"].raw)      # plant the grab-range site
+    m.write(CODE + 0x900, ANCHORS["grabitems"].pattern.raw)      # plant the grab-range site
     inj = P.INJECTIONS["pickup"]
     inject = CODE + 0x900 + inj.inject_off
     m.write(inject, inj.overwrite)
@@ -78,7 +78,7 @@ def test_pickup_injection_uses_imul_stub(game):
 
 def test_spawn_rate_injection_forces_outputs(game):
     m, p = game
-    m.write(CODE + 0x900, ANCHORS["get_spawn_rate"].raw)   # plant the prologue
+    m.write(CODE + 0x900, ANCHORS["get_spawn_rate"].pattern.raw)   # plant the prologue
     inj = P.INJECTIONS["spawn_rate"]
     inject = CODE + 0x900 + inj.inject_off
     m.write(inject, inj.overwrite)
@@ -97,7 +97,7 @@ def test_spawn_rate_injection_forces_outputs(game):
 def test_loot_injection_caps_denominator(game):
     m, p = game
     inj = P.INJECTIONS["loot"]
-    m.write(CODE + 0x600, P.ANCHORS["trydrop"].raw)      # plant the prologue anchor
+    m.write(CODE + 0x600, P.ANCHORS["trydrop"].pattern.raw)      # plant the prologue anchor
     inject = CODE + 0x600 + inj.inject_off
     m.write(inject, inj.overwrite)                        # original 7 bytes at the site
     p.enable("loot", value=100)                           # 100% -> cap denominator to 1
@@ -128,8 +128,8 @@ def test_loot_multi_site_patches_every_twin(game):
     assert inj.multi
     # plant the anchor TWICE (CommonDrop and its structural twin)
     a, b = CODE + 0x200, CODE + 0x600
-    m.write(a, P.ANCHORS["trydrop"].raw)
-    m.write(b, P.ANCHORS["trydrop"].raw)
+    m.write(a, P.ANCHORS["trydrop"].pattern.raw)
+    m.write(b, P.ANCHORS["trydrop"].pattern.raw)
     inj_a, inj_b = a + inj.inject_off, b + inj.inject_off
     m.write(inj_a, inj.overwrite)
     m.write(inj_b, inj.overwrite)
@@ -149,13 +149,13 @@ def test_loot_reenable_is_idempotent_without_rescan(game):
     # value change must reuse the recorded sites and only rewrite the stub.
     m, p = game
     inj = P.INJECTIONS["loot"]
-    m.write(CODE + 0x600, P.ANCHORS["trydrop"].raw)
+    m.write(CODE + 0x600, P.ANCHORS["trydrop"].pattern.raw)
     inject = CODE + 0x600 + inj.inject_off
     m.write(inject, inj.overwrite)
     p.enable("loot", value=100)
     sites_before = [s["inject"] for s in p._inj["loot"]["sites"]]
     # obliterate the anchor: a re-resolve would now raise. Idempotent enable must not care.
-    m.write(CODE + 0x600, b"\x90" * len(P.ANCHORS["trydrop"].raw))
+    m.write(CODE + 0x600, b"\x90" * len(P.ANCHORS["trydrop"].pattern.raw))
     p.enable("loot", value=50)                            # would raise if it re-scanned
     assert [s["inject"] for s in p._inj["loot"]["sites"]] == sites_before
     body = m.read(p._inj["loot"]["sites"][0]["cave"], p._inj["loot"]["stub_len"])
@@ -169,8 +169,8 @@ def test_teleport_managed_call_stub(game):
     # plant the inject anchor (TriggerPing tail) and the call-target anchor (Teleport)
     tp = CODE + 0x300
     tele = CODE + 0xA00
-    m.write(tp, P.ANCHORS["trigger_ping"].raw)
-    m.write(tele, P.ANCHORS["player_teleport"].raw)
+    m.write(tp, P.ANCHORS["trigger_ping"].pattern.raw)
+    m.write(tele, P.ANCHORS["player_teleport"].pattern.raw)
     inject = tp + inj.inject_off                          # inject_off == 0
     m.write(inject, inj.overwrite)                        # first 7 bytes at the site
     p.enable("teleport")
@@ -220,7 +220,7 @@ def test_teleport_stub_is_stack_convention_agnostic():
 def test_max_minions_tunable_immediate_patch(game):
     import struct as _s
     m, p = game
-    m.write(CODE + 0x800, P.ANCHORS["reset_minions"].raw)   # plant the reset instruction
+    m.write(CODE + 0x800, P.ANCHORS["reset_minions"].pattern.raw)   # plant the reset instruction
     inj = CODE + 0x800 + CHEATS["max_minions"].patch_off     # the immediate at +6
     m.write(inj, CHEATS["max_minions"].orig)                 # original value 1
     assert not p.is_enabled("max_minions")
@@ -325,7 +325,7 @@ def test_values_default_before_any_apply(game):
 
 def test_applied_value_is_recorded_and_restored(game):
     m, p = game
-    m.write(CODE + 0x700, ANCHORS["getranges"].raw)
+    m.write(CODE + 0x700, ANCHORS["getranges"].pattern.raw)
     inj = P.INJECTIONS["tool_reach"]
     m.write(CODE + 0x700 + inj.inject_off, inj.overwrite)
     p.enable("tool_reach", value=77)        # injection value

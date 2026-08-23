@@ -27,6 +27,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from terrariabonker import profile
+from terrariabonker import version as ver
 from terrariabonker.locate import (STATLIFE_FROM_OBJ, find_players,
                                    resolve_local_player)
 
@@ -73,7 +74,34 @@ def _pat(hexstr: str) -> Pattern:
 
 
 # AOB anchors in executable memory (verified single-match on 1.4.5.7).
-ANCHORS: dict[str, Pattern] = {
+@dataclass(frozen=True)
+class Anchor:
+    """A pattern plus provenance: the game builds this AOB was verified on.
+
+    Verification is a **ledger, not a gate**. An anchor that still matches on an
+    unverified build is used and the UI marks it as unproven, because gating on the build
+    id would disable working cheats: the 24825745 -> 24893155 rebuild left 7 of 9 anchors
+    matching with identical field displacements.
+
+    ``unique`` marks the rare anchor where patching a structural twin would be harmful;
+    everything else patches every copy it finds (mono can JIT one method into more than
+    one arena, which is what broke reach/mining/max_minions).
+    """
+    pattern: Pattern
+    verified: frozenset[str] = frozenset()
+    unique: bool = False
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """What resolving one anchor produced, for status and for honest error text."""
+    sites: tuple[int, ...]
+    available: bool
+    reason: str = ""
+    verified: bool = False
+
+
+_RAW_ANCHORS: dict[str, Pattern] = {
     # ResetEffects: blockRange reset (mov [edi+9F8],0 @ +0), fld1 (+10), pickSpeed reset
     # (fstp [edi+8D8] @ +12) sit adjacent — one anchor covers reach (patch_off 0) and
     # mining (patch_off 12). The two reset instructions are WILDCARDED because those are
@@ -142,6 +170,24 @@ ANCHORS: dict[str, Pattern] = {
     # cap cheat is applied; uniqueness comes from the adjacent `mov [edi+A60],1` reset that
     # follows it (edi = the player). The cheat rewrites the immediate to the desired cap.
     "reset_minions": _pat("C7 87 F8 03 00 00 ?? ?? ?? ?? C7 87 60 0A 00 00 01 00 00 00"),
+}
+
+# Builds every anchor here has been confirmed on, newest last. "Verified" means the AOB
+# resolved AND the cheat was seen working in-game on that build — not merely that it matched.
+_VERIFIED_BUILDS: tuple[str, ...] = (
+    ver.KNOWN_BUILD_KEY,        # the build these AOBs were derived against
+    # 2026-08-23 rebuild. It left every field displacement identical but JIT'd ResetEffects
+    # into two arenas, so reset_block/reset_minions match twice; both copies are patched
+    # now. All nine cheats confirmed working in-game on it by the maintainer.
+    "1.4.5.7+24893155",
+)
+
+# Per-anchor divergence, for a build that breaks only some anchors: {anchor: (build, ...)}.
+_ALSO_VERIFIED: dict[str, tuple[str, ...]] = {}
+
+ANCHORS: dict[str, Anchor] = {
+    key: Anchor(pat, verified=frozenset({*_VERIFIED_BUILDS, *_ALSO_VERIFIED.get(key, ())}))
+    for key, pat in _RAW_ANCHORS.items()
 }
 
 
@@ -436,7 +482,7 @@ class Patcher:
 
     def __init__(self, mem):
         self.mem = mem
-        self._sites: dict[str, int] = {}      # anchor key -> resolved address
+        self._sites: dict[str, list[int]] = {}   # anchor key -> every resolved site
         self._enabled: set[str] = set()
         self._inj: dict[str, dict] = {}       # injection name -> {inject, cave, stub_len}
         self._values: dict[str, float] = {}   # cheat name -> last applied value
@@ -464,7 +510,10 @@ class Patcher:
             with open(_STATE) as f:
                 s = json.load(f)
             if s.get("pid") == self.mem.pid:     # same process -> reuse
-                self._sites = {k: int(v) for k, v in s.get("sites", {}).items()}
+                # Older state stored one address per anchor; accept both shapes so an
+                # upgrade in place does not throw away a live game's patch state.
+                self._sites = {k: ([int(v)] if isinstance(v, int) else [int(x) for x in v])
+                               for k, v in s.get("sites", {}).items()}
                 self._enabled = set(s.get("enabled", []))
                 self._inj = {k: _norm_inj(v) for k, v in s.get("inj", {}).items()}
                 self._values = {k: v for k, v in s.get("values", {}).items()
@@ -501,36 +550,10 @@ class Patcher:
                 out.append((int(a, 16), int(b, 16)))
         return out
 
-    def _resolve(self, anchor_key: str) -> int:
-        """Find the unique anchor address (cached per session). Scans on the pattern's
-        longest fixed run, then verifies the full (possibly wildcarded) pattern."""
-        if anchor_key in self._sites:
-            return self._sites[anchor_key]
-        pat = ANCHORS[anchor_key]
-        seed_off, seed = pat.seed()
-        found = None
-        for start, end in self._exec_regions():
-            buf = self.mem.read(start, end - start)
-            i = buf.find(seed)
-            while i != -1:
-                pos = i - seed_off
-                if pat.matches(buf, pos):
-                    if found is not None:
-                        raise PatchError(f"anchor {anchor_key!r} is not unique "
-                                         "(game updated? re-derive AOBs with CE)")
-                    found = start + pos
-                i = buf.find(seed, i + 1)
-        if found is None:
-            raise PatchError(f"anchor {anchor_key!r} not found "
-                             "(game updated? re-derive AOBs with CE)")
-        self._sites[anchor_key] = found
-        return found
-
-    def _resolve_all(self, anchor_key: str) -> list[int]:
-        """Like ``_resolve`` but returns EVERY match, for anchors that intentionally
-        match structural twins (see ``Injection.multi``). Not cached — one scan per
-        enable is cheap and the site set can differ across re-JITs."""
-        pat = ANCHORS[anchor_key]
+    def _scan(self, anchor_key: str) -> list[int]:
+        """Every address matching the anchor. Scans on the pattern's longest fixed run,
+        then verifies the full (possibly wildcarded) pattern."""
+        pat = ANCHORS[anchor_key].pattern
         seed_off, seed = pat.seed()
         hits = []
         for start, end in self._exec_regions():
@@ -541,9 +564,49 @@ class Patcher:
                 if pat.matches(buf, pos):
                     hits.append(start + pos)
                 i = buf.find(seed, i + 1)
+        return hits
+
+    def resolution(self, anchor_key: str, build: str | None = None) -> Resolution:
+        """Resolve an anchor into a Resolution, with a reason that states what was
+        observed and nothing more.
+
+        Several matches is normal, not an error: mono can JIT one method into more than
+        one arena, and the copies are identical where we patch. Only an anchor declared
+        ``unique`` treats that as a failure.
+        """
+        anchor = ANCHORS[anchor_key]
+        verified = build is not None and build in anchor.verified
+        sites = self._sites.get(anchor_key) or self._scan(anchor_key)
+        if not sites:
+            return Resolution((), False,
+                              f"anchor {anchor_key!r} matched nothing — the method may not "
+                              "be JIT-compiled yet, or this build has moved it", verified)
+        if anchor.unique and len(sites) > 1:
+            return Resolution(tuple(sites), False,
+                              f"anchor {anchor_key!r} matched {len(sites)} sites but must "
+                              "be unique", verified)
+        self._sites[anchor_key] = list(sites)
+        return Resolution(tuple(sites), True, "", verified)
+
+    def _resolve_sites(self, anchor_key: str) -> list[int]:
+        """Every site to patch, or raise with the resolution's own reason."""
+        res = self.resolution(anchor_key)
+        if not res.available:
+            raise PatchError(res.reason)
+        return list(res.sites)
+
+    def _resolve(self, anchor_key: str) -> int:
+        """First matching site — for call targets and single-site injections. Identical
+        JIT copies are interchangeable as call destinations."""
+        return self._resolve_sites(anchor_key)[0]
+
+    def _resolve_all(self, anchor_key: str) -> list[int]:
+        """Every match, for anchors that intentionally match structural twins (see
+        ``Injection.multi``). Deliberately uncached: one scan per enable is cheap and the
+        site set can differ across re-JITs."""
+        hits = self._scan(anchor_key)
         if not hits:
-            raise PatchError(f"anchor {anchor_key!r} not found "
-                             "(game updated? re-derive AOBs with CE)")
+            raise PatchError(self.resolution(anchor_key).reason)
         return hits
 
     # --- code cave / injection --------------------------------------------
@@ -668,8 +731,8 @@ class Patcher:
         rec = self._inj.get(inj.name)
         if rec and rec.get("sites"):
             inject = rec["sites"][0]["inject"]
-        elif inj.anchor in self._sites:
-            inject = self._sites[inj.anchor] + inj.inject_off
+        elif self._sites.get(inj.anchor):
+            inject = self._sites[inj.anchor][0] + inj.inject_off
         else:
             return False
         return self.mem.read(inject, 1) == b"\xe9"
@@ -709,14 +772,20 @@ class Patcher:
                 profile.set_cheat(name, True, self._values.get(name))
                 return
             cheat = CHEATS[name]
-            site = self._resolve(cheat.anchor) + cheat.patch_off
+            # Patch EVERY copy: mono can JIT one method into more than one arena and we
+            # cannot tell which copy executes. The copies are identical where we patch,
+            # so a stale one is inert and the live one takes effect.
+            sites = [b + cheat.patch_off for b in self._resolve_sites(cheat.anchor)]
             if cheat.make_patched is not None:        # tunable in-place patch (value -> bytes)
                 spec = _VALUE_SPECS.get(name)
                 v = value if value is not None else (spec.default if spec else 1)
-                self.mem.write(site, cheat.make_patched(int(v)))
+                blob = cheat.make_patched(int(v))
+                for site in sites:
+                    self.mem.write(site, blob)
                 self._record_value(name, v)
             else:
-                self.mem.write(site, cheat.patched)
+                for site in sites:
+                    self.mem.write(site, cheat.patched)
                 self._set_value(cheat, on=True, override=value)
                 self._record_value(name, value)
             self._enabled.add(name)
@@ -732,8 +801,9 @@ class Patcher:
                 profile.set_cheat(name, False)
                 return
             cheat = CHEATS[name]
-            site = self._resolve(cheat.anchor) + cheat.patch_off
-            self.mem.write(site, cheat.orig)          # restore original code / immediate
+            for base in self._resolve_sites(cheat.anchor):
+                # restore original code / immediate at every copy we patched
+                self.mem.write(base + cheat.patch_off, cheat.orig)
             if cheat.make_patched is None:
                 self._set_value(cheat, on=False)
             self._enabled.discard(name)
@@ -752,16 +822,55 @@ class Patcher:
             return self._injection_enabled(INJECTIONS[name])
         cheat = CHEATS[name]
         try:
-            base = self._resolve(cheat.anchor)
+            bases = self._resolve_sites(cheat.anchor)
         except PatchError:
             return False
-        site = base + cheat.patch_off
-        if cheat.make_patched is not None:           # tunable: enabled when != original
-            return self.mem.read(site, len(cheat.orig)) != cheat.orig
-        return self.mem.read(site, len(cheat.patched)) == cheat.patched
+        # ANY patched copy counts as on: we cannot tell which copy executes, and disable
+        # reverts them all, so "any" and "all" only differ mid-operation.
+        for base in bases:
+            site = base + cheat.patch_off
+            if cheat.make_patched is not None:       # tunable: enabled when != original
+                if self.mem.read(site, len(cheat.orig)) != cheat.orig:
+                    return True
+            elif self.mem.read(site, len(cheat.patched)) == cheat.patched:
+                return True
+        return False
 
     def status(self) -> dict[str, bool]:
         return {name: self.is_enabled(name) for name in PATCH_CATALOG}
+
+    def _anchor_key(self, name: str) -> str:
+        return (INJECTIONS[name].anchor if name in INJECTIONS else CHEATS[name].anchor)
+
+    def details(self, build: str | None = None) -> dict[str, dict]:
+        """Per-cheat availability for the UI: is it applied, can it be applied here, was
+        its AOB ever verified on this build, and if it cannot be applied, why.
+
+        An applied cheat always reports available even though a fresh scan would miss it:
+        an injection's anchor is overwritten by its own jump once installed, so the scan
+        is only meaningful while the cheat is off.
+        """
+        out: dict[str, dict] = {}
+        for name in PATCH_CATALOG:
+            anchor_key = self._anchor_key(name)
+            verified = build is not None and build in ANCHORS[anchor_key].verified
+            try:
+                on = self.is_enabled(name)
+            except PatchError:
+                on = False
+            if on:
+                out[name] = {"on": True, "available": True, "verified": verified,
+                             "reason": "", "sites": len(self._sites.get(anchor_key, ()))}
+                continue
+            try:
+                res = self.resolution(anchor_key, build)
+            except PatchError as e:
+                out[name] = {"on": False, "available": False, "verified": verified,
+                             "reason": str(e), "sites": 0}
+                continue
+            out[name] = {"on": False, "available": res.available, "verified": res.verified,
+                         "reason": res.reason, "sites": len(res.sites)}
+        return out
 
     def values(self) -> dict[str, float]:
         """Value per valued cheat, preferring the live per-pid value, then the saved

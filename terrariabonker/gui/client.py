@@ -180,3 +180,66 @@ SAMPLE_ARGVS: list[list[str]] = [
     patch_set_argv("spawn_rate", True, value=40),
     extract_recipes_argv(),
 ]
+
+
+def build_banner(status: dict | None, known_build: str) -> str:
+    """One line describing how the running build stands, or "" when all is well.
+
+    Cheat availability belongs in the UI, not in a log line repeated on every retry: a
+    cheat can be unavailable (its AOB does not resolve here) or merely unverified (it
+    resolves, but was never confirmed on this exact build). Returns HTML for the banner.
+    """
+    if not status:
+        return ""
+    detail = status.get("detail") or {}
+    if not detail:
+        return ""
+    build = status.get("build") or "?"
+    broken = {n: d.get("reason", "") for n, d in detail.items() if not d.get("available")}
+    unverified = [n for n, d in detail.items() if d.get("available") and not d.get("verified")]
+    if not broken and not unverified:
+        return ""
+    parts = []
+    if broken:
+        listed = "; ".join(f"<b>{n}</b> — {r}" for n, r in sorted(broken.items()))
+        parts.append(f"{len(detail) - len(broken)} of {len(detail)} cheats resolve on this "
+                     f"build. Unavailable: {listed}.")
+    if unverified:
+        parts.append(f"Build <code>{build}</code> is not the build these AOBs were verified "
+                     f"on (<code>{known_build}</code>): {len(unverified)} cheat(s) resolve "
+                     "but are unproven here.")
+    return " ".join(parts)
+
+
+def restore_summary(report: dict | None, saved_items: dict | None = None) -> list[str]:
+    """Plain-language lines for what auto-restore could not finish, or [] when it did.
+
+    Cheats and item edits fail for unrelated reasons and must not be reported as one
+    lump: a cheat is missing because its anchor does not resolve on this build, while an
+    item edit is skipped because the slot no longer holds the item the edit was saved for
+    (leaving it alone is the point — the alternative is clobbering whatever is there).
+    """
+    if not report:
+        return []
+    out = []
+    pending = list(report.get("pending") or [])
+    if pending:
+        out.append(f"[auto-restore] gave up on {len(pending)} cheat(s) after retrying: "
+                   f"{', '.join(sorted(pending))} — see the notice above for why")
+    skipped = list(report.get("skipped") or [])
+    cheats = [s.split(":", 1)[1] for s in skipped if s.startswith("cheat:")]
+    if cheats:
+        out.append(f"[auto-restore] {len(cheats)} cheat(s) refused: {', '.join(sorted(cheats))}")
+    slots = [s.split("slot", 1)[1] for s in skipped if s.startswith("item:slot")]
+    if slots:
+        named = ""
+        if saved_items:
+            from terrariabonker import names
+            labels = [names.label(int((saved_items.get(s) or {}).get("type", 0)))
+                      for s in slots if s in saved_items]
+            if labels:
+                named = f" ({', '.join(labels)})"
+        out.append(f"[auto-restore] {len(slots)} saved item edit(s) not re-applied — "
+                   f"slot(s) {', '.join(slots)} no longer hold the item they were saved "
+                   f"for{named}; left alone rather than overwritten")
+    return out

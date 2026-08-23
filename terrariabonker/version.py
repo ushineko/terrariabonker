@@ -21,6 +21,19 @@ import re
 KNOWN_VERSION = "1.4.5.7"       # the build these offsets were derived against
 KNOWN_BUILDID = "24825745"      # Steam buildid of that build (extra fingerprint)
 
+
+def build_key(version: str | None, buildid: str | None) -> str:
+    """Identity of one exact game build: ``"1.4.5.7+24893155"``.
+
+    The version string alone is not enough — Steam rebuilds keep the version and change
+    the buildid, and that is what a derived AOB is really pinned to. Used as the key of
+    the anchor-verification ledger (see ``patcher.Anchor``).
+    """
+    return f"{version or '?'}+{buildid or '?'}"
+
+
+KNOWN_BUILD_KEY = build_key(KNOWN_VERSION, KNOWN_BUILDID)
+
 # UTF-16LE "vX.Y.Z[.W]" as the menu/version string appears in memory.
 _VER_RE = re.compile(rb"v\x00((?:\d\x00)+(?:\.\x00(?:\d\x00)+)+)")
 

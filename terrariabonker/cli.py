@@ -17,6 +17,7 @@ import sys
 from dataclasses import asdict
 
 from terrariabonker.patcher import PATCH_CATALOG, PatchError
+from terrariabonker import version as ver
 from terrariabonker.proc import elevate
 from terrariabonker.service import Service, ServiceError
 from terrariabonker.trainer import Freezer
@@ -62,6 +63,7 @@ def cmd_status(args) -> int:
         p = snap.player
         print(json.dumps({
             "pid": snap.pid, "version": snap.version, "compat_level": snap.compat_level,
+            "buildid": snap.buildid, "build": ver.build_key(snap.version, snap.buildid),
             "copies": snap.copies,
             "name": p.name if p else None, "hp": p.hp if p else None,
             "max_hp": p.max_hp if p else None, "mana": p.mana if p else None,
@@ -283,14 +285,24 @@ def cmd_patch(args) -> int:
     p = svc.patcher()
     try:
         if args.action == "status":
-            st = p.status()
+            build = svc.build_key()
+            detail = p.details(build)
+            st = {name: d["on"] for name, d in detail.items()}
             vals = p.values()
             if args.json:
-                print(json.dumps({"on": st, "values": vals}))
+                print(json.dumps({"on": st, "values": vals, "detail": detail,
+                                  "build": build,
+                                  "build_verified": all(d["verified"] for d in detail.values())}))
                 return 0
+            print(f"  build {build}")
             for name, on in st.items():
                 v = f"  = {vals[name]}" if name in vals else ""
-                print(f"  [{'x' if on else ' '}] {name:<11} {PATCH_CATALOG[name].label}{v}")
+                d = detail[name]
+                note = "" if d["available"] else f"   UNAVAILABLE: {d['reason']}"
+                if d["available"] and not d["verified"]:
+                    note = "   (AOB unverified on this build)"
+                print(f"  [{'x' if on else ' '}] {name:<11} "
+                      f"{PATCH_CATALOG[name].label}{v}{note}")
         elif args.action in ("enable", "on"):
             p.enable(args.cheat, value=args.value)
             shown = f" (value {args.value})" if args.value is not None else ""

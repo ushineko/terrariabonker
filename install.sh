@@ -55,4 +55,11 @@ if command -v update-desktop-database >/dev/null; then
     update-desktop-database "$INSTALL_DIR"
 fi
 
+# 5. Ask KWin to remember the panel's position. Qt cannot do this itself under Wayland:
+#    move() is a silent no-op and pos() reports the requested value rather than the real
+#    one, so the compositor owns placement. Skips itself on non-KDE desktops.
+if [ -f "$APP_DIR/tools/kwin_rule.py" ]; then
+    python3 "$APP_DIR/tools/kwin_rule.py" || true
+fi
+
 echo "Done. Run '$APP_NAME status' (it will elevate via sudo)."

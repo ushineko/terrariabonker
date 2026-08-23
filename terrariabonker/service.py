@@ -364,6 +364,11 @@ class Service:
             inv.set_stack(empty, stack)
         return empty
 
+    def build_key(self) -> str:
+        """Identity of the running build, e.g. "1.4.5.7+24893155" (see version.build_key)."""
+        version, buildid, _level, _msg = self._build_info()
+        return ver.build_key(version, buildid)
+
     def patcher(self):
         """A Patcher bound to this game process (the code-patch cheats)."""
         from terrariabonker.patcher import Patcher

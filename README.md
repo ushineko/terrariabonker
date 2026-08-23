@@ -231,6 +231,21 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   local cache (a few seconds, one-time); **Re-extract from game** regenerates both the
   recipe database and the icons after a game update.
 
+The panel reopens at the size you left it (stored under `~/.cache/terrariabonker/`). Its
+on-screen position is remembered by **KWin**, not by the app: under Wayland `QWidget.move()`
+is a silent no-op and `pos()` reports the value it was given rather than the real one, so
+`install.sh` registers a KWin "remember position" rule instead and `uninstall.sh` removes it.
+On a non-KDE desktop the size is still remembered and placement is left to the window manager.
+
+Only one panel runs at a time: a second launch says so and exits, because two would run
+two privileged workers and two auto-restore loops against the same game state.
+
+The header shows the game's **build id** next to its version, and a notice appears when a
+cheat cannot be applied on the running build (with the reason) or when its AOB was never
+verified on that exact build. Anchors record which builds they were confirmed on — Steam
+rebuilds keep the version string and change the build id, and that is what an AOB is really
+pinned to.
+
 The window runs unprivileged and never runs Qt as root. It keeps one long-lived
 `terrariabonker serve` worker under `sudo` and sends it JSON lines, because locating the
 player is ~99% of a read's cost: a one-shot CLI read takes ~2.7 s, a warm request ~3 ms.

@@ -26,8 +26,10 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QWidget)
 
 from terrariabonker import __version__, names, prefixes, profile, recipes, sprites
+from terrariabonker import version as ver
 from terrariabonker.gui import client, invgrid
 from terrariabonker.gui.helper import Helper
+from terrariabonker.gui import single, uistate
 from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import PATCH_CATALOG
 
@@ -172,6 +174,7 @@ class MainWindow(QWidget):
         self._opening_slot = False                 # a pre-dialog slot read is outstanding
         self._restore_pid = None                   # last game pid we auto-restored to
         self._restore_attempts = 0                 # retry budget for lazily-JIT'd cheats
+        self._restore_last_left = None             # last (pending, skipped): stop when unchanged
         self._build()
         # One long-lived privileged worker keeps the locate caches warm, so repeated
         # reads cost ~3 ms instead of ~2.7 s. Without it every call spawns its own CLI.
@@ -232,6 +235,18 @@ class MainWindow(QWidget):
             " border-radius: 4px; padding: 6px;")
         self.sudo_warn.hide()
         root.addWidget(self.sudo_warn)
+
+        # Shown when a cheat cannot be applied on this build, or when the AOBs were never
+        # verified on it. This is where that belongs — it used to be invisible except as a
+        # repeated [auto-restore] log line.
+        self.build_warn = QLabel()
+        self.build_warn.setWordWrap(True)
+        self.build_warn.setTextFormat(Qt.TextFormat.RichText)
+        self.build_warn.setStyleSheet(
+            "background-color: #4a3a12; color: #ffe9c0; border: 1px solid #a8842c;"
+            " border-radius: 4px; padding: 6px;")
+        self.build_warn.hide()
+        root.addWidget(self.build_warn)
 
         tabs = QTabWidget()
         self.tabs = tabs
@@ -447,6 +462,10 @@ class MainWindow(QWidget):
         if st is None:
             return
         on, vals = st["on"], st["values"]
+        detail = st.get("detail") or {}
+        text = client.build_banner(st, ver.KNOWN_BUILD_KEY)
+        self.build_warn.setText(text)
+        self.build_warn.setVisible(bool(text))
         # A cheat that's queued or mid-apply hasn't been confirmed yet — leave its checkbox
         # as the user set it, so an in-flight status refresh can't flicker it off/on.
         busy = set(self._cheat_pending)
@@ -454,6 +473,16 @@ class MainWindow(QWidget):
             busy.add(self._cheat_inflight)
         self._patch_filling = True
         for name, cb in self._patch_cbs.items():
+            d = detail.get(name) or {}
+            if detail:
+                available = bool(d.get("available", True))
+                cb.setEnabled(available)
+                if not available:
+                    cb.setToolTip(f"Unavailable on this build: {d.get('reason', '')}")
+                elif not d.get("verified", True):
+                    cb.setToolTip(f"{PATCH_CATALOG[name].note}\n\n"
+                                  "(AOB unverified on this build — it resolves, but was "
+                                  "confirmed on a different one.)")
             if name in busy:
                 continue
             cb.setChecked(bool(on.get(name)))
@@ -596,10 +625,13 @@ class MainWindow(QWidget):
             self.status.setText("<b>Terraria not found</b> — is it running under Proton?")
             return
         god = " · <span style='color:#d33'>GODMODE</span>" if self.cb_god.isChecked() else ""
+        # version+buildid is the identity an AOB is really pinned to, so show that key
+        # rather than the version alone (see version.build_key / the anchor ledger).
+        build = d.get("build") if d.get("buildid") else d.get("version")
         self.status.setText(
             f"<b>{d.get('name')}</b> — HP {d.get('hp')}/{d.get('max_hp')} · "
             f"Mana {d.get('mana')}/{d.get('max_mana')} · "
-            f"PID {d.get('pid')} · Terraria {d.get('version')}{god}")
+            f"PID {d.get('pid')} · Terraria {build}{god}")
         self._maybe_restore(d)
 
     def _maybe_restore(self, d: dict):
@@ -614,6 +646,7 @@ class MainWindow(QWidget):
         if pid != self._restore_pid:
             self._restore_pid = pid
             self._restore_attempts = 0
+            self._restore_last_left = None
             self._do_restore()
 
     def _do_restore(self):
@@ -627,16 +660,24 @@ class MainWindow(QWidget):
                 if "[ERROR]" in out:
                     self.log.appendPlainText(f"[auto-restore FAILED] {out.strip()}")
                 return
-            if rep["cheats"] or rep["items"] or rep["pending"]:
+            if self._restore_attempts == 1 and (rep["cheats"] or rep["items"]
+                                                or rep["pending"]):
                 self.log.appendPlainText(
                     f"[auto-restore] cheats={rep['cheats']} items={rep['items']} "
                     f"pending={rep['pending']} skipped={rep['skipped']}")
             self.refresh_patches()
-            # Retry while anything is unresolved: cheats whose method hasn't JIT-compiled
-            # yet, or items skipped because the inventory wasn't loaded at world-entry. A
-            # genuinely-moved item stays skipped and just exhausts the retry budget.
-            if (rep["pending"] or rep["skipped"]) and self._restore_attempts < 8:
+            # Retry only while retrying still achieves something: a cheat whose method has
+            # not JIT-compiled yet resolves on a later pass, but one that cannot resolve on
+            # this build never will. Two passes with the same leftovers means no progress,
+            # so stop — the reason is on the build banner, not in a repeated log line.
+            left = (sorted(rep["pending"]), sorted(rep["skipped"]))
+            progressed = left != self._restore_last_left
+            self._restore_last_left = left
+            if any(left) and progressed and self._restore_attempts < 8:
                 QTimer.singleShot(2000, self._do_restore)
+            elif any(left) and not progressed and self._restore_attempts > 1:
+                for line in client.restore_summary(rep, profile.items()):
+                    self.log.appendPlainText(line)
 
         self._call(client.restore_argv(), on_output=done)
 
@@ -1056,6 +1097,7 @@ class MainWindow(QWidget):
         self._spawn_user(client.extract_sprites_argv(force), on_output=done, on_progress=prog)
 
     def closeEvent(self, event):
+        uistate.save_size(self.width(), self.height())
         self._status_timer.stop()
         self._inv_timer.stop()
         self.helper.stop()
@@ -1076,9 +1118,20 @@ def run() -> int:
     app.setDesktopFileName("terrariabonker")
     if os.path.exists(ICON):
         app.setWindowIcon(QIcon(ICON))
+    ok, other = single.acquire()
+    if not ok:
+        where = f" (pid {other})" if other else ""
+        QMessageBox.warning(
+            None, "terrariabonker is already running",
+            f"<b>Another control panel is already open{where}.</b>"
+            "<p>Running two would start two privileged workers and two auto-restore "
+            "loops on the same game, which fight over the shared patch state. Use the "
+            "existing window.</p>")
+        return 1
     w = MainWindow()
-    # Open at the natural minimum (the inventory grid drives it) so the full grid
-    # is visible immediately; the Inventory tab is the widest/tallest.
-    w.resize(w.sizeHint())
+    # Reopen at the size the user left it; otherwise the natural minimum (the inventory
+    # grid drives it) so the full grid is visible immediately.
+    saved = uistate.load_size()
+    w.resize(QSize(*saved) if saved else w.sizeHint())
     w.show()
     return app.exec()
