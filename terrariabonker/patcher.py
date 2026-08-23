@@ -176,11 +176,13 @@ CHEATS: dict[str, Cheat] = {
         _b("C7 87 F8 09 00 00 00 00 00 00"), _b("90 90 90 90 90 90 90 90 90 90"),
         value_off=0x2C0, value_kind="i32", on_value=20, off_value=0,
         note="NOPs the blockRange reset; item-independent extended reach"),
+    # Force a low itemTime at the placement-timing read site: `mov edi,N; nop*5`. N is the
+    # itemTime (lower = faster), tunable via presets (Fast=4 / Faster=2 / Hyper=1).
     "fast_place": Cheat(
         "fast_place", "Fast placement (ApplyItemTime)", "place", 20,
-        _b("B8 01 00 00 00 3B F8 0F 4C F8"), _b("BF 04 00 00 00 90 90 90 90 90"),
-        value_off=None,
-        note="forces itemTime=4 at the placement-timing read site"),
+        _b("B8 01 00 00 00 3B F8 0F 4C F8"), b"",
+        make_patched=lambda n: b"\xbf" + struct.pack("<i", max(1, int(n))) + b"\x90" * 5,
+        note="forces a low itemTime (Fast=4/Faster=2/Hyper=1) at the placement read site"),
     # Rewrite ResetEffects' `maxMinions = 1` reset to `maxMinions = N`, so N minion slots
     # hold each frame (accessory bonuses still stack on top). patch_off=6 is the 4-byte
     # immediate; make_patched packs N there. Ported in spirit from ReGrind-style stat caps.
@@ -383,6 +385,9 @@ class ValueSpec:
     lo: float | int
     hi: float | int
     unit: str = ""
+    # Named discrete choices (label, value). When set, the GUI shows a dropdown of these
+    # labels instead of a numeric spinbox (e.g. fast_place: Fast/Faster/Hyper).
+    presets: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -404,6 +409,9 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
     "spawn_rate": ValueSpec("i32", 15, 0, 200, "max active enemies · 0 = peaceful"),
     "loot": ValueSpec("i32", 100, 1, 100, "% min drop chance · 100 = guaranteed"),
     "max_minions": ValueSpec("i32", 10, 1, 255, "minion slots (base; +accessories)"),
+    # itemTime presets (lower = faster placement). "Fast" is the original behaviour.
+    "fast_place": ValueSpec("i32", 4, 1, 4, "placement speed",
+                            presets=(("Fast", 4), ("Faster", 2), ("Hyper", 1))),
 }
 
 

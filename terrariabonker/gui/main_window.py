@@ -21,11 +21,11 @@ from PyQt6.QtGui import (QColor, QFont, QIcon, QPainter, QPixmap, QStandardItem,
                          QStandardItemModel)
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
-                             QLabel, QLineEdit, QListView, QPlainTextEdit,
+                             QLabel, QLineEdit, QListView, QMessageBox, QPlainTextEdit,
                              QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout,
                              QWidget)
 
-from terrariabonker import names, prefixes, profile, recipes, sprites
+from terrariabonker import __version__, names, prefixes, profile, recipes, sprites
 from terrariabonker.gui import client, invgrid
 from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import PATCH_CATALOG
@@ -146,7 +146,7 @@ class RecipeDialog(QDialog):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("terrariabonker")
+        self.setWindowTitle(f"terrariabonker v{__version__}")
         if os.path.exists(ICON):
             self.setWindowIcon(QIcon(ICON))
         self._freeze: QProcess | None = None
@@ -202,6 +202,9 @@ class MainWindow(QWidget):
         self.btn_launch.setToolTip("Start Terraria through Steam (steam://rungameid/%s)" % APPID)
         self.btn_launch.clicked.connect(self._launch_terraria)
         top.addWidget(self.btn_launch)
+        self.btn_about = QPushButton("About")
+        self.btn_about.clicked.connect(self._about)
+        top.addWidget(self.btn_about)
         root.addLayout(top)
 
         # Shown only when passwordless sudo is missing: memory actions need it, and in a
@@ -342,10 +345,16 @@ class MainWindow(QWidget):
             self._patch_cbs[name] = cb
             g.addWidget(cb, row, 0)
             if info.value is not None:
-                spin = self._value_spin(info.value)
-                spin.valueChanged.connect(lambda _v, n=name: self._on_patch_value(n))
-                self._patch_vals[name] = spin
-                g.addWidget(spin, row, 1)
+                if info.value.presets:
+                    w = QComboBox()
+                    for label, val in info.value.presets:
+                        w.addItem(label, val)
+                    w.currentIndexChanged.connect(lambda _i, n=name: self._on_patch_value(n))
+                else:
+                    w = self._value_spin(info.value)
+                    w.valueChanged.connect(lambda _v, n=name: self._on_patch_value(n))
+                self._patch_vals[name] = w
+                g.addWidget(w, row, 1)
                 unit = QLabel(info.value.unit)
                 unit.setStyleSheet("color: gray")
                 g.addWidget(unit, row, 2)
@@ -366,9 +375,11 @@ class MainWindow(QWidget):
         return s
 
     def _patch_value(self, name: str):
-        """Current spinbox value for a valued cheat, or None if it carries none."""
-        spin = self._patch_vals.get(name)
-        return spin.value() if spin is not None else None
+        """Current value for a valued cheat (spinbox value or preset combo data), or None."""
+        w = self._patch_vals.get(name)
+        if w is None:
+            return None
+        return w.currentData() if isinstance(w, QComboBox) else w.value()
 
     def _on_patch_toggled(self, name: str, on: bool):
         if self._patch_filling:
@@ -430,10 +441,17 @@ class MainWindow(QWidget):
             if name in busy:
                 continue
             cb.setChecked(bool(on.get(name)))
-            spin = self._patch_vals.get(name)
-            if spin is not None and vals.get(name) is not None:
+            w = self._patch_vals.get(name)
+            if w is not None and vals.get(name) is not None:
                 v = vals[name]
-                spin.setValue(float(v) if isinstance(spin, QDoubleSpinBox) else int(v))
+                if isinstance(w, QComboBox):
+                    idx = w.findData(int(v))
+                    if idx >= 0:
+                        w.setCurrentIndex(idx)
+                elif isinstance(w, QDoubleSpinBox):
+                    w.setValue(float(v))
+                else:
+                    w.setValue(int(v))
         self._patch_filling = False
 
     def _spin(self, lo, hi, val):
@@ -594,6 +612,22 @@ class MainWindow(QWidget):
                 QTimer.singleShot(2000, self._do_restore)
 
         self._spawn(client.restore_argv(), on_output=done)
+
+    def _about(self):
+        QMessageBox.about(
+            self, "About terrariabonker",
+            f"<h3>terrariabonker v{__version__}</h3>"
+            "<p>A from-scratch live-memory trainer and item editor for "
+            "<b>Terraria 1.4.5.7</b> (Windows build under Proton). It finds the player in "
+            "<code>/proc/&lt;pid&gt;/mem</code> with no hardcoded addresses, then reads and "
+            "edits player state, inventory, and code-patch cheats.</p>"
+            "<p>Cheat sites are derived with Cheat Engine's mono dissector; nothing needs CE "
+            "at runtime. Several code-patch cheats (pickup range, spawn rate, drop-chance "
+            "floor, map-ping teleport) are ported from the FearLess Forums "
+            "<b>“TerrariaReGrind”</b> Cheat Engine table — reverse-engineering "
+            "credit for those hooks belongs to the ReGrind authors; the 1.4.5.7 sites were "
+            "re-derived here.</p>"
+            "<p><i>Edits your own single-player game in memory; writes nothing to disk.</i></p>")
 
     def _launch_terraria(self):
         """Start Terraria through Steam. Unprivileged and detached — Steam

@@ -27,6 +27,8 @@ def game(tmp_path, monkeypatch):
     # plant the anchors at known spots in the "code" region
     m.write(CODE + 0x100, ANCHORS["reset_block"].raw)
     m.write(CODE + 0x400, ANCHORS["place"].raw)
+    # pristine "off" baseline at the wildcarded patch site (raw has 0s there)
+    m.write(CODE + 0x400 + CHEATS["fast_place"].patch_off, CHEATS["fast_place"].orig)
     p = Patcher(m)
     p._exec_regions = lambda: [(CODE, CODE + 0x1000)]   # only scan the planted region
     return m, p
@@ -241,6 +243,7 @@ def test_anchor_resolves_whether_or_not_patched(game):
     for anchor, cheat_name in (("place", "fast_place"), ("reset_block", "reach"),
                                ("reset_block", "mining")):
         cheat = CHEATS[cheat_name]
+        patched = cheat.make_patched(1) if cheat.make_patched else cheat.patched
         base = p._resolve(anchor)
         site = base + cheat.patch_off
         # pristine: original bytes at the site -> resolves
@@ -248,7 +251,7 @@ def test_anchor_resolves_whether_or_not_patched(game):
         p._sites.pop(anchor, None)
         assert p._resolve(anchor) == base
         # patched: cheat bytes at the site -> STILL resolves (bytes are wildcarded)
-        m.write(site, cheat.patched)
+        m.write(site, patched)
         p._sites.pop(anchor, None)
         assert p._resolve(anchor) == base, f"{anchor} lost its match once {cheat_name} patched"
         assert p.is_enabled(cheat_name)              # ground truth reads the patched bytes
@@ -262,7 +265,7 @@ def test_is_enabled_reads_ground_truth_without_cache(game):
     m, p = game
     cheat = CHEATS["fast_place"]
     site = p._resolve("place") + cheat.patch_off
-    m.write(site, cheat.patched)
+    m.write(site, cheat.make_patched(4))
     p._sites.clear()                                 # simulate a lost cache
     assert p.is_enabled("fast_place") is True
     m.write(site, cheat.orig)
@@ -270,12 +273,15 @@ def test_is_enabled_reads_ground_truth_without_cache(game):
     assert p.is_enabled("fast_place") is False
 
 
-def test_enable_disable_fast_place(game):
+def test_fast_place_presets(game):
+    import struct as _s
     m, p = game
     site = CODE + 0x400 + CHEATS["fast_place"].patch_off
-    p.enable("fast_place")
-    assert m.read(site, 10) == CHEATS["fast_place"].patched
+    p.enable("fast_place")                        # default preset: Fast (itemTime 4)
+    assert m.read(site, 10) == b"\xbf" + _s.pack("<i", 4) + b"\x90" * 5
     assert p.is_enabled("fast_place")
+    p.enable("fast_place", value=1)               # Hyper (itemTime 1) — live re-tune
+    assert m.read(site, 5) == b"\xbf" + _s.pack("<i", 1)
     p.disable("fast_place")
     assert m.read(site, 10) == CHEATS["fast_place"].orig
     assert not p.is_enabled("fast_place")
@@ -314,8 +320,7 @@ def test_values_default_before_any_apply(game):
     # every valued cheat reports its ValueSpec default until one is applied
     assert p.values() == {"mining": 0.2, "reach": 20, "tool_reach": 30,
                           "pickup": 50, "spawn_rate": 15, "loot": 100,
-                          "max_minions": 10}
-    assert "fast_place" not in p.values()   # carries no value
+                          "max_minions": 10, "fast_place": 4}   # Fast preset default
 
 
 def test_applied_value_is_recorded_and_restored(game):

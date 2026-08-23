@@ -197,7 +197,8 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   fast-mining, long-reach, and a **Code patches** section: checkbox toggles for the
   code-patch cheats (mining speed, placement reach, fast placement, tool/interaction
   reach, item pickup range, spawn rate, drop-chance floor, **map-ping teleport**, and
-  **minion cap**) with tunable value spinboxes where applicable. With teleport on, **double-click a
+  **minion cap**) with tunable value spinboxes where applicable (fast placement offers
+  **Fast / Faster / Hyper** presets). With teleport on, **double-click a
   spot on the fullscreen map to warp there**. No Cheat Engine at runtime; a game
   restart clears them all.
 - **Inventory** tab — a grid mirroring the in-game inventory (Hotbar / Inventory /
