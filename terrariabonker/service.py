@@ -610,6 +610,51 @@ class Service:
         from terrariabonker.patcher import Patcher
         return Patcher(self.mem)
 
+    def tilemap(self):
+        """A read-only view of the world's tiles (spec 040)."""
+        from terrariabonker.locate import main_static_base
+        from terrariabonker.tiles import TileMap
+
+        base = main_static_base(self.mem)
+        if base is None:
+            raise ServiceError("could not locate Main's statics — is the game in a world?")
+        try:
+            return TileMap(self.mem, base)
+        except ValueError as e:
+            raise ServiceError(str(e))
+
+    def vein_at(self, x: int, y: int, *, gems: bool = False,
+                limit: int | None = None, diagonal: bool = True) -> dict:
+        """What a vein miner *would* take, starting at one tile. Reads only.
+
+        Deliberately a dry run: nothing about mining is destructive-free, so the part that
+        decides which tiles to take is worth being able to inspect on its own.
+        """
+        from terrariabonker import tiles as T
+
+        tm = self.tilemap()
+        whitelist = T.whitelist(gems)
+        t = tm.type_at(x, y)
+        found = T.flood(tm, x, y, whitelist,
+                        limit=limit or T.DEFAULT_LIMIT, diagonal=diagonal)
+        return {
+            "at": [x, y], "type": t,
+            "name": T.ORES.get(t) or T.EXTRACTABLES.get(t) or T.GEMS.get(t) or "",
+            "whitelisted": t in whitelist if t is not None else False,
+            "tiles": [list(p) for p in found], "count": len(found),
+            "capped": len(found) >= (limit or T.DEFAULT_LIMIT),
+            "world": [tm.max_x, tm.max_y],
+        }
+
+    def player_tile(self) -> tuple[int, int]:
+        """The tile the player is standing in."""
+        import struct
+
+        from terrariabonker.locate import STATLIFE_FROM_OBJ
+        base = self.live_block().life_addr - STATLIFE_FROM_OBJ
+        px, py = struct.unpack("<ff", self.mem.read(base + 0x0C, 8))
+        return int(px // 16), int(py // 16)
+
     def build_check(self) -> dict:
         """Is this build one we know, and do the cheats still resolve on it? (spec 036)
 

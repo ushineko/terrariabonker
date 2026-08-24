@@ -23,6 +23,7 @@ class Program
         bool prefixes = Array.IndexOf(args, "--prefixes") >= 0;
         bool tooltips = Array.IndexOf(args, "--tooltips") >= 0;
         bool npcs = Array.IndexOf(args, "--npcs") >= 0;
+        bool tiles = Array.IndexOf(args, "--tiles") >= 0;
         string exe = Array.Find(args, a => !a.StartsWith("--"))
             ?? "/mnt/Data3/SteamLibrary/steamapps/common/Terraria/Terraria.exe";
         using var fs = File.OpenRead(exe);
@@ -63,6 +64,19 @@ class Program
             Console.WriteLine(JsonSerializer.Serialize(tmap,
                 new JsonSerializerOptions { WriteIndented = false }));
             Console.Error.WriteLine($"joined id->tooltip: {tmap.Count}");
+            return 0;
+        }
+
+        if (tiles)
+        {
+            // TileID's constants are the authority on which tile id is which ore. The
+            // ore whitelist used to be hand-written; checking it against this found two
+            // omissions (Luminite, Fossil Ore), so it is generated and checked instead.
+            var tid = ReadIdConsts(md, "TileID", allowNonPositive: false);
+            var map = new SortedDictionary<int, string>();
+            foreach (var kv in tid) map[kv.Value] = kv.Key;
+            Console.Error.WriteLine($"TileID consts: {map.Count}");
+            Console.WriteLine(JsonSerializer.Serialize(map));
             return 0;
         }
 
@@ -206,6 +220,10 @@ class Program
                     ConstantTypeCode.SByte => br.ReadSByte(),
                     ConstantTypeCode.Int16 => br.ReadInt16(),
                     ConstantTypeCode.Int32 => br.ReadInt32(),
+                    // TileID's constants are UInt16; without these the whole set reads
+                    // back empty.
+                    ConstantTypeCode.UInt16 => br.ReadUInt16(),
+                    ConstantTypeCode.UInt32 => (int)br.ReadUInt32(),
                     _ => -1,
                 };
                 if (!allowNonPositive && val < 1) continue;

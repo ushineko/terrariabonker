@@ -1,7 +1,7 @@
 # Spec 040: Ore extractor lite — auto-mine contiguous ores
 
-**Status**: RECON — not implemented, but no longer blocked. The tile map is
-readable and the call is understood; one sizing question remains
+**Status**: IN PROGRESS — the read half is built, tested and verified in-game.
+The write half (the per-frame stub) is not started
 
 > **Note**: No issue tracker ticket (personal utility).
 

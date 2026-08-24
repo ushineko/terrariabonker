@@ -160,7 +160,7 @@ SERVE_OPS = frozenset({
     "status", "version", "inventory", "inv", "set-hp", "set-max-hp", "set-mana",
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
     "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
-    "accept-build",
+    "accept-build", "vein",
 })
 
 
@@ -243,6 +243,40 @@ def cmd_compendium(args) -> int:
     svc = _svc()
     cat = svc.compendium(refresh=getattr(args, "refresh", False))
     print(json.dumps(cat))
+    return 0
+
+
+def cmd_vein(args) -> int:
+    """Dry run: what a vein miner would take from one tile. Reads only, writes nothing."""
+    svc = _svc()
+    if args.x is None or args.y is None:
+        x, y = svc.player_tile()
+        print(f"[vein] no coordinates given; using the player's tile ({x}, {y})")
+    else:
+        x, y = args.x, args.y
+    got = svc.vein_at(x, y, gems=args.gems, limit=args.limit,
+                      diagonal=not args.orthogonal)
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    if not got["whitelisted"]:
+        print(f"[vein] tile ({x}, {y}) is id {got['type']} — not on the whitelist; "
+              "nothing would be mined")
+        return 0
+    print(f"[vein] {got['name']} (id {got['type']}) at ({x}, {y}): "
+          f"{got['count']} tiles would be mined"
+          + ("  [CAPPED — the vein is larger]" if got["capped"] else ""))
+    pts = [tuple(p) for p in got["tiles"]]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    print(f"       bounding box x {min(xs)}..{max(xs)}, y {min(ys)}..{max(ys)}")
+    if args.map:
+        seen = set(pts)
+        tm = svc.tilemap()
+        for yy in range(min(ys) - 1, max(ys) + 2):
+            row = "".join("#" if (xx, yy) in seen else ("." if tm.type_at(xx, yy) else " ")
+                          for xx in range(min(xs) - 1, max(xs) + 2))
+            print("       " + row)
     return 0
 
 
@@ -532,6 +566,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--refresh", action="store_true",
                    help="rescan the game instead of using the per-build cache")
     p.set_defaults(func=cmd_compendium)
+
+    p = sub.add_parser("vein",
+                       help="dry run: what a vein miner would take from a tile (reads only)")
+    p.add_argument("x", type=int, nargs="?", help="tile x (default: the player's tile)")
+    p.add_argument("y", type=int, nargs="?", help="tile y")
+    p.add_argument("--gems", action="store_true", help="include gems as well as ores")
+    p.add_argument("--limit", type=int, help="stop after this many tiles")
+    p.add_argument("--orthogonal", action="store_true",
+                   help="only up/down/left/right, not diagonals")
+    p.add_argument("--map", action="store_true", help="draw the vein")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.set_defaults(func=cmd_vein)
 
     p = sub.add_parser("build-check",
                        help="report the running build and whether the cheats resolve on it")
