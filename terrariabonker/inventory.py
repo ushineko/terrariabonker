@@ -40,6 +40,17 @@ ITEM_RARE = 0xF8        # rarity tier (int): -1 gray .. 0 white .. 10 red .. 11 
 ITEM_PREFIX = 0x15C     # modifier tier (byte): 0 none .. e.g. Legendary/Warding/Menacing
 # Damage-class / accessory flags (byte bools) — used to offer only item-appropriate
 # modifiers in the editor and to label a modified item.
+# Derived by differencing the game's own template objects rather than by dissecting the
+# class: the offset that is >= 0 for known helmets/chestplates/greaves and -1 for everything
+# else, and likewise > 0 for healing/mana potions. Cross-checked (Skeletron Mask headSlot 98,
+# Dirt Block -1) and the four sit adjacent, as sibling fields do.
+ITEM_BUFF_TYPE = 0x130  # BuffID granted on use; buff potions carry no healLife/healMana
+ITEM_HEAL_LIFE = 0xB4
+ITEM_HEAL_MANA = 0xB8
+ITEM_HEAD_SLOT = 0xD8
+ITEM_BODY_SLOT = 0xDC
+ITEM_LEG_SLOT = 0xE0
+
 ITEM_ACCESSORY = 0x7D
 ITEM_MELEE = 0x15D
 ITEM_MAGIC = 0x15E

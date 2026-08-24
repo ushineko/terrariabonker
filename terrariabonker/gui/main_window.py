@@ -28,7 +28,9 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
 from terrariabonker import __version__, names, prefixes, profile, recipes, sprites
 from terrariabonker import version as ver
 from terrariabonker.gui import client, invgrid
+from terrariabonker.gui.compendium import CompendiumTab
 from terrariabonker.gui.helper import Helper
+from terrariabonker.gui import uitext
 from terrariabonker.gui import single, uistate
 from terrariabonker.gui.item_dialog import ItemEditDialog
 from terrariabonker.patcher import PATCH_CATALOG
@@ -253,6 +255,12 @@ class MainWindow(QWidget):
         tabs.addTab(self._trainer_tab(), "Trainer")
         tabs.addTab(self._inventory_tab(), "Inventory")
         tabs.addTab(self._recipes_tab(), "Recipes")
+        # The log widget is built after the tabs, so bind it late rather than passing
+        # self.log.appendPlainText here (which would resolve it now, and fail).
+        self.compendium = CompendiumTab(self, self._fetch_compendium, self._give_item,
+                                        self._icon_for,
+                                        lambda msg: self.log.appendPlainText(msg))
+        tabs.addTab(self.compendium, "Compendium")
         tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(tabs, 1)
 
@@ -352,7 +360,21 @@ class MainWindow(QWidget):
         b.clicked.connect(lambda _=False, s=slot: self._on_cell_clicked(s))
         return b
 
+    def _fetch_compendium(self, done):
+        """Hand the catalog to the tab when it arrives; None if the command failed."""
+        def got(raw):
+            done(client.parse_compendium(raw))
+
+        self._call(client.compendium_argv(), on_output=got)
+
+    def _give_item(self, item_id: int):
+        self._run(client.give_argv(item_id, 1))
+
     def _on_tab_changed(self, i: int):
+        if i == 3:
+            self.compendium.ensure_loaded()
+            if not sprites.is_cached():
+                self._extract_sprites(after=self.compendium.ensure_loaded)
         if i == 1:
             self.refresh_inventory()
             if not sprites.is_cached():               # icons missing/stale: build them,
@@ -362,33 +384,35 @@ class MainWindow(QWidget):
 
     def _patches_group(self) -> QGroupBox:
         """Code-patch cheats, embedded in the Trainer tab. No Cheat Engine at
-        runtime — these are byte patches (and one code-cave injection) applied through
-        /proc; a game restart clears them. (The 'CE' tab is reserved for real CE
-        instrumentation.)"""
+        runtime — these are byte patches (and code-cave injections) applied through /proc;
+        a game restart clears them.
+
+        One tab per section rather than one long list: the flat list already needed
+        scrolling at twelve patches, and it only grows. Tabs keep the Trainer tab a fixed
+        height however many are added.
+        """
         box = QGroupBox("Code patches")
-        box.setToolTip("Cheats that patch the running game in memory. "
-                       "A game restart clears them.")
-        g = QGridLayout(box)
-        row = 0
-        # Grouped by section (see patcher.SECTIONS) — the flat list outgrew being scannable
-        # once there were eleven of them. The catalog is already ordered by section, so a
-        # heading is emitted whenever the section changes.
-        current = None
+        box.setToolTip(uitext.wrap("Cheats that patch the running game in memory. "
+                                   "A game restart clears them."))
+        outer = QVBoxLayout(box)
+        pages = QTabWidget()
+        outer.addWidget(pages)
+
+        # The catalog is ordered by section, so a new page starts whenever it changes.
+        current, grid, row = None, None, 0
         for name, info in PATCH_CATALOG.items():
             if info.section != current:
                 current = info.section
-                head = QLabel(current)
-                head.setStyleSheet("color: #c8c8c8; font-weight: bold;")
-                if row:
-                    g.setRowMinimumHeight(row, 14)     # a little air above each heading
-                    row += 1
-                g.addWidget(head, row, 0, 1, 3)
-                row += 1
+                page = QWidget()
+                grid = QGridLayout(page)
+                grid.setColumnStretch(0, 1)
+                row = 0
+                pages.addTab(page, current)
             cb = QCheckBox(info.label)
-            cb.setToolTip(info.note)
+            cb.setToolTip(uitext.wrap(info.note))
             cb.toggled.connect(lambda on, n=name: self._on_patch_toggled(n, on))
             self._patch_cbs[name] = cb
-            g.addWidget(cb, row, 0)
+            grid.addWidget(cb, row, 0)
             if info.value is not None:
                 if info.value.presets:
                     w = QComboBox()
@@ -399,12 +423,13 @@ class MainWindow(QWidget):
                     w = self._value_spin(info.value)
                     w.valueChanged.connect(lambda _v, n=name: self._on_patch_value(n))
                 self._patch_vals[name] = w
-                g.addWidget(w, row, 1)
+                grid.addWidget(w, row, 1)
                 unit = QLabel(info.value.unit)
                 unit.setStyleSheet("color: gray")
-                g.addWidget(unit, row, 2)
+                grid.addWidget(unit, row, 2)
             row += 1
-        g.setColumnStretch(0, 1)
+            grid.setRowStretch(row, 1)      # keep rows packed at the top of the page
+        self.patch_pages = pages
         return box
 
     def _value_spin(self, spec) -> QWidget:
@@ -493,11 +518,13 @@ class MainWindow(QWidget):
                 available = bool(d.get("available", True))
                 cb.setEnabled(available)
                 if not available:
-                    cb.setToolTip(f"Unavailable on this build: {d.get('reason', '')}")
+                    cb.setToolTip(uitext.wrap(
+                        f"Unavailable on this build: {d.get('reason', '')}"))
                 elif not d.get("verified", True):
-                    cb.setToolTip(f"{PATCH_CATALOG[name].note}\n\n"
-                                  "(AOB unverified on this build — it resolves, but was "
-                                  "confirmed on a different one.)")
+                    cb.setToolTip(uitext.wrap(
+                        f"{PATCH_CATALOG[name].note}\n\n"
+                        "(AOB unverified on this build — it resolves, but was confirmed "
+                        "on a different one.)"))
             if name in busy:
                 continue
             cb.setChecked(bool(on.get(name)))

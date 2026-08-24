@@ -37,6 +37,31 @@ def elevate() -> None:
     os.execvp("sudo", ["sudo", "-E", sys.executable, entry, *sys.argv[1:]])
 
 
+def give_back_to_user(path: str) -> None:
+    """Hand a file or directory we wrote as root back to the invoking user.
+
+    ``elevate()`` re-execs with ``sudo -E``, which keeps ``HOME`` pointing at the *user's*
+    home — so caches written by the privileged side land in the user's own directory but
+    owned by ``root``, where they cannot be cleared without sudo. Worse, the directory
+    around them stays user-writable, so root would be reading back a file an unprivileged
+    process could have replaced.
+
+    Best effort by design: a cache we cannot chown is still a usable cache, so every failure
+    here is swallowed.
+    """
+    if os.geteuid() != 0:
+        return
+    try:
+        uid = int(os.environ["SUDO_UID"])
+        gid = int(os.environ["SUDO_GID"])
+    except (KeyError, ValueError):
+        return                      # not under sudo (a real root shell); leave it alone
+    try:
+        os.chown(path, uid, gid)
+    except OSError:
+        pass
+
+
 def find_pid() -> int:
     """Return the PID of the running Terraria game process.
 

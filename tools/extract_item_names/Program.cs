@@ -20,6 +20,8 @@ class Program
     static int Main(string[] args)
     {
         bool prefixes = Array.IndexOf(args, "--prefixes") >= 0;
+        bool tooltips = Array.IndexOf(args, "--tooltips") >= 0;
+        bool npcs = Array.IndexOf(args, "--npcs") >= 0;
         string exe = Array.Find(args, a => !a.StartsWith("--"))
             ?? "/mnt/Data3/SteamLibrary/steamapps/common/Terraria/Terraria.exe";
         using var fs = File.OpenRead(exe);
@@ -44,17 +46,62 @@ class Program
             return 0;
         }
 
+        if (tooltips)
+        {
+            // The game's own tooltip text, id -> tooltip. Values may reference shared
+            // snippets as {$CommonItemTooltip.Foo}; those are resolved here so the runtime
+            // only ever sees plain strings.
+            var ids = ReadItemIdConsts(md);
+            var tips = ReadLocalization(pe, md, "ItemTooltip");
+            var all = ReadAllLocalization(pe, md);
+            Console.Error.WriteLine($"ItemTooltip entries: {tips.Count}, all keys: {all.Count}");
+            var tmap = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            foreach (var kv in ids)
+                if (tips.TryGetValue(kv.Key, out var text) && !string.IsNullOrWhiteSpace(text))
+                    tmap[kv.Value.ToString()] = ResolveRefs(text, all);
+            Console.WriteLine(JsonSerializer.Serialize(tmap,
+                new JsonSerializerOptions { WriteIndented = false }));
+            Console.Error.WriteLine($"joined id->tooltip: {tmap.Count}");
+            return 0;
+        }
+
+        if (npcs)
+        {
+            // NPC ids go negative for some entries, so unlike items they are not filtered
+            // to positive values.
+            var nid = ReadIdConsts(md, "NPCID", allowNonPositive: true);
+            var nname = ReadLocalization(pe, md, "NPCName");
+            var special = ReadLocalization(pe, md, "SpecialNPCName");
+            var allLoc = ReadAllLocalization(pe, md);
+            Console.Error.WriteLine($"NPCID consts: {nid.Count}, names: {nname.Count}, "
+                                    + $"special: {special.Count}");
+            var nmap = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            foreach (var kv in nid)
+            {
+                if (!nname.TryGetValue(kv.Key, out var disp) || string.IsNullOrEmpty(disp))
+                    special.TryGetValue(kv.Key, out disp);
+                disp = string.IsNullOrEmpty(disp) ? Spaced(kv.Key) : ResolveRefs(disp, allLoc);
+                nmap[kv.Value.ToString()] = disp;
+            }
+            Console.WriteLine(JsonSerializer.Serialize(nmap,
+                new JsonSerializerOptions { WriteIndented = false }));
+            Console.Error.WriteLine($"joined id->npc: {nmap.Count}");
+            return 0;
+        }
+
         var idByInternal = ReadItemIdConsts(md);
         Console.Error.WriteLine($"ItemID consts: {idByInternal.Count}");
 
         var displayByInternal = ReadItemNames(pe, md);
         Console.Error.WriteLine($"localization ItemName entries: {displayByInternal.Count}");
 
+        var allText = ReadAllLocalization(pe, md);
         var outMap = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (var kv in idByInternal)
         {
             displayByInternal.TryGetValue(kv.Key, out var disp);
-            outMap[kv.Value.ToString()] = string.IsNullOrEmpty(disp) ? Spaced(kv.Key) : disp;
+            outMap[kv.Value.ToString()] = string.IsNullOrEmpty(disp)
+                ? Spaced(kv.Key) : ResolveRefs(disp, allText);
         }
         Console.WriteLine(JsonSerializer.Serialize(outMap,
             new JsonSerializerOptions { WriteIndented = false }));
@@ -88,7 +135,56 @@ class Program
     }
 
     // Generalized const reader: Terraria.ID.<typeName> fields (byte/short/int) -> name->id.
-    static Dictionary<string, int> ReadIdConsts(MetadataReader md, string typeName)
+    // Localization values reference each other as {$Category.Key} — tooltips pull in
+    // CommonItemTooltip and PaintingArtist, NPC names pull in other NPCName entries, and a
+    // couple of item names point at ItemName. Resolve against every category so the shipped
+    // data is plain text; anything still unresolved is left visible rather than blanked.
+    static string ResolveRefs(string text, Dictionary<string, string> all)
+    {
+        int guard = 0;
+        while (text.Contains("{$") && guard++ < 8)
+        {
+            int i = text.IndexOf("{$", StringComparison.Ordinal);
+            int j = text.IndexOf('}', i);
+            if (j < 0) break;
+            string key = text.Substring(i + 2, j - i - 2);
+            if (!all.TryGetValue(key, out var val)) break;   // unknown: leave it in place
+            text = text.Substring(0, i) + val + text.Substring(j + 1);
+        }
+        return text;
+    }
+
+    // Every localization entry as "Category.Key" -> value.
+    static Dictionary<string, string> ReadAllLocalization(PEReader pe, MetadataReader md)
+    {
+        var all = new Dictionary<string, string>();
+        var resDir = pe.PEHeaders.CorHeader.ResourcesDirectory;
+        var data = pe.GetSectionData(resDir.RelativeVirtualAddress);
+        foreach (var rh in md.ManifestResources)
+        {
+            var r = md.GetManifestResource(rh);
+            if (!r.Implementation.IsNil) continue;
+            var name = md.GetString(r.Name);
+            if (!name.StartsWith("Terraria.Localization.Content.en-US.") || !name.EndsWith(".json"))
+                continue;
+            var reader = data.GetReader((int)r.Offset, data.Length - (int)r.Offset);
+            int len = reader.ReadInt32();
+            var json = Encoding.UTF8.GetString(reader.ReadBytes(len));
+            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions {
+                CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            foreach (var cat in doc.RootElement.EnumerateObject())
+            {
+                if (cat.Value.ValueKind != JsonValueKind.Object) continue;
+                foreach (var kv in cat.Value.EnumerateObject())
+                    if (kv.Value.ValueKind == JsonValueKind.String)
+                        all[cat.Name + "." + kv.Name] = kv.Value.GetString();
+            }
+        }
+        return all;
+    }
+
+    static Dictionary<string, int> ReadIdConsts(MetadataReader md, string typeName,
+                                                bool allowNonPositive = false)
     {
         var map = new Dictionary<string, int>();
         foreach (var th in md.TypeDefinitions)
@@ -111,7 +207,7 @@ class Program
                     ConstantTypeCode.Int32 => br.ReadInt32(),
                     _ => -1,
                 };
-                if (val < 1) continue;
+                if (!allowNonPositive && val < 1) continue;
                 string name = md.GetString(fd.Name);
                 if (name == "Count") continue;
                 map[name] = val;

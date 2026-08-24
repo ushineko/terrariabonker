@@ -61,6 +61,13 @@ holds no state; stopping it ends every effect.*
   The item sprites are decoded from the game's own `Content/Images/*.xnb` (a
   self-contained XNB + LZX decoder, no external tools) into a local, gitignored cache on
   first use — reconstitutable on any machine from that machine's game files.
+- **Item compendium** — a browsable catalog of **every** item in the game (6,195) and every
+  NPC name (763), not just the craftable ones. Sortable columns for damage, defense and
+  rarity; filter by kind (weapon / tool / accessory / armour / potion / block / material)
+  or by name and ID; each entry shows the game's own tooltip, its sprite, and a link to the
+  official wiki, and can be given to you. Item stats do not exist in `Terraria.exe` at all —
+  they are assigned at runtime by `Item.SetDefaults` — so they are read from the game's own
+  template objects in memory and cached per build.
 - **Code-patch cheats** — global mining speed, item-independent placement reach,
   fast placement, **unified tool/interaction reach** (mining, tool use, chests,
   signs, and crafting-station range all extend together), **item pickup range**
@@ -226,8 +233,9 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   fast-mining, long-reach, and a **Code patches** section: checkbox toggles for the
   code-patch cheats (mining speed, placement reach, fast placement, tool/interaction
   reach, item pickup range, spawn rate, drop-chance floor, **map-ping teleport**, and
-  **minion cap**, **vanity accessories**, **inventory accessories**) with tunable value
-  spinboxes where applicable
+  **minion cap**, **vanity accessories**, **inventory accessories**, **smart-cursor
+  radius**) with tunable value spinboxes where applicable, grouped into
+  **Build / Combat / Accessories / Misc** tabs
   (fast placement offers
   **Fast / Faster / Hyper** presets). With teleport on, **double-click a
   spot on the fullscreen map to warp there**. No Cheat Engine at runtime; a game
@@ -257,6 +265,14 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   (ingredients). On first open the item icons are decoded from the game's own files into a
   local cache (a few seconds, one-time); **Re-extract from game** regenerates both the
   recipe database and the icons after a game update.
+
+- **Compendium** tab — every item and NPC in one sortable list. Filter by kind or search by
+  name/ID; click a column to sort (damage, defense, rarity, ID). Double-click an entry (or
+  press Enter) for its tooltip, stats, a **Wiki** button that opens the official article in
+  your browser, and **Give**, which puts the item in your first empty slot. The catalog is
+  built on first open by reading the game's item templates — about two seconds — and cached
+  per game build under `~/.cache/terrariabonker/`, so reopening the tab is instant. NPC
+  entries currently list names only; their stats, sprites and spawning are still to come.
 
 The panel reopens at the size you left it (stored under `~/.cache/terrariabonker/`). Its
 on-screen position is remembered by **KWin**, not by the app: under Wayland `QWidget.move()`

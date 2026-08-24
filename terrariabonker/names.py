@@ -22,6 +22,14 @@ try:
 except (OSError, ValueError):
     _NAMES = {}
 
+_TIP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "tooltips.json")
+
+try:
+    with open(_TIP_PATH) as _f:
+        _TOOLTIPS: dict[int, str] = {int(k): v for k, v in json.load(_f).items()}
+except (OSError, ValueError):
+    _TOOLTIPS = {}
+
 
 def name(item_id: int) -> str:
     """Display name for an ItemID, or '' if unknown (e.g. a 1.4-only item)."""
@@ -31,6 +39,19 @@ def name(item_id: int) -> str:
 def label(item_id: int) -> str:
     """A never-empty label: 'Copper Shortsword' or '#5400' for unknown ids."""
     return _NAMES.get(item_id) or (f"#{item_id}" if item_id else "(empty)")
+
+
+def tooltip(item_id: int) -> str:
+    """The game's own tooltip text for an item, or '' when it has none.
+
+    From ``data/tooltips.json`` (``ItemTooltip`` localization, with the shared
+    ``CommonItemTooltip`` snippets already substituted in at extraction time).
+    """
+    return _TOOLTIPS.get(item_id, "")
+
+
+def all_names() -> dict[int, str]:
+    return dict(_NAMES)
 
 
 def search(query: str, limit: int = 60) -> list[tuple[int, str]]:

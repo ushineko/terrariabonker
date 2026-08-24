@@ -159,7 +159,7 @@ def cmd_set_item(args) -> int:
 SERVE_OPS = frozenset({
     "status", "version", "inventory", "inv", "set-hp", "set-max-hp", "set-mana",
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
-    "fast-mining", "long-reach",
+    "fast-mining", "long-reach", "compendium",
 })
 
 
@@ -234,6 +234,14 @@ def cmd_serve(args) -> int:
                 continue
         ok, out = _serve_once(parser, argv)
         _serve_reply(rid, ok, out)
+    return 0
+
+
+def cmd_compendium(args) -> int:
+    """The full item/NPC catalog. Always --json: it is a GUI data feed, not a listing."""
+    svc = _svc()
+    cat = svc.compendium()
+    print(json.dumps(cat))
     return 0
 
 
@@ -478,6 +486,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "changed in-game (guards against editing a stale snapshot)")
     force_flag(p)
     p.set_defaults(func=cmd_set_item)
+
+    p = sub.add_parser("compendium",
+                       help="dump the full item/NPC catalog as JSON (for the GUI tab)")
+    p.add_argument("--json", action="store_true", help="machine-readable (always on)")
+    p.set_defaults(func=cmd_compendium)
 
     p = sub.add_parser("give", help="give an item into the first empty inventory slot")
     p.add_argument("type", type=int, help="ItemID")

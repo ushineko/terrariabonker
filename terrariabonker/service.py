@@ -364,6 +364,57 @@ class Service:
             inv.set_stack(empty, stack)
         return empty
 
+    def compendium(self) -> dict:
+        """The full catalog: every item with its stats and kind, plus every NPC name.
+
+        Item stats come from the game's own template objects (see ``content``), which needs
+        one scan of the writable regions — about two seconds — so the result is cached per
+        build under ``~/.cache`` (not the config dir, which can be root-owned) and reused.
+        NPC stats are not read yet; they need ``Main.npc`` to locate the NPC vtable, which
+        arrives with the spawn work.
+        """
+        from terrariabonker import content, names, npcs
+        stats = self._item_template_cache()
+        items = []
+        for tid, name in sorted(names.all_names().items()):
+            st = stats.get(tid)
+            items.append({
+                "id": tid, "name": name, "kind": content.item_kind(st) if st else "Unknown",
+                "tooltip": names.tooltip(tid), "stats": st or {},
+                "wiki": content.wiki_url(name),
+            })
+        npc_list = [{"id": nid, "name": nm, "kind": "NPC", "wiki": content.wiki_url(nm)}
+                    for nid, nm in sorted(npcs.all_names().items())]
+        return {"items": items, "npcs": npc_list, "build": self.build_key()}
+
+    def _item_template_cache(self) -> dict[int, dict]:
+        import json
+        import os
+
+        from terrariabonker import content, proc
+        path = os.path.expanduser("~/.cache/terrariabonker/templates-%s.json"
+                                  % self.build_key().replace("+", "-"))
+        try:
+            with open(path) as f:
+                return {int(k): v for k, v in json.load(f).items()}
+        except (OSError, ValueError):
+            pass
+        found = content.find_item_templates(self.mem, self._item_vtable())
+        try:
+            cache_dir = os.path.dirname(path)
+            os.makedirs(cache_dir, exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({str(k): v for k, v in found.items()}, f)
+            os.replace(tmp, path)
+            # This runs privileged but writes into the user's own cache directory (sudo -E
+            # keeps HOME), so hand the result back or they cannot clear their own cache.
+            proc.give_back_to_user(cache_dir)
+            proc.give_back_to_user(path)
+        except OSError:
+            pass                      # a cache we cannot write is not a failure
+        return found
+
     def build_key(self) -> str:
         """Identity of the running build, e.g. "1.4.5.7+24893155" (see version.build_key)."""
         version, buildid, _level, _msg = self._build_info()

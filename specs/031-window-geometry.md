@@ -41,9 +41,10 @@ position it is not permitted to read, so guessing from Qt's numbers would persis
    prevents the window from closing.
 6. **Position** is delegated to KWin, which has a "Remember" rule type for exactly this.
    `tools/kwin_rule.py --install/--remove` registers a rule matched on `wmclass=terrariabonker`
-   with `positionrule=4` / `screenrule=4` (the idiom used by the existing rules on this
+   **and** `title="terrariabonker v"` with `titlematch=2` (substring), with
+   `positionrule=4` / `screenrule=4` (the idiom used by the existing rules on this
    desktop), via `kwriteconfig6`, then asks KWin to reconfigure so it applies without a
-   re-login. `install.sh` calls it, `uninstall.sh` calls `--remove`, and both are no-ops
+   re-login. The title clause is not decoration — see the follow-up finding below. `install.sh` calls it, `uninstall.sh` calls `--remove`, and both are no-ops
    when the KDE config tools are absent.
 7. Size is left out of the KWin rule so the two mechanisms cannot fight over it: the app
    owns size (and works on any desktop), KWin owns position and screen.
@@ -59,6 +60,21 @@ position it is not permitted to read, so guessing from Qt's numbers would persis
   terrariabonker rule is updated rather than duplicated, so re-running the installer is safe.
 - **Non-KDE desktops** get size persistence only; position falls to the window manager's own
   placement, which is the status quo.
+- **A wmclass-only rule captures the app's dialogs too — found later, in spec 035.** Every
+  modal opened from the panel (recipe view, compendium entry, confirmations) began appearing
+  pinned to the screen's upper-left instead of centred on its parent. The cause was this
+  rule: KWin matched *every* window of the process, dialogs included, and applied the
+  remembered top-level position to each. It was our own regression, not a Qt or theme
+  problem.
+
+  The first fix attempted — adding `types=1` to restrict the rule to normal windows — **did
+  not work**; the behaviour was unchanged and was re-measured three ways to confirm. What
+  works is narrowing the match to the main window by title as well as class:
+  `title="terrariabonker v"` with `titlematch=2` (substring), which the titlebar carries and
+  the dialogs do not. `--remove` also strips the now-unused `types` key.
+
+  The general lesson for any future window rule here: match the main window specifically, or
+  the rule silently becomes a rule about dialogs.
 - **Rollback.** `git revert` plus `tools/kwin_rule.py --remove`; the cache file is
   disposable.
 
@@ -70,6 +86,9 @@ position it is not permitted to read, so guessing from Qt's numbers would persis
 - [x] Size state lives under `~/.cache`, not the possibly-root-owned config directory
 - [x] `tools/kwin_rule.py` adds a `wmclass=terrariabonker` rule with `positionrule`/
       `screenrule` set to Remember, is idempotent on re-run, and removes cleanly
+- [x] The rule matches only the main window, not the app's dialogs: narrowed with
+      `title="terrariabonker v"` / `titlematch=2` after the wmclass-only form was found to
+      pin every modal to the upper-left (maintainer-confirmed fixed)
 - [x] The rule survives a `kwinrulesrc` round trip without altering any other rule's content
 - [x] `install.sh` registers the rule and `uninstall.sh` removes it; both succeed when the
       KDE tools are missing

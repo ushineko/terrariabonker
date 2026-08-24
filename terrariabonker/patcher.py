@@ -291,22 +291,19 @@ CHEATS: dict[str, Cheat] = {
         "mining", "Global mining speed (pickSpeed)", "reset_block", 12,
         _b("D9 9F D8 08 00 00"), _b("DD D8 90 90 90 90"),
         value_off=0x1A0, value_kind="f32", on_value=0.2, off_value=1.0,
-        note="NOPs the per-frame pickSpeed reset so a low value holds"),
+        note="Global mining speed. Lower is faster."),
     "reach": Cheat(
         "reach", "Placement reach (blockRange)", "reset_block", 0,
         _b("C7 87 F8 09 00 00 00 00 00 00"), _b("90 90 90 90 90 90 90 90 90 90"),
         value_off=0x2C0, value_kind="i32", on_value=20, off_value=0,
-        note="NOPs the blockRange reset; item-independent extended reach. Large values "
-             "also enlarge the SMART CURSOR search: it scans a box of this radius every "
-             "frame (75 = 151x151 tiles), so lower it if holding Shift to auto-place "
-             "stutters"),
+        note="Extended placement reach for every item."),
     # Force a low itemTime at the placement-timing read site: `mov edi,N; nop*5`. N is the
     # itemTime (lower = faster), tunable via presets (Fast=4 / Faster=2 / Hyper=1).
     "fast_place": Cheat(
         "fast_place", "Fast placement (ApplyItemTime)", "place", 20,
         _b("B8 01 00 00 00 3B F8 0F 4C F8"), b"",
         make_patched=lambda n: b"\xbf" + struct.pack("<i", max(1, int(n))) + b"\x90" * 5,
-        note="forces a low itemTime (Fast=4/Faster=2/Hyper=1) at the placement read site"),
+        note="Near-instant block placement."),
     # Rewrite ResetEffects' `maxMinions = 1` reset to `maxMinions = N`, so N minion slots
     # hold each frame (accessory bonuses still stack on top). patch_off=6 is the 4-byte
     # immediate; make_patched packs N there. Ported in spirit from ReGrind-style stat caps.
@@ -314,7 +311,7 @@ CHEATS: dict[str, Cheat] = {
         "max_minions", "Minion cap (maxMinions)", "reset_minions", 6,
         _b("01 00 00 00"), b"",                     # patched is built from the value
         make_patched=lambda n: struct.pack("<i", max(1, int(n))),
-        note="raises the minion (summon) cap; a game restart clears it"),
+        note="Raises the minion (summon) cap."),
 }
 
 
@@ -589,29 +586,26 @@ INJECTIONS: dict[str, Injection] = {
     "tool_reach": Injection(
         "tool_reach", "Tool + interaction reach (GetRanges)", "getranges",
         0xCA, _b("8D 65 F4 5E 5F"), _force_xy,
-        note="extends mining, tool use, and chest/sign reach together; "
-             "a game restart clears it. GetRanges also sizes the SMART CURSOR search "
-             "box, so this stacks with placement reach when auto-placing with Shift"),
+        note="Extends mining, tool use, chests, signs and crafting stations together."),
     # Player.GrabItems: a call returns the grab range in eax, then `mov [ebp-54],eax`
     # stores it. Inject `imul eax,N` before that store to scale the pickup radius.
     # Overwrite `mov [ebp-54],eax; lea eax,[ebp-50]` (6 bytes), re-run in the stub.
     "pickup": Injection(
         "pickup", "Item pickup range (GrabItems)", "grabitems",
         0x0, _b("89 45 AC 8D 45 B0"), _imul_eax,
-        note="scales the item pickup range by N; a game restart clears it"),
+        note="Scales the item pickup radius."),
     # GetSpawnRate epilogue (esi=out spawnRate, edi=out maxSpawns still live). Overwrite
     # `lea esp,[ebp-0C]; pop esi; pop edi` like GetRanges; force the two outputs.
     "spawn_rate": Injection(
         "spawn_rate", "Spawn rate (GetSpawnRate)", "get_spawn_rate",
         0x1EAA, _b("8D 65 F4 5E 5F"), _force_spawn,
-        note="caps active enemies at N (0 = peaceful); a game restart clears it"),
+        note="Caps active enemies. 0 is peaceful."),
     # CommonDrop.TryDroppingItem +0x26: cap the chance denominator so drops have a
     # minimum chance (100% = guaranteed). Ported from the FearLess ReGrind table.
     "loot": Injection(
         "loot", "Drop chance floor (CommonDrop)", "trydrop",
         -7, _b("8B 4E 10 89 4C 24 04"), _cap_drop_denom,   # anchor at +0x2D -> site at +0x26
-        note="floors the drop chance of common enemy/grab-bag drops at N% "
-             "(100 = guaranteed); a game restart clears it",
+        note="Minimum drop chance for common drops. 100 is guaranteed.",
         rerun_overwrite=False, multi=True),
     # Make the seven VANITY accessory slots functional (spec 032). Vanilla already runs
     # ApplyEquipVanity for 13..19 — which is why info accessories like the Depth Meter
@@ -622,8 +616,8 @@ INJECTIONS: dict[str, Injection] = {
     "vanity_accs": Injection(
         "vanity_accs", "Vanity accessories work (slots 13-19)", "equip_apply",
         7, _b("89 44 24 04 89 3C 24"), _clamp_vanity_slot,
-        note="items in the vanity accessory column grant their full effects, doubling "
-             "the usable accessory slots; a game restart clears it",
+        note="Vanity accessory slots grant full effects, doubling your usable "
+             "accessories.",
         edits=(Edit("equip_apply", 27, b"\x0a", b"\x14"),        # ApplyEquipFunctional loop
                Edit("equip_benefits", 48, b"\x0a", b"\x14"))),   # prefix/armour benefits
     # Smart-cursor search radius (spec 034). Keeps placement/tool reach at whatever the
@@ -631,10 +625,7 @@ INJECTIONS: dict[str, Injection] = {
     "smart_cursor": Injection(
         "smart_cursor", "Smart cursor search radius", "smart_cursor",
         69, _b("89 46 3C 85 DB"), _shrink_smart_cursor,
-        note="limits how far the SMART CURSOR searches for a target (holding Shift to "
-             "auto-place). It scans this radius SQUARED every frame, and the reach cheats "
-             "size it — at reach 75 that is 22,801 tiles per frame, which stutters. Does "
-             "not affect manual placement, tool or interaction reach",
+        note="Don't set this too high or the game will lag.",
         rerun_overwrite=False),
     # Accessories take effect from the INVENTORY (spec 033). UpdateEquips' first loop
     # already walks all 58 slots every frame; this hooks the point where the Item* is in
@@ -642,8 +633,7 @@ INJECTIONS: dict[str, Injection] = {
     "inventory_accs": Injection(
         "inventory_accs", "Accessories work from inventory", "inventory_scan",
         22, _b("8B 00 8B 40 6C"), None,
-        note="accessories anywhere in your inventory grant their effects without being "
-             "equipped; a game restart clears it",
+        note="Accessories work from your inventory, without being equipped.",
         rerun_overwrite=False, build_body=_inventory_accs_body),
     # Map-ping teleport (ported from the FearLess ReGrind table). Hook Main.TriggerPing
     # at +0x2D; the stub calls Player.Teleport(this, pingX, pingY, 0, 0), warping the
@@ -654,8 +644,8 @@ INJECTIONS: dict[str, Injection] = {
     "teleport": Injection(
         "teleport", "Map-ping teleport (TriggerPing)", "trigger_ping",
         0x0, _b("8B 4D 08 89 4C 24 04"), None,
-        note="drop a fullscreen-map ping to teleport there; a game restart clears it "
-             "(re-toggle after a world/character reload)",
+        note="Double-click the fullscreen map to warp there. Re-toggle after a world "
+             "reload.",
         rerun_overwrite=False, call_anchor="player_teleport", call_target_off=0x32),
 }
 
@@ -692,7 +682,7 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
     "spawn_rate": ValueSpec("i32", 15, 0, 200, "max active enemies · 0 = peaceful"),
     "loot": ValueSpec("i32", 100, 1, 100, "% min drop chance · 100 = guaranteed"),
     "max_minions": ValueSpec("i32", 10, 1, 255, "minion slots (base; +accessories)"),
-    "smart_cursor": ValueSpec("i32", 20, 3, 200, "tiles · searched area is this squared"),
+    "smart_cursor": ValueSpec("i32", 20, 3, 200, "tiles"),
     # itemTime presets (lower = faster placement). "Fast" is the original behaviour.
     "fast_place": ValueSpec("i32", 4, 1, 4, "placement speed",
                             presets=(("Fast", 4), ("Faster", 2), ("Hyper", 1))),

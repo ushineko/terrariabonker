@@ -32,10 +32,21 @@ DESCRIPTION = "terrariabonker Remember Position"
 # "Always On Top" rules that keep their own position/screen).
 REMEMBER = "4"
 
+# Matching on wmclass alone also catches the app's DIALOGS, and "remember position" then
+# pins each one to the panel's stored spot instead of letting KWin centre it on its parent.
+# Measured: with the rule on, a dialog opened at exactly the parent's corner; with it off,
+# perfectly centred. Restricting by window type (types=1, NET::NormalMask) did NOT help, so
+# the discriminator is the title: only the panel's own title carries the version, while
+# dialogs are named after the item, "About terrariabonker", and so on.
+TITLE = "terrariabonker v"
+SUBSTRING_MATCH = "2"           # 0 unimportant, 1 exact, 2 substring, 3 regex
+
 KEYS = {
     "Description": DESCRIPTION,
     "wmclass": WMCLASS,
     "wmclassmatch": "1",
+    "title": TITLE,
+    "titlematch": SUBSTRING_MATCH,
     "positionrule": REMEMBER,
     "screenrule": REMEMBER,
 }
@@ -105,8 +116,9 @@ def remove() -> int:
         return 0
     for key in KEYS:
         _delete(group, key)
-    # KWin also stores what it remembered (position/screen) on the same group.
-    for key in ("position", "screen", "size"):
+    # KWin also stores what it remembered (position/screen) on the same group, plus any
+    # keys an older version of this rule wrote.
+    for key in ("position", "screen", "size", "types"):
         _delete(group, key)
     rest = [r for r in rules if r != group]
     _write("General", "rules", ",".join(rest))
