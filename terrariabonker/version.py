@@ -48,6 +48,60 @@ _MAX_COMPONENT = 1000
 # is how a startup misread could report either of them with confidence. The live version
 # shows up 2-4 times, and only once the game has reached its menu.
 _MIN_OCCURRENCES = 2
+_EXE_CACHE: dict = {}                # path -> ((inode, mtime, size), version)
+
+
+def _mapped_exe(mem):
+    """``(path, True)`` when the process is running the exe currently on disk.
+
+    The inode check is the whole point. Steam can replace ``Terraria.exe`` while the game
+    keeps running the code it already mapped — which is exactly what happened on
+    2026-08-23: the file became 1.4.5.8 at 12:19 while a 1.4.5.7 process ran on until it
+    was restarted at 21:41. Reading the file in that window describes a build the process
+    is not executing.
+    """
+    path = mem.exe_path()
+    if not path or not os.path.exists(path):
+        return None, False
+    try:
+        with open(f"/proc/{mem.pid}/maps") as f:
+            for line in f:
+                if line.rstrip().endswith(path) and " r-xp " in line:
+                    parts = line.split()
+                    return path, int(parts[4]) == os.stat(path).st_ino
+    except (OSError, ValueError, IndexError):
+        pass
+    return path, False
+
+
+def _version_from_exe(path: str) -> str | None:
+    """The version literal compiled into the exe, if there is exactly one.
+
+    This is the authority. The game's version is a string constant in its own assembly;
+    everything else that looks like a version in the process is somebody else's — a
+    runtime path, or stale JSON left by a previous build, which is what a frequency vote
+    kept choosing.
+    """
+    cached = _EXE_CACHE.get(path)
+    stamp = None
+    try:
+        st = os.stat(path)
+        stamp = (st.st_ino, st.st_mtime, st.st_size)
+    except OSError:
+        return None
+    if cached and cached[0] == stamp:
+        return cached[1]
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    found = {m.group(1).replace(b"\x00", b"").decode("ascii", "ignore")
+             for m in _VER_RE.finditer(data)}
+    found = {v for v in found if v.count(".") >= 2 and _plausible(v)}
+    got = found.pop() if len(found) == 1 else None
+    _EXE_CACHE[path] = (stamp, got)
+    return got
 
 
 def _plausible(version: str) -> bool:
@@ -64,11 +118,20 @@ def _plausible(version: str) -> bool:
 
 
 def detect_version(mem) -> str | None:
-    """Return the game's version string (e.g. "1.4.5.7") scanned from memory, or None.
+    """The version of the build this process is running, or None if it cannot be told.
 
-    None means "not readable yet", which happens for a moment after launch: it is a
-    scan of live memory, and the string it looks for has to have been allocated first.
+    Read from the exe the process maps, after checking the mapping still refers to the
+    file on disk. Scanning live memory was tried first and is kept only as a fallback: the
+    process contains several version-shaped strings that are not the game's, a frequency
+    vote picks whichever happens to be most numerous, and the game's own literal is not it.
+    On the 1.4.5.8 build the heap holds four copies of a stale ``"Version":"v1.4.5.7"``
+    JSON against a single copy of the real one.
     """
+    path, current = _mapped_exe(mem)
+    if path and current:
+        from_exe = _version_from_exe(path)
+        if from_exe:
+            return from_exe
     counts: dict[str, int] = {}
     for start, end in mem.regions():
         buf = mem.read(start, end - start)
