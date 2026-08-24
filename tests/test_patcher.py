@@ -30,7 +30,7 @@ def game(tmp_path, monkeypatch):
     # pristine "off" baseline at the wildcarded patch site (raw has 0s there)
     m.write(CODE + 0x400 + CHEATS["fast_place"].patch_off, CHEATS["fast_place"].orig)
     p = Patcher(m)
-    p._exec_regions = lambda: [(CODE, CODE + 0x1000)]   # only scan the planted region
+    p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]   # planted region only
     return m, p
 
 
@@ -354,7 +354,7 @@ def test_resolve_raises_when_anchor_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "_STATE", str(tmp_path / "s.json"))
     m = FakeMem(BASE, 0x2000)               # no anchors planted
     p = Patcher(m)
-    p._exec_regions = lambda: [(BASE, BASE + 0x2000)]
+    p._exec_regions = lambda writable=False: [(BASE, BASE + 0x2000)]
     with pytest.raises(PatchError):
         p.enable("fast_place")
 

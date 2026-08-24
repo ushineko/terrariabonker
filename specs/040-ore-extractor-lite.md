@@ -1,7 +1,7 @@
 # Spec 040: Ore extractor lite — auto-mine contiguous ores
 
-**Status**: IN PROGRESS — the read half is built, tested and verified in-game. The
-write half is built but **crashes the game**; see "Where the write half stands".
+**Status**: IN PROGRESS — both halves work in-game from the CLI (a vein mined 11/11 in
+64s with the game healthy). No GUI surface yet; see "Where the write half stands".
 The write half (the per-frame stub) is not started
 
 > **Note**: No issue tracker ticket (personal utility).
@@ -90,7 +90,7 @@ a non-zero id, so a whitelist of ore ids can never match an empty tile.
 - **A flood fill in a code cave is a lot of assembly** — a work queue, bounds checks, tile
   indexing and a whitelist lookup, all in a stub, all crash-on-mistake.
 
-## Recommended shape (not yet built)
+## Shape (as built)
 
 Split it where the project has split things before, keeping policy out of assembly:
 
@@ -98,9 +98,14 @@ Split it where the project has split things before, keeping policy out of assemb
   whitelisted types from the tile just mined, and produce a list of coordinates. The
   whitelist is then a config value rather than a constant baked into a stub, and getting it
   wrong costs nothing.
-- **Assembly does one dumb thing.** A stub in a per-frame method reads a queued `(x, y)`
-  from a scratch area and calls `Player.PickTile(x, y, <power>)`, then clears the slot.
-  Bounded work per frame, no recursion, no queue management in machine code.
+- **Assembly does one dumb thing.** A stub reads a queued `(x, y)` from a scratch area and
+  calls `Player.PickTile(x, y, <power>)`. Bounded work per call, no recursion, no queue
+  management in machine code.
+
+  Built with two deviations from this sketch. The hook is `PickTile`'s own entry rather
+  than a per-frame method — it already runs on the game thread, and only while mining,
+  which is the only time the cheat should act. And the stub does **not** clear the slot,
+  because it may not write to its cave at all; the caller clears it once the tile is gone.
 
 This is the flag-polling design that was considered and rejected for NPC spawning, where a
 template copy turned out to be enough. Here there is no such shortcut: only the game's own
@@ -145,15 +150,24 @@ code can mine a tile properly.
 3. ~~**`PickTile` or `KillTile` directly?**~~ **PickTile.** `CanKillTile` is consulted inside
    `PickTile_DetermineDamage`, so calling `KillTile` directly would skip the one check that
    keeps a flood fill away from tiles the game forbids breaking.
-4. **How much per frame?** A large vein mined in one frame will spike; a few tiles per frame
-   is smoother and is also a natural way to keep the stub simple. Still open, and now
-   blocked behind the crash below.
+4. ~~**How much per frame?**~~ **Answered by the design, not by a tunable.** One tile is
+   armed at a time and is re-mined on every `PickTile` call until it breaks, so the rate is
+   the player's own swing rate and there is no burst to smooth: 11 tiles took 64 seconds of
+   ordinary mining. Re-mining a broken tile is a no-op (`CanKillTile` zeroes the damage),
+   which is what makes "arm and wait for it to be gone" safe.
 
-## Where the write half stands
+## The write half: what broke, and what fixed it
 
-The stub is written, injected and verified byte-for-byte against its disassembly, and it
-**crashes the game** whenever the tile it is given actually breaks. Mining an *empty* tile
-has always worked, which is what made the first two diagnoses look right and both wrong.
+**Working.** Verified in-game: a single armed tile mined on the first swing, then an
+11-tile tin vein taken 11/11 in 64 seconds with the process healthy throughout.
+
+Getting there cost three wrong diagnoses, and the shape of the mistake was the same each
+time — a hypothesis that fit the evidence was declared a root cause before any test could
+tell it apart from its rivals. What finally settled it was not more reasoning but wine's
+own SEH tracing (`PROTON_LOG=1`, which sets `+seh`), which named the faulting instruction
+in one run. Attaching a debugger instead would have been much worse: mono uses SIGSEGV as
+normal control flow for null checks and GC write barriers, so "break on access violation"
+trips constantly on healthy execution.
 
 **Two real bugs found and fixed, neither of which was the crash:**
 
@@ -170,7 +184,34 @@ has always worked, which is what made the first two diagnoses look right and bot
   `check_active_offset` validates the field offset against the live world rather than
   trusting mono's field layout.
 
-**The crash itself is not diagnosed.** What the evidence constrains:
+**The crash: the stub wrote to its own cave, and a cave is not writable.**
+
+```
+Unhandled exception: page fault on WRITE access to 0x7795424b
+                     in wow64 32-bit code (0x77954216)
+  info[0]=00000001 (write)   ESI:7795420f
+  =>0 0x77954216 in cuesdk_2015 (+0x4216)
+```
+
+Cave at 0x77954209, so esi is cave+6 (the call/pop anchor), the faulting instruction is
+cave+0x0D (`inc dword [esi+0x3c]`, the in-flight state write) and the target is cave+0x42,
+the slot. `_find_cave` had borrowed padding inside a **code section of CUESDK_2015.dll**,
+the Corsair SDK that ships with the game — read-execute. Installing the stub worked anyway
+because `/proc/pid/mem` bypasses page protection; the CPU running that stub does not.
+
+`ore_extract` was the first stub in this project to keep mutable state in its cave. Every
+other injection only reads and executes there, which is why nothing had ever hit this and
+why `_find_cave` had no writability check.
+
+**The fix: design the write out.** The slot stays in the cave but is written only from the
+unprivileged side, which may. The re-entrancy guard — the one thing that genuinely needed
+a write — moved onto the stack: the nested call passes `ORE_SENTINEL` as PickTile's `cap`,
+and the stub compares the incoming `cap` at `[esp+0x34]` before doing anything. That needs
+no audit of what the game's own callers pass, because the test is "is this *my* sentinel".
+`Injection.writes_cave` now makes `_find_cave` demand a writable page for any future stub
+that does need one, so this fails at install rather than on the first swing.
+
+**What the evidence had already ruled out:**
 
 - It is a **hard native fault**, not a managed exception: nothing is appended to
   `client-crashlog.txt` (whose last entry predates both crashes), and wine traps SIGSEGV
@@ -180,19 +221,21 @@ has always worked, which is what made the first two diagnoses look right and bot
 - It is **not the signature** — `PickTile(this, x, y, pickPower, -1)` matches the game's own
   call site in `ItemCheck_UseMiningTools_ActuallyUseMiningTool` exactly.
 - It is **not recursion** — a single queued tile has nothing to re-arm with and cannot
-  recurse, and it crashes.
+  recurse, and it crashed anyway. (The three-state guard was still a real fix for a real
+  bug: the old flag was cleared before the work, so the queueing loop re-armed mid-call.
+  It was simply never the cause.)
 - It is **not stack alignment**, or at least not that alone: the `teleport` stub hands its
   callee `esp ≡ 8 (mod 16)` where mono assumes 12, and has never crashed. (The extractor
   now realigns anyway; mono builds 16-byte frames assuming `esp ≡ 12` at entry, which
   `PickTile`'s own prologue confirms — 4 pushes plus `sub esp,0x7C` is 140 bytes.)
 
-**Prime suspect: `this`.** The stub computes it as `[Main.player][Main.myPlayer]` and that
-number has never been checked against anything. The destruction path opens with
-`this.IntentionGuesser.AllowTracking(60)`; a wrong `this` there gives a managed
-NullReferenceException, which then has to unwind through an unmanaged cave frame mono has
-no `MonoJitInfo` for — a hard death with no crashlog, matching every observation.
+- It is **not a bad `this`** — the prime suspect for a while, and wrong. Checked without
+  touching the game: `[Main.player][Main.myPlayer]` is `0x3A54A090`, the same object
+  `live_block()` resolves, same vtable.
 
-**Next steps, in strict risk order.** 1-3 cannot crash the game:
+**Left to do:** no GUI surface — the extractor is CLI-only (`tb vein`, `tb extract`).
+
+**The bisect that got there,** kept because the ordering is the reusable part:
 
 1. ~~*Read-only, no injection.* Compare `[Main.player][Main.myPlayer]` against the player
    object `live_block()` already resolves.~~ **Done — they match** (`0x3A54A090` both ways,
@@ -213,9 +256,9 @@ no `MonoJitInfo` for — a hard death with no crashlog, matching every observati
    standing one, and the original justification for adding it was wrong.
 3. *Stub with no call.* Compute `this`, write it to the slot, return. Confirms the stub
    agrees with Python and that the injection alone is inert.
-4. *Bisect the destruction path.* Call with `pickPower=1` on a hard tile so damage stays
-   under 100. Survives -> the fault is in destruction; crashes -> it is in the general
-   machinery.
+4. ~~*Bisect the destruction path.* Call with `pickPower=1` so damage stays under 100.~~
+   **Crashed at power 1**, before any tile could break — which ruled out the destruction
+   path and pointed at the general machinery, where the fault turned out to be.
 
 ## Risks & Assumptions
 

@@ -32,7 +32,7 @@ def game(tmp_path, monkeypatch):
             INJECTIONS["smart_cursor"].overwrite)
     m.write(CODE + 0xC00, b"\xcc" * 0x100)
     p = Patcher(m)
-    p._exec_regions = lambda: [(CODE, CODE + 0x1000)]
+    p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
     return m, p
 
 

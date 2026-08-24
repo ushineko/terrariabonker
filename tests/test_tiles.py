@@ -168,7 +168,7 @@ def test_silt_and_slush_are_swept_by_default_and_gems_are_not():
     assert T.whitelist(gems=True) > T.whitelist(gems=False)
 
 
-# --- the stub's slot ---------------------------------------------------------
+# --- the stub -----------------------------------------------------------------
 
 def _ore_stub():
     """Build the extractor stub against stand-ins for the addresses it bakes in."""
@@ -195,6 +195,112 @@ def _ore_stub():
         L.find_localplayer_anchor = real
 
 
+def _writes_to_esi(code: bytes) -> list[int]:
+    """Offsets of instructions in `code` that WRITE through esi+disp.
+
+    Only the forms this stub could plausibly emit are decoded; the point is not a general
+    disassembler but a tripwire on the one mistake that matters. mod=01 rm=110 is
+    [esi+disp8], so modrm & 0xC7 == 0x46 with the reg field carrying the opcode extension.
+    """
+    hits = []
+    i = 0
+    while i < len(code) - 2:
+        op, modrm = code[i], code[i + 1]
+        esi_disp8 = (modrm & 0xC7) == 0x46
+        reg = (modrm >> 3) & 7
+        if esi_disp8:
+            if op in (0xC7, 0x89, 0x88, 0x01, 0x29, 0x31, 0x21, 0x09, 0x11, 0x19):
+                hits.append(i)                       # mov/add/sub/xor/and/or to memory
+            elif op == 0xFF and reg in (0, 1):
+                hits.append(i)                       # inc/dec dword [esi+d]
+            elif op == 0x83 and reg != 7:
+                hits.append(i)                       # arithmetic; reg==7 is cmp (a read)
+        i += 1
+    return hits
+
+
+def test_the_stub_never_writes_to_its_own_cave():
+    """The crash this guards, in full: a code cave is borrowed padding inside somebody
+    else's mapping, and those are read-execute — this one lands in a code section of
+    CUESDK_2015.dll, the Corsair SDK shipped with the game. Installing a stub works
+    regardless because /proc/pid/mem ignores page protection; the CPU running it does not.
+
+    An earlier version kept an "in flight" state in its slot and died on the first swing:
+
+        page fault on write access to 0x7795424b in wow64 32-bit code (0x77954216)
+
+    0x77954216 was `inc dword [esi+0x3c]`, 0x7795424b was the slot. Reads are fine.
+    """
+    body = _ore_stub()
+    assert _writes_to_esi(body) == [], \
+        "the stub writes into its own cave — it will fault on a read-execute page"
+    # and the reads it does make are still there
+    assert b"\x83\x7e" in body, "the armed check is gone"
+    assert body.count(b"\xff\x76") == 2, "the x/y reads are gone"
+
+
+def test_an_injection_that_writes_its_cave_must_ask_for_a_writable_one():
+    """`writes_cave` is the escape hatch for a stub that genuinely needs to write: it makes
+    _find_cave demand a writable page rather than letting the mismatch surface as an
+    access violation mid-game. The extractor does not need it — its guard lives on the
+    stack — but the plumbing has to actually filter, or the flag is decoration."""
+    from unittest.mock import mock_open, patch
+    from terrariabonker import patcher as P
+
+    maps = ("77950000-77980000 r-xp 00000000 00:00 0    /game/CUESDK_2015.dll\n"
+            "0418a000-0418c000 rwxp 00000000 00:00 0 \n"
+            "0b000000-0b010000 rw-p 00000000 00:00 0 \n")
+
+    pat = P.Patcher.__new__(P.Patcher)
+
+    class mem:
+        pid = 1234
+    pat.mem = mem()
+
+    with patch("builtins.open", mock_open(read_data=maps)):
+        any_exec = pat._exec_regions()
+        writable = pat._exec_regions(writable=True)
+
+    assert (0x77950000, 0x77980000) in any_exec, "the r-x cave region should be offered"
+    assert (0x77950000, 0x77980000) not in writable, \
+        "a read-execute region was offered to a stub that writes to its cave"
+    assert writable == [(0x0418A000, 0x0418C000)], "only the rwx region is writable"
+    assert P.INJECTIONS["ore_extract"].writes_cave is False
+
+
+def test_the_guard_is_the_sentinel_the_stub_itself_passes():
+    """PickTile re-enters this stub, and the guard has to hold for the whole nested call.
+    A flag would mean a write, which the cave cannot take — so the nested call marks itself
+    by passing ORE_SENTINEL as PickTile's `cap`, and the stub compares the incoming `cap`
+    on the stack before doing anything. Depth is one by construction.
+
+    The two values must be the same one: pass a different sentinel than you check for and
+    the stub recurses into itself on every swing."""
+    from terrariabonker import patcher as P
+
+    body = _ore_stub()
+    sent = struct.pack("<I", P.ORE_SENTINEL)
+    guard = body.index(b"\x81\x7c\x24\x34")        # cmp dword [esp+0x34],imm32
+    assert body[guard + 4:guard + 8] == sent, "the guard checks a different value"
+    pushed = body.index(b"\x68" + sent)               # push imm32  (cap)
+    call = body.index(b"\xff\xd0")
+    assert guard < pushed < call, "the sentinel is not passed to the call it guards"
+    # the guard must come before the armed check, so our own call is the cheapest exit
+    assert guard < body.index(b"\x83\x7e"), "the re-entry check is not first"
+
+
+def test_the_sentinel_is_large_and_positive():
+    """PickTile treats any cap other than -1 as `damage = Min(damage, cap*damage/pickPower)`.
+    A large positive cap leaves damage untouched, exactly as -1 does. A negative one would
+    clamp the damage negative and no tile would ever break."""
+    from terrariabonker import patcher as P
+
+    assert 0 < P.ORE_SENTINEL < 2 ** 31, "a negative cap would clamp mining damage"
+    assert P.ORE_SENTINEL != -1 & 0xFFFFFFFF
+    damage, power = 30, 100
+    assert min(damage, int(P.ORE_SENTINEL * (damage / power))) == damage
+
+
 def test_the_slot_address_matches_what_the_stub_emits():
     """`ore_slot` derives the address from stub_len rather than remembering it, so this
     pins the derivation to the layout `_ore_extract_body` actually emits."""
@@ -202,64 +308,36 @@ def test_the_slot_address_matches_what_the_stub_emits():
 
     inj = P.INJECTIONS["ore_extract"]
     body = _ore_stub()
-
     stub_len = len(body) + 5
     derived = stub_len - 5 - len(inj.overwrite) - P.ORE_SLOT_BYTES
-    # the emitted `cmp dword [esi+delta],1` must point at exactly that offset
-    assert body[7:9] == b"\x83\x7e", "the guard is no longer a disp8 cmp on esi"
-    delta = body[9]
+    armed = body.index(b"\x83\x7e")                  # cmp dword [esi+delta],0
+    delta = body[armed + 2]
     assert 6 + delta == derived, "the slot the stub reads is not where ore_slot says"
     assert body[derived:derived + P.ORE_SLOT_BYTES] == b"\x00" * P.ORE_SLOT_BYTES
     assert body[-len(inj.overwrite):] == inj.overwrite, "displaced prologue not reproduced"
 
 
-def test_the_stub_holds_its_guard_across_the_nested_call():
-    """PickTile re-enters this stub, so the guard has to stay closed for the whole nested
-    call -- not merely until the queued tile has been read.
-
-    Clearing a boolean flag on entry is *not* enough, and that is not a theoretical
-    concern: the queueing loop polls that flag to decide when to hand over the next tile,
-    so it re-arms within a poll interval (10ms) while the nested call is still running
-    (dust, drops, sound and net take longer than that). The re-entered stub then finds the
-    flag armed again and calls PickTile once more, recursing as deep as the vein is long
-    until the game thread's stack gives out -- a hard crash with no managed exception.
-
-    So the slot holds a state: the stub acts only on 1 (armed), moves it to 2 (in flight)
-    *before* the call, and returns it to 0 only *after* the call has returned.
-    """
-    body = _ore_stub()
-    arm = body.index(b"\x83\x7e")        # cmp dword [esi+delta],imm8
-    assert body[arm + 3] == 1, "the stub acts on a state other than 1 (armed)"
-    inflight = body.index(b"\xff\x46")   # inc dword [esi+delta]   (armed -> in flight)
-    call = body.index(b"\xff\xd0")       # call eax
-    idle = body.index(b"\x83\x66")       # and dword [esi+delta],0 (-> idle)
-    assert arm < inflight < call < idle, \
-        "the guard does not span the nested call — this recurses until the stack dies"
-
-
 def test_the_stub_hands_pick_tile_a_mono_aligned_stack():
     """Mono's x86 JIT builds 16-byte-aligned frames assuming esp is 12 (mod 16) on entry
     (PickTile's own prologue: 4 pushes + `sub esp,0x7C` == 140 bytes, which only lands on
-    16 from that start). pushad plus the five args do not preserve that, so the stub has
-    to realign before the pushes."""
+    16 from that start). pushad plus the five args do not preserve that."""
     body = _ore_stub()
-    align = body.index(b"\x83\xe4\xf0")      # and esp,-16
-    pad = body.index(b"\x83\xec")             # sub esp,imm8
-    call = body.index(b"\xff\xd0")            # call eax
+    align = body.index(b"\x83\xe4\xf0")              # and esp,-16
+    pad = body.index(b"\x83\xec")                     # sub esp,imm8
+    call = body.index(b"\xff\xd0")
     assert align < pad < call, "the stack is not realigned before the call"
-    # 5 args are pushed after the padding; entry must land back on 12 (mod 16)
     assert (-body[pad + 2] - 5 * 4 - 4) % 16 == 12, \
         "the padding does not leave PickTile the entry alignment mono assumes"
 
 
-def test_pending_covers_the_tile_still_being_mined():
-    """`ore_pending` must stay true through state 2, not just state 1. Reporting "done"
-    when the stub dequeues the tile — rather than when the mining it triggers has
-    finished — is what let the queueing loop re-arm mid-call."""
+def test_arming_writes_the_coordinate_before_the_flag():
+    """Only the unprivileged side writes the slot, so a half-written coordinate is a real
+    hazard: the game could read x from the new tile and y from the old one. The flag goes
+    last, and disarming is what stops an armed tile being re-mined on every swing."""
     from terrariabonker import patcher as P
 
     class FakeSlot:
-        def __init__(self, state):
+        def __init__(self, state=0):
             self.state = state
             self.writes = []
 
@@ -269,14 +347,18 @@ def test_pending_covers_the_tile_still_being_mined():
         def write(self, a, b):
             self.writes.append((a, b))
 
-    for state, pending in ((0, False), (1, True), (2, True)):
-        p = P.Patcher.__new__(P.Patcher)
-        p.mem = FakeSlot(state)
-        p.ore_slot = lambda: 0x4000
-        assert p.ore_pending() is pending, f"state {state} pending should be {pending}"
-        # and a tile is only ever queued onto an idle slot
-        assert p.ore_queue(7, 9) is (state == 0), \
-            f"queueing onto state {state} should be {state == 0}"
+    p = P.Patcher.__new__(P.Patcher)
+    p.mem = FakeSlot()
+    p.ore_slot = lambda: 0x4000
+    assert p.ore_arm(7, 9) is True
+    assert [a for a, _ in p.mem.writes] == [0x4004, 0x4000], \
+        "the flag must be written after the coordinate, never before"
+    assert p.mem.writes[0][1] == struct.pack("<ii", 7, 9)
+
+    p.mem = FakeSlot(state=1)
+    assert p.ore_armed() is True
+    p.ore_disarm()
+    assert p.mem.writes == [(0x4000, struct.pack("<i", 0))]
 
 
 def test_a_dirt_block_is_not_air():

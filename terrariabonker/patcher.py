@@ -446,20 +446,28 @@ def _teleport_body(player_base: int, call_target: int) -> bytes:
             + b"\x89\x4c\x24\x04")              # mov [esp+04],ecx   / displaced instructions
 
 
-# The extractor's slot, laid out at the tail of its own stub: a flag the game side
-# clears when it consumes a tile, then the tile's x and y. One tile at a time on purpose —
-# a cave is *borrowed* padding (see _find_cave), so its size is the risk, and a queue big
+# The extractor's slot, at the tail of its own stub: a flag the unprivileged side sets
+# when it wants a tile mined, then that tile's x and y. One tile at a time on purpose — a
+# cave is *borrowed* padding (see _find_cave), so its size is the risk, and a queue big
 # enough for a vein would be a far bigger borrow than a 12-byte slot.
 ORE_SLOT_BYTES = 12
 
+# Passed as PickTile's `cap` argument by our own nested call, and by nothing else, so the
+# stub can recognise its own re-entry by reading the incoming argument instead of writing
+# a flag. Large and positive: PickTile only compares `cap` against -1 and otherwise uses
+# it as `damage = Min(damage, cap * damage/pickPower)`, which at this magnitude leaves the
+# damage untouched — exactly what -1 does. A *negative* sentinel would clamp the damage
+# negative and no tile would ever break.
+ORE_SENTINEL = 0x5A5A5A5A
+
 
 def _ore_extract_body(patcher, inj) -> bytes:
-    """Mine one queued tile per ``PickTile`` call, from inside ``PickTile`` itself.
+    """Mine one armed tile per ``PickTile`` call, from inside ``PickTile`` itself.
 
     The unprivileged side does the thinking — read the tile map, flood-fill the vein,
     decide what may be taken — and writes a single coordinate here. This stub does one
-    dumb thing with it: call ``Player.PickTile(this, x, y, 100, -1)``, which is the same
-    call the game makes when you swing a pickaxe, so drops, framing, lighting and the
+    dumb thing with it: call ``Player.PickTile(this, x, y, 100, sentinel)``, which is the
+    same call the game makes when you swing a pickaxe, so drops, framing, lighting and the
     ``CanKillTile`` check all happen exactly as they normally would.
 
     **Why hook PickTile rather than a per-frame method.** The call has to happen on the
@@ -467,30 +475,41 @@ def _ore_extract_body(patcher, inj) -> bytes:
     time this cheat should be doing anything. Nothing happens when you put the pickaxe
     away, and no new hot path is patched.
 
-    **Re-entrancy is handled by an explicit in-flight state, not by clearing a flag.**
-    Calling PickTile from inside PickTile re-enters this stub, so the guard has to hold
-    for the whole nested call -- not just until the queued tile has been read. Clearing a
-    boolean flag on entry is *not* enough: the unprivileged side polls that flag to decide
-    when to queue the next tile, so it re-arms within a poll interval while the nested
-    call is still running (dust, drops, sound, net take milliseconds; the poll is 10ms).
-    The nested entry then finds the flag armed again and calls PickTile once more, and so
-    on -- recursion as deep as the vein is long, which overflows the game thread's stack
-    and kills the process with no managed exception to show for it.
+    **The stub never writes to its own cave, and that is the whole design.** A cave is
+    borrowed padding inside somebody else's mapping, and those mappings are *read-execute*
+    — the one this lands in is a code section of ``CUESDK_2015.dll``, the Corsair SDK that
+    ships with the game. Installing a stub works anyway because ``/proc/pid/mem`` bypasses
+    page protection, but the CPU running that stub does not: an earlier version kept an
+    ``in flight`` state in the slot and died on its first swing with
 
-    So the slot holds a state, not a flag: 0 idle, 1 armed, 2 in flight. The stub only
-    acts on 1, and its first act is to make the state 2, which it holds until the nested
-    call returns. A re-entered stub sees 2, fails the ``== 1`` test and falls straight
-    through to the displaced bytes. Depth is one by construction, whatever the other side
-    does. State 2 also reads as "still pending" to ``ore_pending``, so the queueing loop
-    waits for the tile to actually be mined rather than for it to be dequeued.
+        page fault on write access to 0x7795424b in wow64 32-bit code (0x77954216)
+
+    where 0x77954216 was the ``inc`` and 0x7795424b was the slot. Every other injection in
+    this project only reads and executes in its cave, which is why this was the only one
+    that ever hit it. Reads are fine; writes are not. So the slot is written *only* from
+    the unprivileged side, and the stub reads it.
+
+    **Re-entrancy is caught on the stack, not in memory.** Calling PickTile from inside
+    PickTile re-enters this stub, and the guard has to hold for the whole nested call —
+    which used to mean a flag, which meant a write. Instead the nested call passes
+    :data:`ORE_SENTINEL` as PickTile's ``cap`` argument, and the stub's first act is to
+    compare the incoming ``cap`` (still on the stack at ``[esp+0x34]``, below the pushad)
+    against it. Our own call falls straight through to the displaced bytes, so depth is
+    one by construction. This needs no audit of what the game's own callers pass: the test
+    is "is this *my* sentinel", not "is this one of theirs".
+
+    Because nothing is consumed, an armed tile is re-mined on every swing until the caller
+    disarms it. That is idempotent — a broken tile fails ``CanKillTile`` and the call is a
+    no-op — and it lets the caller wait on the tile actually being gone, which is the real
+    success condition, rather than on the stub having dequeued something.
 
     **Stack alignment.** Mono's x86 JIT builds 16-byte-aligned frames assuming esp is
-    12 (mod 16) at entry -- PickTile's own prologue is proof: 4 pushes + ``sub esp,0x7C``
+    12 (mod 16) at entry — PickTile's own prologue is proof: 4 pushes + ``sub esp,0x7C``
     is 140 bytes, which lands the frame on 16 only from that start. The pushad and the
-    args do not preserve that, so esp is realigned before the pushes and restored from
-    ebx afterwards.
+    args do not preserve that, so esp is realigned before the pushes and restored from ebx
+    afterwards.
 
-    The stub finds its own data with ``call/pop``: the cave address is not known when the
+    The stub finds its own slot with ``call/pop``: the cave address is not known when the
     body is built (the cave is chosen from the body's length), so a baked absolute address
     is not available.
     """
@@ -508,37 +527,37 @@ def _ore_extract_body(patcher, inj) -> bytes:
     # Built in two passes: the data lives after the code, so the displacement from the
     # call/pop anchor is only known once the code's length is.
     def emit(delta: int) -> bytes:
-        # The slot is a three-state machine, not a boolean: 0 idle, 1 armed (the
-        # unprivileged side queued a tile), 2 in flight (we are inside the nested call).
-        # State 2 is what makes the re-entrancy guard real -- see the docstring.
         assert 0 <= delta + 8 < 128, "slot no longer reachable with a disp8"
-        # The work, so the guard's jump distance is measured rather than counted by hand.
-        guarded = (b"\xff\x46" + bytes([delta])       # inc dword [esi+delta]  (1 -> 2)
-                   + b"\x8b\xdc"                       # mov ebx,esp
-                   + b"\x83\xe4\xf0"                   # and esp,-16   \ mono wants esp==12
-                   + b"\x83\xec\x0c"                   # sub esp,12    / (mod 16) at entry
-                   + b"\xa1" + _u32(player_arr)        # mov eax,[Main.player]
-                   + b"\x8b\x0d" + _u32(my_player)     # mov ecx,[Main.myPlayer]
-                   + b"\x8b\x44\x88\x10"               # mov eax,[eax+ecx*4+0x10]
-                   + b"\x6a\xff"                       # push -1    (cap)
-                   + b"\x6a\x64"                       # push 100   (pickPower)
-                   + b"\xff\x76" + bytes([delta + 8])  # push [esi+delta+8]   (y)
-                   + b"\xff\x76" + bytes([delta + 4])  # push [esi+delta+4]   (x)
-                   + b"\x50"                            # push eax   (this)
-                   + b"\xb8" + _u32(pick_tile)         # mov eax,PickTile
-                   + b"\xff\xd0"                       # call eax
-                   + b"\x8b\xe3"                       # mov esp,ebx (either convention)
-                   + b"\x83\x66" + bytes([delta]) + b"\x00")   # and [esi+delta],0 (idle)
-        assert len(guarded) < 128, "guard jump no longer fits in a short branch"
+        # The work, so each guard's jump distance is measured rather than counted by hand.
+        work = (b"\x8b\xdc"                          # mov ebx,esp
+                + b"\x83\xe4\xf0"                    # and esp,-16  \ mono wants esp==12
+                + b"\x83\xec\x0c"                    # sub esp,12   / (mod 16) at entry
+                + b"\xa1" + _u32(player_arr)          # mov eax,[Main.player]
+                + b"\x8b\x0d" + _u32(my_player)       # mov ecx,[Main.myPlayer]
+                + b"\x8b\x44\x88\x10"                # mov eax,[eax+ecx*4+0x10]
+                + b"\x68" + _u32(ORE_SENTINEL)        # push sentinel  (cap == re-entry mark)
+                + b"\x6a\x64"                         # push 100       (pickPower)
+                + b"\xff\x76" + bytes([delta + 8])    # push [esi+delta+8]   (y)
+                + b"\xff\x76" + bytes([delta + 4])    # push [esi+delta+4]   (x)
+                + b"\x50"                              # push eax       (this)
+                + b"\xb8" + _u32(pick_tile)           # mov eax,PickTile
+                + b"\xff\xd0"                         # call eax
+                + b"\x8b\xe3")                        # mov esp,ebx (either convention)
+        assert len(work) < 128, "guard jump no longer fits in a short branch"
+        armed = (b"\x83\x7e" + bytes([delta]) + b"\x00"   # cmp dword [esi+delta],0
+                 + b"\x74" + bytes([len(work)]))            # je skip  (nothing armed)
+        # cap still sits above the pushad: 0x14 into the frame, +0x20 for pushad.
+        mine = (b"\x81\x7c\x24\x34" + _u32(ORE_SENTINEL)  # cmp dword [esp+0x34],sentinel
+                + b"\x74" + bytes([len(armed) + len(work)]))  # je skip  (our own call)
         return (b"\x60"                                     # pushad
                 + b"\xe8\x00\x00\x00\x00"                  # call $+5  (push next addr)
                 + b"\x5e"                                    # pop esi   (esi = here)
-                + b"\x83\x7e" + bytes([delta]) + b"\x01"     # cmp dword [esi+delta],1
-                + b"\x75" + bytes([len(guarded)])            # jne skip  (idle, or in flight)
-                + guarded
+                + mine
+                + armed
+                + work
                 + b"\x61"                                    # popad  <- skip lands here
                 + b"\xeb" + bytes([ORE_SLOT_BYTES])          # jmp over the slot
-                + b"\x00" * ORE_SLOT_BYTES                   # state, x, y
+                + b"\x00" * ORE_SLOT_BYTES                   # armed, x, y
                 + inj.overwrite)                             # the displaced prologue
 
     probe = emit(0)
@@ -722,6 +741,13 @@ class Injection:
     # than from a value: ``build_body(patcher, injection) -> bytes``. Such a stub
     # reproduces its own displaced bytes, so ``rerun_overwrite`` does not apply.
     build_body: Callable | None = None
+    # True if the stub's own code writes anywhere inside its cave (self-modifying data,
+    # a scratch slot, a counter). A cave is borrowed padding inside somebody else's
+    # mapping and those are typically **read-execute**, so such a stub faults on its first
+    # run -- while installing it works fine, because /proc/pid/mem bypasses page
+    # protection. Setting this makes _find_cave demand a writable page instead of letting
+    # the mismatch surface as an access violation mid-game. See _ore_extract_body.
+    writes_cave: bool = False
 
 
 INJECTIONS: dict[str, Injection] = {
@@ -940,12 +966,17 @@ class Patcher:
             self._values[name] = value if value is not None else spec.default
 
     # --- anchor resolution -------------------------------------------------
-    def _exec_regions(self):
+    def _exec_regions(self, writable: bool = False):
+        """Executable mappings, as (start, end). ``writable`` keeps only those the CPU may
+        also write -- which is almost none of them: a cave is borrowed padding inside
+        somebody else's read-execute mapping. See ``Injection.writes_cave``."""
         out = []
         with open(f"/proc/{self.mem.pid}/maps") as f:
             for line in f:
                 p = line.split()
                 if "x" not in p[1]:
+                    continue
+                if writable and "w" not in p[1]:
                     continue
                 if (p[5] if len(p) > 5 else "").startswith("/dev/"):
                     continue
@@ -1013,7 +1044,8 @@ class Patcher:
         return hits
 
     # --- code cave / injection --------------------------------------------
-    def _find_cave(self, size: int, claimed: list[int] | None = None) -> int:
+    def _find_cave(self, size: int, claimed: list[int] | None = None,
+                   writable: bool = False) -> int:
         """Find ``size`` bytes of executable padding for a stub — we *borrow* space
         rather than allocate our own.
 
@@ -1035,6 +1067,14 @@ class Patcher:
           stub -> a crash, which is cheaply recoverable: disable restores the site,
           a restart clears everything, and we re-derive by AOB each session.
 
+        ``writable`` is for a stub whose own code writes inside its cave. Almost every
+        executable mapping here is read-execute -- the caves this finds land in code
+        sections of the game's own DLLs -- so such a stub faults on its first run even
+        though installing it succeeded, because ``/proc/pid/mem`` ignores page protection
+        and the CPU does not. Asking for a writable cave usually finds nothing, which is
+        the honest answer: put the mutable state somewhere else, or design the write out
+        (see ``_ore_extract_body``, which moved its re-entrancy guard onto the stack).
+
         RISK SCALES WITH ``size``. Real alignment gaps are small (a 16-byte-aligned
         gap is <=15 bytes); a large request can only be met by a long cold run, which
         is both rarer AND more likely to be actual data than incidental padding. So
@@ -1051,7 +1091,7 @@ class Patcher:
         claimed = claimed or []
         for pad in (b"\xcc", b"\x00"):
             needle = pad * want
-            for start, end in self._exec_regions():
+            for start, end in self._exec_regions(writable=writable):
                 buf = self.mem.read(start, end - start)
                 i = buf.find(needle)
                 while i != -1:
@@ -1117,7 +1157,8 @@ class Patcher:
             injects = [b + inj.inject_off for b in bases]
             caves = []
             for _ in injects:
-                caves.append(self._find_cave(stub_len, caves))   # distinct cave per site
+                caves.append(self._find_cave(stub_len, caves,
+                                             writable=inj.writes_cave))
         sites = []
         for inject, cave in zip(injects, caves):
             back = inject + len(inj.overwrite)          # lands on the byte after ours
@@ -1144,36 +1185,34 @@ class Patcher:
         overwrite = len(INJECTIONS["ore_extract"].overwrite)
         return sites[0]["cave"] + rec["stub_len"] - 5 - overwrite - ORE_SLOT_BYTES
 
-    def ore_state(self) -> int:
-        """The stub's slot state: 0 idle, 1 armed, 2 in flight. -1 when the cheat is off.
+    def ore_armed(self) -> bool:
+        """Is a tile currently armed for the stub to mine?
 
-        See ``_ore_extract_body``: 2 is held for the whole nested ``PickTile`` call, which
-        is what stops the caller re-arming mid-call and recursing into the stub.
+        Only this side ever writes the slot -- the stub cannot, because a cave lives in a
+        read-execute mapping (see ``_ore_extract_body``). So this reports what *we* last
+        set, not what the game has done: whether the tile actually got mined is answered
+        by looking at the tile.
         """
         slot = self.ore_slot()
-        return -1 if slot is None else self.mem.read_i32(slot)
+        return bool(slot and self.mem.read_i32(slot))
 
-    def ore_pending(self) -> bool:
-        """True until the queued tile has actually been mined.
-
-        Both 1 (armed) and 2 (in flight) count as pending. Treating only 1 as pending is
-        the bug that overflowed the game's stack: it reports "done" the moment the stub
-        dequeues the tile, milliseconds before the mining it triggers has finished.
-        """
-        return self.ore_state() > 0
-
-    def ore_queue(self, x: int, y: int) -> bool:
-        """Hand one tile to the stub, if and only if it is idle.
-
-        The state is written **last**, so the game can never see a coordinate that is only
-        half written; and it is only written from 0, so a tile is never queued on top of
-        one still in flight.
-        """
+    def ore_arm(self, x: int, y: int) -> bool:
+        """Arm one tile. The flag is written **last**, so the game can never see a
+        coordinate that is only half written."""
         slot = self.ore_slot()
-        if slot is None or self.mem.read_i32(slot) != 0:
+        if slot is None:
             return False
         self.mem.write(slot + 4, struct.pack("<ii", int(x), int(y)))
         self.mem.write(slot, struct.pack("<i", 1))
+        return True
+
+    def ore_disarm(self) -> bool:
+        """Stop the stub mining. Called once a tile is gone, and in the cleanup path --
+        an armed slot would otherwise keep re-mining the same coordinate on every swing."""
+        slot = self.ore_slot()
+        if slot is None:
+            return False
+        self.mem.write(slot, struct.pack("<i", 0))
         return True
 
     def _disable_injection(self, inj: Injection) -> None:

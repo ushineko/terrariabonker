@@ -659,10 +659,13 @@ class Service:
                      limit: int | None = None, timeout: float = 20.0) -> dict:
         """Mine the vein at ``(x, y)`` through the game's own ``PickTile`` (spec 040).
 
-        The tiles are fed to the stub one at a time. It only runs while the player is
-        mining, because that is where it is hooked — so this waits for each tile to be
-        taken rather than assuming it was, and gives up rather than hanging if the player
-        stops swinging.
+        Tiles are armed one at a time. The stub only runs while the player is mining,
+        because that is where it is hooked, so this waits for each tile to actually be
+        **gone** rather than for the stub to acknowledge anything -- the stub cannot
+        acknowledge, since it may not write to its own cave (see ``_ore_extract_body``).
+        Waiting on the tile is the better test regardless: it is the success condition,
+        not a proxy for it. An armed tile is simply re-mined on every swing until it
+        breaks, which is idempotent, so a slow tile costs swings and nothing else.
         """
         import time
 
@@ -672,27 +675,36 @@ class Service:
         if not p.is_enabled("ore_extract"):
             raise ServiceError("the ore extractor cheat is not enabled")
         tm = self.tilemap()
-        vein = T.flood(tm, x, y, T.whitelist(gems), limit=limit or T.DEFAULT_LIMIT)
+        want = T.whitelist(gems)
+        vein = T.flood(tm, x, y, want, limit=limit or T.DEFAULT_LIMIT)
         if not vein:
             return {"at": [x, y], "queued": 0, "mined": 0, "left": 0,
                     "reason": "not a whitelisted tile"}
 
         mined = 0
-        for tx, ty in vein:
-            if tm.type_at(tx, ty) not in T.whitelist(gems):
-                continue                      # already gone (the player got there first)
-            if not p.ore_queue(tx, ty):
-                break
-            deadline = time.time() + timeout
-            while p.ore_pending() and time.time() < deadline:
-                time.sleep(0.01)
-            if p.ore_pending():
-                break                         # not mining any more; stop rather than hang
-            mined += 1
+        stalled = ""
+        try:
+            for tx, ty in vein:
+                if tm.solid_type_at(tx, ty) not in want:
+                    continue                  # already gone (the player got there first)
+                if not p.ore_arm(tx, ty):
+                    stalled = "could not arm the stub"
+                    break
+                deadline = time.time() + timeout
+                while time.time() < deadline:
+                    if tm.solid_type_at(tx, ty) is None:
+                        break
+                    time.sleep(0.02)
+                if tm.solid_type_at(tx, ty) is not None:
+                    stalled = ("stopped early — the stub only runs while you are mining, "
+                               "and (%d,%d) did not break within %.0fs" % (tx, ty, timeout))
+                    break
+                mined += 1
+        finally:
+            p.ore_disarm()          # never leave a tile armed: it re-mines every swing
         return {"at": [x, y], "queued": len(vein), "mined": mined,
                 "left": len(vein) - mined,
-                "reason": "" if mined == len(vein) else
-                          "stopped early — the stub only runs while you are mining"}
+                "reason": stalled if stalled else ""}
 
     def build_check(self) -> dict:
         """Is this build one we know, and do the cheats still resolve on it? (spec 036)

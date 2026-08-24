@@ -35,7 +35,7 @@ def twin_game(tmp_path, monkeypatch):
     for off in (COPY_A, COPY_B):
         m.write(CODE + off, ANCHORS["reset_block"].pattern.raw)
     p = Patcher(m)
-    p._exec_regions = lambda: [(CODE, CODE + 0x1000)]
+    p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
     return m, p
 
 
@@ -158,7 +158,7 @@ def test_missing_anchor_reason_states_what_was_observed(tmp_path, monkeypatch):
     monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
     m = FakeMem(BASE, 0x8000)
     p = Patcher(m)
-    p._exec_regions = lambda: [(CODE, CODE + 0x1000)]
+    p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
     res = p.resolution("reset_block")
     assert not res.available
     assert "matched nothing" in res.reason

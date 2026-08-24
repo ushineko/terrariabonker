@@ -38,7 +38,7 @@ def game(tmp_path, monkeypatch):
     # a run of int3 for the cave allocator to borrow
     m.write(CODE + 0xB00, b"\xcc" * 0x80)
     p = Patcher(m)
-    p._exec_regions = lambda: [(CODE, CODE + 0x1000)]
+    p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
     return m, p
 
 

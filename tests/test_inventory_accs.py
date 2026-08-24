@@ -47,7 +47,7 @@ def game(tmp_path, monkeypatch):
     _plant_call(m, CODE + BENEFITS_AT + 36, ARMOR_FN)
     m.write(CODE + 0xC00, b"\xcc" * 0x100)          # cave space
     p = Patcher(m)
-    p._exec_regions = lambda: [(CODE, CODE + 0x1000)]
+    p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
     return m, p
 
 
