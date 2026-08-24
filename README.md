@@ -266,9 +266,8 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   **type + stack + modifier** and regenerates the rest (damage, use-time, pickaxe
   power, defense, reach, auto-reuse) from the type on load — so those stat edits are
   session-only as far as the game is concerned. Auto-restore bridges this: it re-applies
-  them when the game reloads. Only those regenerated fields are saved, and only where they
-  differ from the item's own defaults, so re-prefixing something records nothing (the game
-  keeps modifiers itself). Edits follow the **item**, not the slot, so moving an edited
+  them when the game reloads. Only those regenerated fields are saved, so re-prefixing
+  or restacking something records nothing (the game keeps modifiers and stacks itself). Edits follow the **item**, not the slot, so moving an edited
   weapon — or an accessory into the equipment column — keeps it; every copy of that item
   gets the edit. An item you are not carrying is simply noted as waiting.
 - **Recipes** tab — a crafting-panel-style **icon grid** of craftable items. Type in the

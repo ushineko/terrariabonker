@@ -606,37 +606,24 @@ class Service:
         builds.remember(key, how, failed)
         return {"build": key, "decision": how, "failed": sorted(failed)}
 
-    def restorable_defaults(self, item_type: int) -> dict | None:
-        """The item's own values for the fields auto-restore deals with, or None.
-
-        None means "no baseline", which callers treat as a reason to record the edit
-        rather than to drop it: forgetting a real edit is worse than keeping a redundant
-        one (spec 038).
-        """
-        from terrariabonker import profile
-
-        st = self._item_template_cache().get(int(item_type))
-        if not st:
-            return None
-        got = {k: st.get(k) for k in profile.RESTORABLE if st.get(k) is not None}
-        return got or None
-
     def record_item_edit(self, item_type: int, kwargs: dict) -> dict:
-        """Save only what actually needs restoring: fields the game regenerates, and only
-        where they differ from this item's defaults.
+        """Save the fields auto-restore needs: the ones the game regenerates from the type.
 
-        The edit dialog submits every field pre-filled with the item's current values, so
-        without this the profile records an item's defaults as though the user had chosen
-        them — which is why six accessories whose only change was a prefix were reported
-        as failures on every launch.
+        Type, stack and prefix are written into the save by Terraria itself, so recording
+        them achieves nothing and produced restore warnings about items whose only change
+        was a prefix (spec 038).
+
+        It deliberately does **not** try to drop fields that match the item's defaults.
+        That was tried and it destroyed real edits: the "default" came from the
+        ContentSamples scan, which can pick up a live edited item as the template, so an
+        edit was compared against itself and pruned. Keeping a redundant field costs a
+        harmless rewrite of a value the game would have set anyway; dropping a real one
+        loses the user's work silently.
         """
         from terrariabonker import profile
 
         want = {k: v for k, v in (kwargs or {}).items()
                 if k in profile.RESTORABLE and v is not None}
-        base = self.restorable_defaults(item_type)
-        if base:
-            want = {k: v for k, v in want.items() if base.get(k) != v}
         profile.set_item_edit(item_type, want)
         return {"type": int(item_type), "saved": want}
 
@@ -665,12 +652,6 @@ class Service:
         # player moved used to lose its edit silently (spec 038).
         inv = list(self.inventory())
         for itype, fields in profile.item_edits().items():
-            base = self.restorable_defaults(itype)
-            if base:
-                fields = {k: v for k, v in fields.items() if base.get(k) != v}
-                if not fields:
-                    profile.forget_item_edit(itype)   # nothing left that differs
-                    continue
             where = [c.slot for c in inv if c.type == itype]
             if not where:
                 report["absent"].append(itype)        # ordinary, not a failure

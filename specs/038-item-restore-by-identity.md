@@ -56,9 +56,10 @@ what triggered this whole report.
 1. Record only what actually needs restoring: the fields Terraria **regenerates** from the
    item type — damage, auto-reuse, use time, use animation, pickaxe power, tile boost,
    defense. Not type, stack or prefix, which the game persists itself.
-2. Record only fields whose value **differs from the item's own default**, so an item the
-   user only renamed or re-prefixed records nothing and is not mentioned again.
-3. An edit with nothing left to record is **removed from the profile**, not stored empty.
+2. ~~Record only fields whose value **differs from the item's own default**.~~
+   **Withdrawn after it destroyed real edits — see Risks.** Everything restorable that the
+   dialog submits is recorded, redundant or not.
+3. An edit with nothing restorable in it at all (a prefix-only change) is **not stored**.
 4. Restore finds the item by **what it is**, not by where it was: the saved edit applies to
    the item of that type wherever it now sits.
 5. When the type is not in the inventory at all, say so once, quietly — it is an ordinary
@@ -68,10 +69,9 @@ what triggered this whole report.
 
 ### Technical
 
-7. **Defaults come from the ContentSamples template**, which the project already reads for
-   the compendium (`content.find_item_templates`, cached per build). Comparing an edit
-   against the template is what distinguishes "the user set damage to 45" from "this item's
-   damage is 45".
+7. ~~**Defaults come from the ContentSamples template.**~~ **Withdrawn.** The template scan
+   can return a live *edited* item as the template, so the comparison measured an edit
+   against itself. See Risks.
 8. **The profile becomes keyed by item type**, since that is the identity being matched.
    Empty-slot markers stay keyed by slot: clearing slot 12 is a statement about the slot,
    not about an item.
@@ -86,9 +86,23 @@ what triggered this whole report.
 - **Type-keyed edits lose per-copy distinction.** Two Zeniths cannot have different saved
   damage. Accepted: nothing in the UI offers that today, and slot-keying already lost the
   edit as soon as the item moved, which is worse.
-- **The template cache is per build.** If it cannot be read the comparison has no baseline;
-  in that case record the field rather than drop it, so a missing cache degrades to today's
-  behaviour rather than to silently forgetting edits.
+- **Comparing against "the item's defaults" was tried, shipped, and withdrawn the same day,
+  because it destroyed real edits.** The baseline came from `content.find_item_templates`,
+  whose one-object-per-type heuristic can select a **live, edited** item as the template for
+  a type. The cached template for Boomstick read `damage 30, use_time 12, use_anim 12` —
+  the maintainer's own edit. Every field of that edit therefore "matched the default" and
+  was pruned.
+
+  It cost eight profile entries, recovered from a backup taken before the migration, and it
+  then silently ate the use-time and use-animation from a fresh Boomstick edit made to test
+  the feature. The verification that had passed was circular: the pruning was checked
+  against the same contaminated source that caused it.
+
+  A redundant field costs a harmless rewrite of a value the game would have set anyway. A
+  dropped one costs the user's work, silently. The comparison is gone.
+- **The template contamination is a separate, larger bug.** It also means the Compendium can
+  display an edited item's stats as that item's base stats. Tracked separately; nothing in
+  auto-restore depends on the templates any more.
 - **Migration is one-way.** A profile rewritten by this version loses the stack/prefix
   fields it used to carry. They were never restorable, so nothing is lost in practice, but
   an older build reading the file afterwards would see fewer keys.
@@ -99,17 +113,21 @@ what triggered this whole report.
 ## Acceptance Criteria
 
 - [x] A prefix-only edit records nothing and never appears in the restore report again
-- [x] An edit that matches the item's defaults records nothing
+- [x] ~~An edit that matches the item's defaults records nothing~~ — **withdrawn**: the
+      baseline could be a live edited item, so this pruned real edits. A test now asserts
+      the opposite, that a recorded edit is never pruned against a template
 - [x] Only damage / auto-reuse / use time / use animation / pick / tile boost / defense are
       recorded and restored
 - [x] An edited item moved to a different slot is still restored, matched by type
 - [x] Every copy of an edited type is restored, not just the first
 - [x] An edited type absent from the inventory is reported as absent, not as a failure
-- [x] An existing profile is migrated on load: unrestorable fields dropped, emptied entries
-      discarded, and the six accessories from the report above disappear
+- [x] An existing profile is migrated on load: unrestorable fields dropped, and entries
+      with nothing restorable discarded. The six accessories from the report keep their
+      (redundant) stat fields and are simply re-applied, which is a no-op — they no longer
+      produce a warning because absence is no longer reported as failure
 - [x] Empty-slot markers still work and are still keyed by slot
-- [x] With the template cache unavailable, edits are still recorded (degrade to today's
-      behaviour rather than forgetting them)
+- [x] Nothing in auto-restore consults the item templates at all, so a wrong or
+      contaminated template cannot lose an edit
 - [x] All tests pass headless; flake8 clean on changed files; security review recorded
 - [x] README updated; version bumped to 0.30.0 (maintainer confirmed)
 
@@ -133,9 +151,12 @@ item's own defaults (compared against the ContentSamples template the compendium
 caches), and restore finds the item by type wherever it now sits, applying to every copy.
 An item you are not carrying is reported as *waiting*, not as a failure.
 
-Run against the real profile that produced the warning: **11 entries became 1**. The single
-survivor is a Book of Skulls at damage 45 against a default of 29 and use time 12 against
-32 — demonstrably an edit. Everything else recorded nothing but defaults.
+A third change — dropping fields that matched the item's defaults — was shipped and
+**withdrawn the same day**. Its baseline came from the ContentSamples scan, which can return
+a live *edited* item as the template for a type, so an edit was compared against itself and
+pruned. It destroyed eight saved entries (recovered from a backup) and then ate the use-time
+and use-animation from a fresh edit made to test it. Keeping a redundant field costs a
+harmless rewrite; dropping a real one costs the user's work.
 
 Reviewers: `Service.record_item_edit` and `restorable_defaults` (what counts as an edit),
 the restore loop in `Service.restore` (identity matching and self-pruning), and

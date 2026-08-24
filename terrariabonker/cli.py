@@ -144,8 +144,7 @@ def cmd_set_item(args) -> int:
     svc.set_item(args.slot, args.type, expect_type=args.expect_type, **kwargs)
     # Record the edit so auto-restore can re-apply it. Terraria itself saves type, stack
     # and prefix and regenerates the rest from the type on load, so only the regenerated
-    # fields are worth keeping — and only where they differ from the item's own defaults
-    # (spec 038).
+    # fields are worth keeping (spec 038).
     if args.type:
         svc.record_item_edit(args.type, kwargs)
     else:

@@ -109,7 +109,6 @@ def test_restore_matches_an_edited_item_wherever_it_now_sits(monkeypatch, tmp_pa
     from terrariabonker import profile
     monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
     svc = Service(_game([(2, 250), (3507, 1)]))      # the edited sword is now in slot 1
-    monkeypatch.setattr(Service, "restorable_defaults", lambda self, t: None)
     profile.set_item_edit(3507, {"damage": 200})
 
     rep = svc.restore()
@@ -121,7 +120,6 @@ def test_restore_applies_to_every_copy(monkeypatch, tmp_path):
     from terrariabonker import profile
     monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
     svc = Service(_game([(3507, 1), (3507, 1)]))
-    monkeypatch.setattr(Service, "restorable_defaults", lambda self, t: None)
     profile.set_item_edit(3507, {"damage": 200})
 
     rep = svc.restore()
@@ -133,7 +131,6 @@ def test_an_item_you_are_not_carrying_is_absent_not_a_failure(monkeypatch, tmp_p
     from terrariabonker import profile
     monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
     svc = Service(_game([(2, 250)]))
-    monkeypatch.setattr(Service, "restorable_defaults", lambda self, t: None)
     profile.set_item_edit(3507, {"damage": 200})
 
     rep = svc.restore()
@@ -142,29 +139,24 @@ def test_an_item_you_are_not_carrying_is_absent_not_a_failure(monkeypatch, tmp_p
     assert profile.item_edits() == {3507: {"damage": 200}}, "the edit must be kept"
 
 
-def test_an_edit_matching_the_items_defaults_is_dropped(monkeypatch, tmp_path):
-    """The six accessories in the report: every recorded field was the item's own value."""
+def test_a_recorded_edit_is_never_pruned_against_a_template(monkeypatch, tmp_path):
+    """Pruning fields that matched the item's "default" destroyed real edits.
+
+    The default came from the ContentSamples scan, which can pick up a live *edited* item
+    as the template — so an edit was compared against itself and dropped. It cost the
+    maintainer a Boomstick's use-time and use-animation, silently, on the very edit made
+    to test the feature. A redundant field costs a harmless rewrite; a dropped one costs
+    the user's work.
+    """
     from terrariabonker import profile
     monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
-    svc = Service(_game([(708, 1)]))
-    monkeypatch.setattr(Service, "restorable_defaults",
-                        lambda self, t: {"damage": -1, "use_time": 100})
-    profile.set_item_edit(708, {"damage": -1, "use_time": 100})
+    svc = Service(_game([(964, 1)]))
 
-    rep = svc.restore()
-    assert rep["items"] == [] and rep["absent"] == []
-    assert profile.item_edits() == {}, "an edit with nothing to restore should be forgotten"
-
-
-def test_a_real_edit_survives_the_default_pruning(monkeypatch, tmp_path):
-    from terrariabonker import profile
-    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
-    svc = Service(_game([(3507, 1)]))
-    monkeypatch.setattr(Service, "restorable_defaults",
-                        lambda self, t: {"damage": 190, "use_time": 20})
-    profile.set_item_edit(3507, {"damage": 200, "use_time": 20})
+    svc.record_item_edit(964, {"damage": 31, "use_time": 12, "use_anim": 12,
+                               "prefix": 65, "stack": 1, "type": 964})
+    assert profile.item_edits() == {964: {"damage": 31, "use_time": 12, "use_anim": 12}}, \
+        "an edit was pruned, or an unrestorable field was kept"
 
     rep = svc.restore()
     assert rep["items"] == [0]
-    assert svc.inventory()[0].damage == 200
-    assert profile.item_edits() == {3507: {"damage": 200, "use_time": 20}}
+    assert svc.inventory()[0].damage == 31
