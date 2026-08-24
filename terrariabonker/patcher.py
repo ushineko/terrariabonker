@@ -1129,8 +1129,14 @@ class Patcher:
             except PatchError:
                 on = False
             if on:
+                # For an applied cheat the meaningful count is what is installed, not what
+                # the anchor scan happens to have cached: an injection applied in an
+                # earlier process leaves this one's scan cache empty, which read as
+                # "0 sites" for a cheat patched at four of them.
+                installed = len((self._inj.get(name) or {}).get("sites", ()))
                 out[name] = {"on": True, "available": True, "verified": verified,
-                             "reason": "", "sites": len(self._sites.get(anchor_key, ()))}
+                             "reason": "",
+                             "sites": installed or len(self._sites.get(anchor_key, ()))}
                 continue
             try:
                 res = self.resolution(anchor_key, build)

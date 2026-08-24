@@ -75,6 +75,13 @@ cheat was unavailable, no reason, and no distinction between "not JIT'd yet, wil
     Two panels would mean two privileged workers, two 1 Hz syncs and two auto-restore loops
     racing on the same `patches.json`.
 
+- **The `sites` number in the status meant two different things**, found while checking
+  spec 034's open criterion. For a cheat that is off it is the anchor scan's match count;
+  for one that is on it was the *scan cache*, which an earlier process fills and a later one
+  does not — so `loot`, genuinely patched at four sites, reported "0 sites" while reporting
+  itself available. Fixed to report what is installed when a cheat is applied. The
+  availability flag was always right; only the count was misleading.
+
 ## Risks & Assumptions
 
 - **Patching a stale JIT copy.** Assumed inert: it is never executed. The risk is the reverse

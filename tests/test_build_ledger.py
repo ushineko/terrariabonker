@@ -293,3 +293,23 @@ def test_the_catalog_is_ordered_by_section():
             assert info.section not in seen, f"{info.section} appears in two runs"
             seen.add(info.section)
             order.append(info.section)
+
+
+def test_an_applied_injection_reports_the_sites_it_installed(monkeypatch):
+    """It used to report the anchor-scan cache, which is empty when the cheat was applied
+    by an earlier process — so `loot`, patched at four sites, read as "0 sites"."""
+    from terrariabonker import patcher
+
+    name = next(iter(patcher.INJECTIONS))
+    p = patcher.Patcher.__new__(patcher.Patcher)
+    p._sites = {}                                  # this process never scanned
+    p._inj = {name: {"sites": [{"inject": 1, "cave": 2}] * 4, "stub_len": 8}}
+    monkeypatch.setattr(patcher.Patcher, "is_enabled", lambda self, n: n == name)
+    # every other cheat is off, and resolving those would want a live process
+    monkeypatch.setattr(patcher.Patcher, "resolution",
+                        lambda self, key, build=None: patcher.Resolution(
+                            (), False, "not scanned", False))
+
+    detail = patcher.Patcher.details(p, build=None)[name]
+    assert detail["on"] is True
+    assert detail["sites"] == 4, "reported the empty scan cache, not what is installed"
