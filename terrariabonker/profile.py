@@ -18,6 +18,13 @@ from contextlib import contextmanager
 
 _PATH = os.path.expanduser("~/.config/terrariabonker/profile.json")
 
+# The only fields worth saving: the ones Terraria regenerates from the item type on load.
+# Type, stack and prefix are written into the save file by the game itself, so re-applying
+# them achieves nothing — auto-restore used to record all three and then report failures
+# about items whose only "edit" was a prefix that had survived perfectly well on its own.
+RESTORABLE = ("damage", "auto_reuse", "use_time", "use_anim", "pick", "tile_boost",
+              "defense")
+
 
 @contextmanager
 def _locked():
@@ -37,8 +44,34 @@ def load() -> dict:
             d = json.load(f)
     except (OSError, ValueError):
         d = {}
-    d.setdefault("cheats", {})     # name -> value (None for valueless)
-    d.setdefault("items", {})      # slot(str) -> set-item kwargs ({"type": 0} == empty)
+    d.setdefault("cheats", {})       # name -> value (None for valueless)
+    d.setdefault("item_edits", {})   # item type(str) -> {restorable field: value}
+    d.setdefault("empty_slots", [])  # slots the user deliberately cleared
+    return _migrate(d)
+
+
+def _migrate(d: dict) -> dict:
+    """Fold a slot-keyed profile into the type-keyed one (spec 038).
+
+    Edits used to be stored per slot with every field the dialog submitted, which meant an
+    item that moved lost its edit and an item whose only change was a prefix was reported
+    as a failure on every launch. Only the regenerated fields are carried over; whether
+    those differ from the item's own defaults needs the game's templates, so that pruning
+    happens on the next restore rather than here.
+    """
+    legacy = d.pop("items", None)
+    if not legacy:
+        return d
+    for slot_s, kw in legacy.items():
+        itype = int(kw.get("type", 0) or 0)
+        if not itype:
+            slot = int(slot_s)
+            if slot not in d["empty_slots"]:
+                d["empty_slots"].append(slot)
+            continue
+        fields = {k: v for k, v in kw.items() if k in RESTORABLE and v is not None}
+        if fields:
+            d["item_edits"].setdefault(str(itype), {}).update(fields)
     return d
 
 
@@ -61,19 +94,36 @@ def set_cheat(name: str, on: bool, value=None) -> None:
         _save(d)
 
 
-def set_item(slot: int, kwargs: dict) -> None:
-    """Record a per-slot item edit (the full set-item kwargs, incl. ``type``)."""
+def set_item_edit(item_type: int, fields: dict) -> None:
+    """Record an edit against the item *type*, not the slot it happens to be in.
+
+    ``fields`` should already be narrowed to what differs from the item's defaults; an
+    empty mapping removes the entry rather than storing something with nothing to restore.
+    """
+    fields = {k: v for k, v in (fields or {}).items() if k in RESTORABLE and v is not None}
     with _locked():
         d = load()
-        d["items"][str(slot)] = dict(kwargs)
+        if fields:
+            d["item_edits"][str(int(item_type))] = fields
+        else:
+            d["item_edits"].pop(str(int(item_type)), None)
         _save(d)
+
+
+def forget_item_edit(item_type: int) -> None:
+    """Drop a saved edit — used when a restore finds nothing left that differs."""
+    with _locked():
+        d = load()
+        if d["item_edits"].pop(str(int(item_type)), None) is not None:
+            _save(d)
 
 
 def clear_item(slot: int) -> None:
     """Record that a slot was emptied."""
     with _locked():
         d = load()
-        d["items"][str(slot)] = {"type": 0}
+        if int(slot) not in d["empty_slots"]:
+            d["empty_slots"].append(int(slot))
         _save(d)
 
 
@@ -81,5 +131,10 @@ def cheats() -> dict:
     return load().get("cheats", {})
 
 
-def items() -> dict:
-    return load().get("items", {})
+def item_edits() -> dict:
+    """``{item type (int): {field: value}}`` for every saved edit."""
+    return {int(k): v for k, v in load().get("item_edits", {}).items()}
+
+
+def empty_slots() -> list:
+    return list(load().get("empty_slots", []))

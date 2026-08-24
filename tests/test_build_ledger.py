@@ -264,32 +264,35 @@ def test_banner_handles_a_missing_status():
 
 def test_restore_summary_is_silent_when_everything_landed():
     assert client.restore_summary({"cheats": ["mining"], "items": [1],
-                                   "pending": [], "skipped": []}) == []
+                                   "pending": [], "skipped": [], "absent": []}) == []
 
 
 def test_restore_summary_separates_cheats_from_item_edits():
     """They fail for unrelated reasons; reporting them as one lump is what made the old
     message point at a build notice that was not on screen."""
-    lines = client.restore_summary(
-        {"pending": ["reach"], "skipped": ["item:slot31", "item:slot32"]},
-        saved_items={"31": {"type": 708}, "32": {"type": 54}})
+    lines = client.restore_summary({"pending": ["reach"], "absent": [708, 54]})
     assert len(lines) == 2
     cheat_line = next(ln for ln in lines if "cheat" in ln)
     item_line = next(ln for ln in lines if "item edit" in ln)
     assert "reach" in cheat_line and "notice above" in cheat_line
-    assert "31, 32" in item_line and "no longer hold" in item_line
     assert "notice above" not in item_line, "item edits have nothing to do with the build"
 
 
-def test_restore_summary_names_the_items_when_the_profile_is_available():
-    lines = client.restore_summary({"skipped": ["item:slot36"]},
-                                   saved_items={"36": {"type": 54}})
-    assert "Hermes Boots" in lines[0]
+def test_an_absent_item_is_worded_as_waiting_not_as_a_failure():
+    """The old line — "no longer hold the item they were saved for; left alone rather
+    than overwritten" — read as a warning about seven items, when not carrying something
+    is entirely ordinary (spec 038)."""
+    lines = client.restore_summary({"absent": [54]})
+    assert len(lines) == 1
+    assert "Hermes Boots" in lines[0], "the item should be named, not the slot"
+    for alarming in ("no longer hold", "overwritten", "not re-applied", "failed"):
+        assert alarming not in lines[0], alarming
 
 
-def test_restore_summary_survives_an_unknown_profile():
-    lines = client.restore_summary({"skipped": ["item:slot99"]})
-    assert lines and "99" in lines[0]
+def test_restore_summary_says_nothing_about_slots():
+    """Slots are no longer the identity, so they have no place in the message."""
+    lines = client.restore_summary({"absent": [3507]})
+    assert "slot" not in lines[0].lower()
 
 
 def test_restore_summary_reports_refused_cheats_separately():

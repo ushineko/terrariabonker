@@ -786,7 +786,7 @@ class MainWindow(QWidget):
         pid = d.get("pid")
         if pid is None or not d.get("name"):        # need a located player (game in-world)
             return
-        if not (profile.cheats() or profile.items()):
+        if not (profile.cheats() or profile.item_edits()):
             return                                   # nothing saved to restore
         if pid != self._restore_pid:
             self._restore_pid = pid
@@ -830,7 +830,7 @@ class MainWindow(QWidget):
             if any(left) and progressed and self._restore_attempts < RESTORE_RETRIES:
                 QTimer.singleShot(2000, self._do_restore)
             elif any(left) and not progressed and self._restore_attempts > 1:
-                for line in client.restore_summary(rep, profile.items()):
+                for line in client.restore_summary(rep):
                     self.log.appendPlainText(line)
 
         self._call(client.restore_argv(), on_output=done)

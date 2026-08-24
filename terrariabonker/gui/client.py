@@ -251,13 +251,17 @@ def build_banner(status: dict | None, known_build: str) -> str:
     return " ".join(parts)
 
 
-def restore_summary(report: dict | None, saved_items: dict | None = None) -> list[str]:
+def restore_summary(report: dict | None, _unused=None) -> list[str]:
     """Plain-language lines for what auto-restore could not finish, or [] when it did.
 
-    Cheats and item edits fail for unrelated reasons and must not be reported as one
-    lump: a cheat is missing because its anchor does not resolve on this build, while an
-    item edit is skipped because the slot no longer holds the item the edit was saved for
-    (leaving it alone is the point — the alternative is clobbering whatever is there).
+    Cheats and item edits fail for unrelated reasons and must not be reported as one lump:
+    a cheat is missing because its anchor does not resolve on this build, while an item
+    edit simply has nothing to apply to.
+
+    An item you are not carrying is **not** a failure. That distinction is the whole point
+    of spec 038 — the old wording ("no longer hold the item they were saved for; left
+    alone rather than overwritten") read like a warning, and was produced mostly by edits
+    that never needed restoring in the first place.
     """
     if not report:
         return []
@@ -270,16 +274,10 @@ def restore_summary(report: dict | None, saved_items: dict | None = None) -> lis
     cheats = [s.split(":", 1)[1] for s in skipped if s.startswith("cheat:")]
     if cheats:
         out.append(f"[auto-restore] {len(cheats)} cheat(s) refused: {', '.join(sorted(cheats))}")
-    slots = [s.split("slot", 1)[1] for s in skipped if s.startswith("item:slot")]
-    if slots:
-        named = ""
-        if saved_items:
-            from terrariabonker import names
-            labels = [names.label(int((saved_items.get(s) or {}).get("type", 0)))
-                      for s in slots if s in saved_items]
-            if labels:
-                named = f" ({', '.join(labels)})"
-        out.append(f"[auto-restore] {len(slots)} saved item edit(s) not re-applied — "
-                   f"slot(s) {', '.join(slots)} no longer hold the item they were saved "
-                   f"for{named}; left alone rather than overwritten")
+    absent = list(report.get("absent") or [])
+    if absent:
+        from terrariabonker import names
+        labels = ", ".join(sorted(names.label(int(t)) for t in absent))
+        out.append(f"[auto-restore] {len(absent)} saved item edit(s) waiting for an item "
+                   f"you are not carrying: {labels}")
     return out

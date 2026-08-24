@@ -142,11 +142,12 @@ def cmd_set_item(args) -> int:
                   use_time=args.use_time, use_anim=args.use_anim, pick=args.pick,
                   tile_boost=args.tile_boost, defense=args.defense, prefix=args.prefix)
     svc.set_item(args.slot, args.type, expect_type=args.expect_type, **kwargs)
-    # Record the edit in the cross-session profile so auto-restore can re-apply it (Terraria
-    # only saves type/stack/prefix, regenerating the rest from the type on load).
+    # Record the edit so auto-restore can re-apply it. Terraria itself saves type, stack
+    # and prefix and regenerates the rest from the type on load, so only the regenerated
+    # fields are worth keeping — and only where they differ from the item's own defaults
+    # (spec 038).
     if args.type:
-        profile.set_item(args.slot, {"type": args.type,
-                                     **{k: v for k, v in kwargs.items() if v is not None}})
+        svc.record_item_edit(args.type, kwargs)
     else:
         profile.clear_item(args.slot)
     print(f"[OK] set slot {args.slot} to type {args.type}")

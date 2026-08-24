@@ -265,10 +265,12 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   overwriting whatever is really there. **Persistence note:** Terraria saves an item as only its
   **type + stack + modifier** and regenerates the rest (damage, use-time, pickaxe
   power, defense, reach, auto-reuse) from the type on load — so those stat edits are
-  session-only as far as the game is concerned. Auto-restore bridges this: it
-  re-applies your edits to the same item when the game reloads, so they effectively
-  persist (only for the same item type in that slot — a slot whose item you changed
-  in-game is left alone).
+  session-only as far as the game is concerned. Auto-restore bridges this: it re-applies
+  them when the game reloads. Only those regenerated fields are saved, and only where they
+  differ from the item's own defaults, so re-prefixing something records nothing (the game
+  keeps modifiers itself). Edits follow the **item**, not the slot, so moving an edited
+  weapon — or an accessory into the equipment column — keeps it; every copy of that item
+  gets the edit. An item you are not carrying is simply noted as waiting.
 - **Recipes** tab — a crafting-panel-style **icon grid** of craftable items. Type in the
   search box to filter the grid in real time (by name or ItemID); click an item for a
   popup listing its ingredients (icon + count) and crafting station. The **Makes / Uses**

@@ -22,12 +22,13 @@ from collections import Counter
 
 import numpy as np
 
-from terrariabonker.inventory import (ITEM_ACCESSORY, ITEM_BODY_SLOT, ITEM_BUFF_TYPE,
-                                      ITEM_DAMAGE,
+from terrariabonker.inventory import (ITEM_ACCESSORY, ITEM_AUTOREUSE, ITEM_BODY_SLOT,
+                                      ITEM_BUFF_TYPE, ITEM_DAMAGE,
                                       ITEM_DEFENSE, ITEM_HEAD_SLOT, ITEM_HEAL_LIFE,
                                       ITEM_HEAL_MANA, ITEM_LEG_SLOT, ITEM_MAGIC, ITEM_MELEE,
                                       ITEM_PICK, ITEM_RANGED, ITEM_RARE, ITEM_SUMMON,
-                                      ITEM_TYPE, ITEM_USE_TIME)
+                                      ITEM_TILEBOOST, ITEM_TYPE, ITEM_USE_ANIM,
+                                      ITEM_USE_TIME)
 from terrariabonker.npcs import (MAX_NPC_TYPE, NPC_BOSS, NPC_COLOR, NPC_DAMAGE,
                                  NPC_DEFENSE, NPC_HEIGHT, NPC_LIFE_MAX, NPC_NET_ID,
                                  NPC_OBJECT_SIZE, NPC_TOWN, NPC_TYPE, NPC_WIDTH)
@@ -50,6 +51,10 @@ def _read_stats(buf: bytes, off: int) -> dict:
         "rare": i32(ITEM_RARE),
         "pick": i32(ITEM_PICK),
         "use_time": i32(ITEM_USE_TIME),
+        # Needed to tell a real edit from an item's own defaults (spec 038).
+        "use_anim": i32(ITEM_USE_ANIM),
+        "tile_boost": i32(ITEM_TILEBOOST),
+        "auto_reuse": int(buf[off + ITEM_AUTOREUSE]),
         "create_tile": i32(ITEM_CREATE_TILE),
         "buff_type": i32(ITEM_BUFF_TYPE),
         "heal_life": i32(ITEM_HEAL_LIFE),
@@ -127,7 +132,8 @@ def find_item_templates(mem, vtable: int) -> dict[int, dict]:
     """``{type: stats}`` for every item the game has a template for."""
     span = max(ITEM_TYPE, ITEM_DAMAGE, ITEM_DEFENSE, ITEM_RARE, ITEM_PICK, ITEM_USE_TIME,
                ITEM_CREATE_TILE, ITEM_ACCESSORY, ITEM_SUMMON, ITEM_LEG_SLOT,
-               ITEM_HEAL_MANA, ITEM_BUFF_TYPE) + 4
+               ITEM_HEAL_MANA, ITEM_BUFF_TYPE, ITEM_USE_ANIM, ITEM_TILEBOOST,
+               ITEM_AUTOREUSE) + 4
     found = _scan_objects(mem, vtable, span, _read_stats,
                           lambda s: 0 <= s["type"] < MAX_TYPE)
     return _template_table(found, "type")

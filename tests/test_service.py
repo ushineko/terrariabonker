@@ -103,16 +103,68 @@ def test_give_item_raises_when_full():
         pass
 
 
-def test_restore_reapplies_matching_items_only(monkeypatch, tmp_path):
-    # restore re-applies an item edit only when the slot still holds the same item type
-    # (re-applying stats), and skips a slot whose item changed (no clobber).
+def test_restore_matches_an_edited_item_wherever_it_now_sits(monkeypatch, tmp_path):
+    """Slot-keying lost the edit as soon as the player moved the item — which moving
+    accessories into the equipment column does routinely (spec 038)."""
     from terrariabonker import profile
     monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
-    svc = Service(_game([(3507, 1), (2, 250)]))     # slot0=type 3507, slot1=type 2
-    profile.set_item(0, {"type": 3507, "damage": 200})   # matches slot0
-    profile.set_item(1, {"type": 999, "damage": 50})     # slot1 is type 2 -> mismatch
+    svc = Service(_game([(2, 250), (3507, 1)]))      # the edited sword is now in slot 1
+    monkeypatch.setattr(Service, "restorable_defaults", lambda self, t: None)
+    profile.set_item_edit(3507, {"damage": 200})
+
     rep = svc.restore()
-    assert rep["cheats"] == [] and rep["pending"] == []
-    assert 0 in rep["items"]
-    assert "item:slot1" in rep["skipped"]
-    assert svc.inventory()[0].damage == 200         # re-applied to the same item
+    assert 1 in rep["items"], "did not follow the item to its new slot"
+    assert svc.inventory()[1].damage == 200
+
+
+def test_restore_applies_to_every_copy(monkeypatch, tmp_path):
+    from terrariabonker import profile
+    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
+    svc = Service(_game([(3507, 1), (3507, 1)]))
+    monkeypatch.setattr(Service, "restorable_defaults", lambda self, t: None)
+    profile.set_item_edit(3507, {"damage": 200})
+
+    rep = svc.restore()
+    assert sorted(rep["items"]) == [0, 1]
+    assert [svc.inventory()[i].damage for i in (0, 1)] == [200, 200]
+
+
+def test_an_item_you_are_not_carrying_is_absent_not_a_failure(monkeypatch, tmp_path):
+    from terrariabonker import profile
+    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
+    svc = Service(_game([(2, 250)]))
+    monkeypatch.setattr(Service, "restorable_defaults", lambda self, t: None)
+    profile.set_item_edit(3507, {"damage": 200})
+
+    rep = svc.restore()
+    assert rep["absent"] == [3507]
+    assert rep["items"] == [] and rep["skipped"] == []
+    assert profile.item_edits() == {3507: {"damage": 200}}, "the edit must be kept"
+
+
+def test_an_edit_matching_the_items_defaults_is_dropped(monkeypatch, tmp_path):
+    """The six accessories in the report: every recorded field was the item's own value."""
+    from terrariabonker import profile
+    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
+    svc = Service(_game([(708, 1)]))
+    monkeypatch.setattr(Service, "restorable_defaults",
+                        lambda self, t: {"damage": -1, "use_time": 100})
+    profile.set_item_edit(708, {"damage": -1, "use_time": 100})
+
+    rep = svc.restore()
+    assert rep["items"] == [] and rep["absent"] == []
+    assert profile.item_edits() == {}, "an edit with nothing to restore should be forgotten"
+
+
+def test_a_real_edit_survives_the_default_pruning(monkeypatch, tmp_path):
+    from terrariabonker import profile
+    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
+    svc = Service(_game([(3507, 1)]))
+    monkeypatch.setattr(Service, "restorable_defaults",
+                        lambda self, t: {"damage": 190, "use_time": 20})
+    profile.set_item_edit(3507, {"damage": 200, "use_time": 20})
+
+    rep = svc.restore()
+    assert rep["items"] == [0]
+    assert svc.inventory()[0].damage == 200
+    assert profile.item_edits() == {3507: {"damage": 200, "use_time": 20}}

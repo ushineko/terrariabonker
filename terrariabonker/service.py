@@ -525,9 +525,13 @@ class Service:
 
         return self._template_cache(
             "templates",
-            lambda: content.find_item_templates(self.mem, self._item_vtable()), refresh)
+            lambda: content.find_item_templates(self.mem, self._item_vtable()), refresh,
+            # A cache written before spec 038 lacks these, and without them an edit
+            # cannot be told from an item's own defaults. Rescan rather than guess.
+            wants=("use_anim", "auto_reuse", "tile_boost"))
 
-    def _template_cache(self, kind: str, scan, refresh: bool = False) -> dict[int, dict]:
+    def _template_cache(self, kind: str, scan, refresh: bool = False,
+                        wants: tuple = ()) -> dict[int, dict]:
         import json
         import os
 
@@ -537,7 +541,10 @@ class Service:
         if not refresh:
             try:
                 with open(path) as f:
-                    return {int(k): v for k, v in json.load(f).items()}
+                    got = {int(k): v for k, v in json.load(f).items()}
+                sample = next(iter(got.values()), None)
+                if not wants or sample is None or all(w in sample for w in wants):
+                    return got
             except (OSError, ValueError):
                 pass
         found = scan()
@@ -599,6 +606,40 @@ class Service:
         builds.remember(key, how, failed)
         return {"build": key, "decision": how, "failed": sorted(failed)}
 
+    def restorable_defaults(self, item_type: int) -> dict | None:
+        """The item's own values for the fields auto-restore deals with, or None.
+
+        None means "no baseline", which callers treat as a reason to record the edit
+        rather than to drop it: forgetting a real edit is worse than keeping a redundant
+        one (spec 038).
+        """
+        from terrariabonker import profile
+
+        st = self._item_template_cache().get(int(item_type))
+        if not st:
+            return None
+        got = {k: st.get(k) for k in profile.RESTORABLE if st.get(k) is not None}
+        return got or None
+
+    def record_item_edit(self, item_type: int, kwargs: dict) -> dict:
+        """Save only what actually needs restoring: fields the game regenerates, and only
+        where they differ from this item's defaults.
+
+        The edit dialog submits every field pre-filled with the item's current values, so
+        without this the profile records an item's defaults as though the user had chosen
+        them — which is why six accessories whose only change was a prefix were reported
+        as failures on every launch.
+        """
+        from terrariabonker import profile
+
+        want = {k: v for k, v in (kwargs or {}).items()
+                if k in profile.RESTORABLE and v is not None}
+        base = self.restorable_defaults(item_type)
+        if base:
+            want = {k: v for k, v in want.items() if base.get(k) != v}
+        profile.set_item_edit(item_type, want)
+        return {"type": int(item_type), "saved": want}
+
     def restore(self) -> dict:
         """Re-apply the cross-session profile (desired cheats + item edits) to this game.
 
@@ -610,7 +651,7 @@ class Service:
         ``{"cheats": [...], "items": [...], "pending": [...], "skipped": [...]}``."""
         from terrariabonker import profile
         from terrariabonker.patcher import PatchError
-        report = {"cheats": [], "items": [], "pending": [], "skipped": []}
+        report = {"cheats": [], "items": [], "pending": [], "skipped": [], "absent": []}
         p = self.patcher()
         for name, value in profile.cheats().items():
             try:
@@ -620,18 +661,23 @@ class Service:
                 report["pending"].append(name)            # method not JIT-ready yet; retry
             except (KeyError, ServiceError):
                 report["skipped"].append(f"cheat:{name}")
-        cur = {s.slot: s for s in self.inventory()}
-        for slot_s, kw in profile.items().items():
-            slot, itype = int(slot_s), int(kw.get("type", 0))
-            if not itype:
-                continue                                  # empty marker: never auto-clear
-            c = cur.get(slot)
-            if c is not None and c.type == itype:         # same item -> re-apply the edits
-                self.set_item(slot, itype,
-                              **{k: v for k, v in kw.items() if k != "type"})
+        # Matched by what the item *is*, not the slot it sat in: an edited weapon the
+        # player moved used to lose its edit silently (spec 038).
+        inv = list(self.inventory())
+        for itype, fields in profile.item_edits().items():
+            base = self.restorable_defaults(itype)
+            if base:
+                fields = {k: v for k, v in fields.items() if base.get(k) != v}
+                if not fields:
+                    profile.forget_item_edit(itype)   # nothing left that differs
+                    continue
+            where = [c.slot for c in inv if c.type == itype]
+            if not where:
+                report["absent"].append(itype)        # ordinary, not a failure
+                continue
+            for slot in where:                        # every copy, not just the first
+                self.set_item(slot, itype, **fields)
                 report["items"].append(slot)
-            else:
-                report["skipped"].append(f"item:slot{slot}")  # item changed; don't clobber
         return report
 
     def fast_mining(self, use_time: int = 8, use_anim: int = 13, pick: int = 200) -> list[int]:
