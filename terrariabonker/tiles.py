@@ -25,8 +25,14 @@ MAIN_MAX_TILES_OFF = 0x5A4      # maxTilesX, then maxTilesY
 _BOUNDS_OFF = 0x08              # -> {width, originX, height, originY}
 _ENTRIES_OFF = 0x10             # the per-tile pointer array
 _TILE_TYPE_OFF = 0x08           # ushort, within a tile object
-_TILE_HEADER_OFF = 0x0C         # sTileHeader, ushort: type(2) wall(1) liquid(1)
+_TILE_HEADER_OFF = 0x0E         # sTileHeader, ushort
 _ACTIVE_BIT = 0x20              # Tile.active() is (sTileHeader & 32) == 32
+
+# 0x0E is *measured*, not derived. Adding up the declared field widths -- type(2),
+# wall(1), liquid(1) -- puts sTileHeader at 0x0C, and that is wrong: mono lays out an
+# `auto` class however it likes and leaves two bytes there. Reading it at 0x0C returns a
+# constant zero, which makes every tile look mined; `TileMap.check_active_offset` exists
+# because that failure is silent and a self-consistent test fixture will not catch it.
 
 # Vanilla ore tile ids. A whitelist is what keeps a flood fill from eating a region, so it
 # is deliberately a list of ores rather than "anything that looks minable". Gems are listed
@@ -88,12 +94,11 @@ class TileMap:
         return self.mem.read_u32(self.buf + _ENTRIES_OFF + 4 * idx) or 0
 
     def type_at(self, x: int, y: int) -> int | None:
-        """The raw tile id at ``(x, y)``, or None outside the world / with no tile object.
+        """The tile id at ``(x, y)``, or None outside the world / with no tile object.
 
-        **This is not "what is there".** A mined-out tile keeps its id and only loses its
-        active bit, so this reports "copper" for a vein someone already dug out. Use
-        :meth:`solid_type_at` for anything that decides what to mine; this stays raw
-        because the map view wants to show ids without a second read per tile.
+        Id 0 is Dirt *and* empty space, so this cannot tell a dirt block from air. No ore
+        id is 0, so a whitelist search does not care; :meth:`solid_type_at` is what
+        separates the two when it matters.
         """
         if not self.in_world(x, y):
             return None
@@ -108,10 +113,13 @@ class TileMap:
     def active_at(self, x: int, y: int) -> bool | None:
         """Is there actually a tile at ``(x, y)``? None outside the world.
 
-        ``Tile.active()`` is ``(sTileHeader & 32) == 32`` (verified against the game's own
-        IL). Terraria clears that bit when a tile is mined but leaves ``type`` alone, so
-        this is the only thing that separates "copper ore" from "where copper ore used to
-        be". :meth:`check_active_offset` validates the field offset against the live game.
+        ``Tile.active()`` is ``(sTileHeader & 32) == 32``, read out of the game's own IL.
+
+        This is *not* what separates a mined tile from a standing one -- ``KillTile`` goes
+        through ``Tile.ClearEverything``, which zeroes ``type`` and ``sTileHeader``
+        together, so a mined tile reads back as id 0 anyway. It is what separates a **dirt
+        block** (id 0, active) from **air** (id 0, inactive), which is the one distinction
+        ``type`` cannot make.
         """
         if not self.in_world(x, y):
             return None
@@ -130,26 +138,50 @@ class TileMap:
         """
         return self.type_at(x, y) if self.active_at(x, y) else None
 
-    def check_active_offset(self, x: int, y: int) -> dict:
+    def check_active_offset(self, x: int, y: int, width: int = 40) -> dict:
         """Sanity-check :data:`_TILE_HEADER_OFF` against the live world.
 
-        The offset is derived from the field order, which mono is free to lay out as it
-        likes, so it is checked rather than trusted: a column from the sky down to below
-        the surface must be inactive at the top and active further down, and every id-0
-        tile must be inactive. A wrong offset reads some other field and fails both.
+        Mono is free to lay out an ``auto`` class however it likes, so the offset is
+        measured rather than trusted -- and the failure is silent, because a wrong offset
+        lands on padding that reads as a constant zero and simply reports every tile as
+        empty.
+
+        The test is two bands that must disagree: sky is open air and must be ~0% active,
+        deep rock is mostly stone and must be substantially active. A constant-zero offset
+        gives 0% in both and fails the second.
+
+        Do not test this with "id 0 must be inactive" -- Dirt *is* id 0. That premise is
+        what let the wrong offset through the first time.
         """
-        col = [(y0, self.type_at(x, y0), self.active_at(x, y0))
-               for y0 in range(max(0, y - 200), min(self.max_y, y + 60))]
-        col = [c for c in col if c[2] is not None]
-        sky = [c for c in col if c[1] == 0]
-        bad_sky = [c for c in sky if c[2]]
-        active = [c for c in col if c[2]]
+        def band(y0, y1):
+            n = a = 0
+            headers = set()
+            for yy in range(max(0, y0), min(self.max_y, y1)):
+                for xx in range(max(0, x - width), min(self.max_x, x + width)):
+                    p = self._entry(xx, yy)
+                    if not p:
+                        continue
+                    raw = self.mem.read(p + _TILE_HEADER_OFF, 2)
+                    if len(raw) < 2:
+                        continue
+                    h = struct.unpack("<H", raw)[0]
+                    n += 1
+                    a += bool(h & _ACTIVE_BIT)
+                    headers.add(h)
+            return a, n, headers
+
+        sky_a, sky_n, _ = band(40, 120)
+        deep_a, deep_n, deep_h = band(y + 120, y + 170)
+        sky_pct = 100.0 * sky_a / max(1, sky_n)
+        deep_pct = 100.0 * deep_a / max(1, deep_n)
         return {
-            "sampled": len(col),
-            "empty_ids": len(sky),
-            "empty_but_active": len(bad_sky),      # must be 0: id 0 is never a real tile
-            "active": len(active),
-            "ok": bool(col) and not bad_sky and bool(active) and len(sky) > 0,
+            "sky_active_pct": round(sky_pct, 1),
+            "deep_active_pct": round(deep_pct, 1),
+            "distinct_headers_deep": len(deep_h),
+            "sampled": sky_n + deep_n,
+            # reported for eyeballing only -- a uniform world legitimately has one header,
+            # so requiring variety here would fail a world that is perfectly fine
+            "ok": bool(sky_n and deep_n) and sky_pct < 5.0 and deep_pct > 30.0,
         }
 
     def column(self, x: int, y0: int, y1: int) -> list[int | None]:
@@ -181,10 +213,8 @@ def flood(tiles: TileMap, x: int, y: int, whitelist, limit: int = DEFAULT_LIMIT,
     Matching on the **starting tile's own id** rather than on "any whitelisted id" is what
     stops a copper vein touching an iron one from taking both: a vein is one ore.
 
-    Matching uses :meth:`~TileMap.solid_type_at`, so already-mined tiles do not join the
-    vein. Matching on the raw id instead would hand the game coordinates for tiles that no
-    longer exist -- harmless (``CanKillTile`` zeroes the damage) but pure wasted work, and
-    it makes a vein look bigger than it is.
+    Matching uses :meth:`~TileMap.solid_type_at`, so only tiles that are really there join
+    the vein.
 
     Returns [] when the start is not whitelisted. The cap is a safety rail, not a
     performance one — a real vein is tens of tiles, and stopping early is far better than

@@ -23,23 +23,26 @@ STRIDE = 40                  # buffer height (bigger than the world, as in the g
 WORLD_W, WORLD_H = 20, 30
 
 
-def _world(fill=None, active=None):
+def _world(fill=None, active=None, w=None, h=None, stride=None):
     """A tiny world with its own oversized buffer, laid out exactly like the game's.
 
     ``active`` decides which tiles carry the active bit; by default any non-zero id does,
     which is how a real world looks. Pass one to model tiles that have been mined out --
     the game keeps their id and only clears the bit.
     """
-    m = FakeMem(BASE, 0x200000)
+    w = WORLD_W if w is None else w
+    h = WORLD_H if h is None else h
+    stride = STRIDE if stride is None else stride
+    m = FakeMem(BASE, 0x2000000)
     m.write(STATIC + T.MAIN_TILE_OFF, struct.pack("<I", BUF))
-    m.poke_i32(STATIC + T.MAIN_MAX_TILES_OFF, WORLD_W)
-    m.poke_i32(STATIC + T.MAIN_MAX_TILES_OFF + 4, WORLD_H)
+    m.poke_i32(STATIC + T.MAIN_MAX_TILES_OFF, w)
+    m.poke_i32(STATIC + T.MAIN_MAX_TILES_OFF + 4, h)
     m.write(BUF + T._BOUNDS_OFF, struct.pack("<I", BOUNDS))
-    for off, v in ((0x00, 64), (0x04, 0), (0x08, STRIDE), (0x0C, 0)):
+    for off, v in ((0x00, 64), (0x04, 0), (0x08, stride), (0x0C, 0)):
         m.poke_i32(BOUNDS + off, v)
     slot = 0
-    for x in range(WORLD_W):
-        for y in range(WORLD_H):
+    for x in range(w):
+        for y in range(h):
             obj = OBJS + slot * 0x18
             slot += 1
             t = 0 if fill is None else fill(x, y)
@@ -47,7 +50,7 @@ def _world(fill=None, active=None):
             m.write(obj + T._TILE_TYPE_OFF, struct.pack("<H", t))
             m.write(obj + T._TILE_HEADER_OFF,
                     struct.pack("<H", T._ACTIVE_BIT if on else 0))
-            m.write(TILES + 4 * (STRIDE * x + y), struct.pack("<I", obj))
+            m.write(TILES + 4 * (stride * x + y), struct.pack("<I", obj))
     return m
 
 
@@ -276,40 +279,44 @@ def test_pending_covers_the_tile_still_being_mined():
             f"queueing onto state {state} should be {state == 0}"
 
 
-def test_a_mined_out_tile_does_not_join_the_vein():
-    """Terraria clears a tile's active bit when it is mined but leaves `type` alone, so a
-    dug-out copper vein still reads as copper. Matching on the raw id hands the game
-    coordinates for tiles that are not there — `CanKillTile` zeroes the damage so nothing
-    breaks, but the vein looks bigger than it is and every one of those tiles costs a
-    swing to discover. Only the three tiles still standing are part of the vein."""
-    def fill(x, y):
-        return 7 if x == 3 and 2 <= y <= 6 else 1
+def test_a_dirt_block_is_not_air():
+    """Dirt is TileID 0 and so is empty space, so `type_at` cannot tell them apart. The
+    active bit is the only thing that can, which is the whole reason `solid_type_at`
+    exists — `KillTile` goes through `Tile.ClearEverything` and zeroes `type` and
+    `sTileHeader` together, so a *mined* tile already reads back as id 0 either way."""
+    # a solid floor of dirt (id 0, active) under open air (id 0, inactive)
+    tm = T.TileMap(_world(lambda x, y: 0, lambda x, y: y >= 10), STATIC)
 
-    # the top two of that copper run have already been mined out
-    def active(x, y):
-        return not (x == 3 and y in (2, 3))
-    tm = T.TileMap(_world(fill, active), STATIC)
-
-    assert tm.type_at(3, 2) == 7, "premise: the mined tile still reports its id"
-    assert tm.active_at(3, 2) is False
-    assert tm.solid_type_at(3, 2) is None
-
-    assert T.flood(tm, 3, 4, {7}) == [(3, 4), (3, 5), (3, 6)] or \
-        sorted(T.flood(tm, 3, 4, {7})) == [(3, 4), (3, 5), (3, 6)]
-    assert T.flood(tm, 3, 2, {7}) == [], "a vein cannot start on a tile that is not there"
+    assert tm.type_at(5, 5) == 0 and tm.type_at(5, 15) == 0, "premise: both read as id 0"
+    assert tm.active_at(5, 5) is False and tm.active_at(5, 15) is True
+    assert tm.solid_type_at(5, 5) is None, "air is not a tile"
+    assert tm.solid_type_at(5, 15) == 0, "a dirt block is"
 
 
-def test_the_active_offset_check_rejects_a_wrong_offset():
-    """`check_active_offset` is what stops us trusting a field offset mono is free to move.
-    Point it at the wrong field and it must say so rather than quietly reading garbage."""
-    # a surface world: empty above, stone below
-    tm = T.TileMap(_world(lambda x, y: 0 if y < 10 else 1), STATIC)
-    assert tm.check_active_offset(5, 15)["ok"], "the real offset should validate"
+def _surface_world():
+    """Tall enough for the validator's two bands: open sky, then rock."""
+    return T.TileMap(_world(lambda x, y: 0 if y < 250 else 1,
+                            lambda x, y: y >= 250,
+                            w=90, h=400, stride=420), STATIC)
 
+
+def test_the_active_offset_check_accepts_the_real_layout():
+    got = _surface_world().check_active_offset(45, 200)
+    assert got["ok"], got
+    assert got["sky_active_pct"] == 0.0 and got["deep_active_pct"] == 100.0
+
+
+def test_the_active_offset_check_rejects_padding():
+    """The failure this guards is silent: mono leaves two bytes of padding where adding up
+    the field widths says sTileHeader should be, so a wrong offset reads a constant zero
+    and reports every tile as empty — and a fixture written to match the same wrong guess
+    agrees with it. The check has to be run against the live game to mean anything."""
+    tm = _surface_world()
     real = T._TILE_HEADER_OFF
     try:
-        T._TILE_HEADER_OFF = 0x08          # point it at `type` instead
-        got = tm.check_active_offset(5, 15)
-        assert not got["ok"], "a wrong offset validated: %r" % (got,)
+        T._TILE_HEADER_OFF = 0x0C          # where the field widths say it is: padding
+        got = tm.check_active_offset(45, 200)
+        assert not got["ok"], "a constant-zero offset validated: %r" % (got,)
+        assert got["deep_active_pct"] == 0.0
     finally:
         T._TILE_HEADER_OFF = real

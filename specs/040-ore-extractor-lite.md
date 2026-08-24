@@ -194,10 +194,23 @@ no `MonoJitInfo` for — a hard death with no crashlog, matching every observati
 
 **Next steps, in strict risk order.** 1-3 cannot crash the game:
 
-1. *Read-only, no injection.* Compare `[Main.player][Main.myPlayer]` against the player
-   object `live_block()` already resolves. If they differ, that is the bug and no stub
-   needs to run.
-2. *Read-only.* Run `check_active_offset` against the live world to confirm `0x0C`.
+1. ~~*Read-only, no injection.* Compare `[Main.player][Main.myPlayer]` against the player
+   object `live_block()` already resolves.~~ **Done — they match** (`0x3A54A090` both ways,
+   same vtable, `myPlayer` 0 of a 256-element array). `this` is correct and is no longer a
+   suspect, which moves the fault into the destruction path itself.
+2. ~~*Read-only.* Run `check_active_offset` against the live world.~~ **Done, and it found a
+   regression rather than confirming anything.** `sTileHeader` is at **0x0E**, not the 0x0C
+   that adding up the field widths gives -- mono leaves two bytes of padding there. The
+   wrong offset reads a constant zero, so every tile looked mined and `flood` returned
+   nothing at all against the live game. It passed CI because the fixture was written to
+   the same wrong guess. Corrected, and the validator now rests on premises that are
+   actually true (sky ~0% active vs deep >30%), not on "id 0 means empty" -- Dirt *is*
+   id 0, and that premise is what let the wrong offset through.
+
+   Also settled: `KillTile` goes through `Tile.ClearEverything`, which zeroes `type` and
+   `sTileHeader` together, so a mined tile reads back as id 0 regardless. The active bit
+   earns its place by separating a **dirt block** from **air**, not a mined tile from a
+   standing one, and the original justification for adding it was wrong.
 3. *Stub with no call.* Compute `this`, write it to the slot, return. Confirms the stub
    agrees with Python and that the injection alone is inert.
 4. *Bisect the destruction path.* Call with `pickPower=1` on a hard tile so damage stays
