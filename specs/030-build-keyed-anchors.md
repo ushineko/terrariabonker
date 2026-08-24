@@ -82,6 +82,17 @@ cheat was unavailable, no reason, and no distinction between "not JIT'd yet, wil
   itself available. Fixed to report what is installed when a cheat is applied. The
   availability flag was always right; only the count was misleading.
 
+- **The version is read by frequency, and for ~21 seconds after launch the frequencies
+  lie.** Measured across a real launch from the panel: from the instant the process appears
+  until the game reaches its menu, the only version-shaped candidates are `1.4.5.8` and
+  `2.0.50727` — a string constant in the exe and the mono runtime's own version — at one
+  occurrence each. `max()` broke that tie by scan order, which is how a startup misread could
+  report either of them with confidence and abort auto-restore for the whole session. The
+  live version appears 2-4 times, and only once the game is up. Two rules follow: no
+  component of a game version is anywhere near 1000, and one occurrence is not evidence.
+  Both failures now produce `None`, which classifies as "unknown" and is retried, rather
+  than a confident wrong answer.
+
 ## Risks & Assumptions
 
 - **Patching a stale JIT copy.** Assumed inert: it is never executed. The risk is the reverse

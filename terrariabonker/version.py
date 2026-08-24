@@ -42,6 +42,12 @@ _VER_RE = re.compile(rb"v\x00((?:\d\x00)+(?:\.\x00(?:\d\x00)+)+)")
 # Terraria's own string has not been allocated yet. Left unfiltered it won the vote and
 # the whole program concluded the game was "Terraria 2.0.50727".
 _MAX_COMPONENT = 1000
+# One occurrence is a string constant baked into the exe, not the version the game is
+# running. Measured across a real launch: for the first ~21 seconds the only candidates
+# are "1.4.5.8" and "2.0.50727", one occurrence each — a tie broken by scan order, which
+# is how a startup misread could report either of them with confidence. The live version
+# shows up 2-4 times, and only once the game has reached its menu.
+_MIN_OCCURRENCES = 2
 
 
 def _plausible(version: str) -> bool:
@@ -75,6 +81,7 @@ def detect_version(mem) -> str | None:
             if not _plausible(s):            # a runtime's version, not the game's
                 continue
             counts[s] = counts.get(s, 0) + 1
+    counts = {v: n for v, n in counts.items() if n >= _MIN_OCCURRENCES}
     if not counts:
         return None
     return max(counts, key=counts.get)
