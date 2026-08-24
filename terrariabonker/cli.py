@@ -240,7 +240,7 @@ def cmd_serve(args) -> int:
 def cmd_compendium(args) -> int:
     """The full item/NPC catalog. Always --json: it is a GUI data feed, not a listing."""
     svc = _svc()
-    cat = svc.compendium()
+    cat = svc.compendium(refresh=getattr(args, "refresh", False))
     print(json.dumps(cat))
     return 0
 
@@ -502,6 +502,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("compendium",
                        help="dump the full item/NPC catalog as JSON (for the GUI tab)")
     p.add_argument("--json", action="store_true", help="machine-readable (always on)")
+    p.add_argument("--refresh", action="store_true",
+                   help="rescan the game instead of using the per-build cache")
     p.set_defaults(func=cmd_compendium)
 
     p = sub.add_parser("spawn-npc", help="spawn an NPC beside the player")

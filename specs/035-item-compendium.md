@@ -1,7 +1,6 @@
 # Spec 035: Item compendium tab
 
-**Status**: INCOMPLETE — Phases 1 (catalog + browse) and 2 (NPC stats + spawn)
-implemented and fully validated in-game; Phase 3 (NPC sprites) open
+**Status**: COMPLETE — all three phases implemented and validated in-game
 **Implementation Date**: 2026-08-23 (Phases 1 and 2)
 
 > **Note**: No issue tracker ticket (personal utility).
@@ -21,7 +20,7 @@ At the maintainer's request the work is split, with a validation stop after each
 | --- | --- | --- |
 | 1 | Catalog: read every item's stats, browse/filter/sort, tooltip, wiki, give | done |
 | 2 | NPC stats and real kinds, spawning, placement offset, boss gate | done |
-| 3 | NPC sprites from the 838 `Content/Images/NPC_*.xnb` sheets | open |
+| 3 | NPC sprites from the `Content/Images/NPC_*.xnb` sheets | done |
 
 ### What the recon found
 
@@ -179,20 +178,47 @@ exists. `Main.myPlayer` is already read by `resolve_local_player`.
     column: Qt stretches the last section by default, which handed ID the whole slack and left
     its header stranded away from its right-aligned values.
 17. **NPC sprites** extend `sprites.py` to decode `Content/Images/NPC_*.xnb` into the same
-    cache, cropping to the first frame as the animated item strips already do. The cache
-    scope string is bumped so existing caches re-extract.
-18. The wiki button uses `QProcess.startDetached("xdg-open", …)`, exactly as the Steam launch
+    cache. They do **not** reuse the item de-animator: that infers a strip from
+    `height >= 2*width` plus evenly spaced content blocks, which is right for tall item
+    strips and wrong for wide NPCs — a two-frame Blue Slime sheet is 32x52, and a
+    one-frame Moon Lord is 573x804. The exact answer is the game's own
+    `Main.npcFrameCount`, an `int[697]` at Main-static **+0x0C34**, verified by the fact
+    that it divides every sheet height measured (Guide 1456/26, Bunny 280/7, Eye of
+    Cthulhu 996/6, Blue Slime 52/2, Moon Lord 804/1).
+
+    The division is floored rather than required to be exact: several sheets carry a few
+    rows of padding (Duke Fishron 1298 over 8, Skeletron Prime 940 over 6), and refusing
+    those left whole strips on screen.
+18. **Some sheets are grids, not strips**, and `npcFrameCount` counts frames rather than
+    rows — Queen Slime's 16 frames are 2 columns of 8, Deerclops uses 5 columns, Moon Lord
+    a 3x3 — so a vertical crop alone leaves a row of little pictures. `_first_grid_cell`
+    takes the top-left cell, and only when the image splits into several **evenly sized**
+    blocks separated by fully transparent lines. That evenness test is what stops it
+    slicing a single sprite that has a detached piece. Measured across all 697 sheets it
+    changes 19 and leaves 678 untouched.
+19. **The frame counts cross the privilege boundary through a file.** They live in the
+    game's memory, so only the privileged side can read them, while extraction runs
+    unprivileged. `Service.compendium` publishes them to
+    `~/.cache/terrariabonker/npcframes.json`; the extractor reads them there. If they are
+    absent the NPC sheets are **skipped rather than cached whole** — a wrong icon would
+    persist until the scope is bumped, a missing one is fixed by the next run — and
+    `is_cached()` reports the cache incomplete so that next run happens.
+20. **NPC sprites are keyed by type, not netID.** Every coloured slime and every Hornet is
+    a separate netID sharing one base type, and the game ships one sheet per type; asking
+    by id would request `NPC_-65.xnb`. The cache filenames are `NPC_<type>.png`, kept
+    apart from items' `Item_<id>.png` because the two id spaces overlap.
+21. The wiki button uses `QProcess.startDetached("xdg-open", …)`, exactly as the Steam launch
     button does, so nothing runs as root and no network call originates in the app.
-19. **One dialog per double-click.** `doubleClicked` and `activated` both fire for a
+22. **One dialog per double-click.** `doubleClicked` and `activated` both fire for a
     double-click under this style, and a re-entrancy flag does not help: `exec()` runs a
     nested event loop, so the second signal is delivered *after* the dialog closes and simply
     opens another one. Only `doubleClicked` is connected; Enter is wired separately as a
     `QShortcut` so keyboard use still works. Pinned by a test that emits both signals.
-20. **Localization references must resolve.** The extractor's reference resolver only handled
+23. **Localization references must resolve.** The extractor's reference resolver only handled
     `CommonItemTooltip.*`; generalising it to any `{$Category.Key}` took unresolved
     references from 19 to 0 in NPC names and 534 to 5 in tooltips (2 to 0 in item names).
     Tests assert the remainder stays at zero for names.
-21. **Code-patch tooltips got a crispness pass** in the same round of UI feedback: all 12
+24. **Code-patch tooltips got a crispness pass** in the same round of UI feedback: all 12
     cheat notes rewritten to tooltip length, re-flowed through `gui/uitext.wrap`, and the
     patch list split into one tab per section (Build / Combat / Accessories / Misc) so it
     scales as cheats are added. Tests cap note length and forbid the repeated
@@ -268,6 +294,18 @@ exists. `Main.myPlayer` is already read by `resolve_local_player`.
   `https://terraria.wiki.gg/` URL handed to `xdg-open` as its own argv element — no shell,
   no injection. Punctuation in a name (apostrophes) is legal in a URL and the wiki resolves
   it.
+- **A handful of sheets are not vertical strips at all**, and the grid rule only rescues
+  those laid out evenly. The Wyvern segments, the four Pillars and the Flying Dutchman are
+  single large sprites and are correctly left whole; Foxparks' 40 uneven row blocks are left
+  whole too, which is the conservative failure. Icons render at 40px, so a slightly oversized
+  source is cosmetic rather than a wrong picture.
+- **Queen Slime's colour cannot be reproduced, and the attempt is shelved.** Its sheet is
+  olive with a red core; in game it is pink. Unlike the coloured slimes it carries no tint —
+  `NPC.color` is `(0, 0, 0, 0)` — so whatever recolours it lives in its draw code rather than
+  in any field this project can read, and matching it would mean inventing a colour. The
+  maintainer reviewed the sprite and accepted it as-is. Recorded so the next person does not
+  re-derive the dead end; if it is ever worth doing, the lead is `Main.DrawNPCDirect`'s
+  special-casing rather than anything on the NPC object.
 - **Rollback.** `git revert`. The tab is additive and reads memory except when the user
   asks for something: `give_item` (pre-existing) and `spawn_npc`, which writes only into a
   `Main.npc` slot the game had marked unused. No patches, no code caves, no ledger entries,
@@ -332,10 +370,36 @@ exists. `Main.myPlayer` is already read by `resolve_local_player`.
 - [x] All tests pass headless (290); flake8 clean on changed code; security review recorded
 - [x] README updated; version bumped to 0.26.0 (maintainer confirmed)
 
-### Phase 3 — NPC artwork (open)
+### UI consistency and progress (phase 3 review)
 
-- [ ] NPC entries show their sprite, decoded from `Content/Images/NPC_*.xnb` into the existing
-      cache
+- [x] Every long operation reports through one shared progress bar under the tabs — the
+      privileged catalog read, the row build, the recipe grid build and sprite extraction —
+      so whichever tab starts the work, it is visible
+- [x] The two big grids build in slices with the event loop pumped between them: nearly
+      7,000 compendium rows took 1.3 s in one go and froze the window, which meant no bar
+      could paint even when one was showing
+- [x] The Compendium has a **Re-scan from game** button matching the Recipes tab's
+      **Re-extract from game**, backed by `compendium --refresh`, which bypasses the
+      per-build cache
+
+### Phase 3 — NPC artwork
+
+- [x] NPC entries show their sprite, decoded from `Content/Images/NPC_*.xnb` into the existing
+      cache — 697 sheets, alongside the 6,193 item sprites, in ~24 s
+- [x] Sheets are cropped to one frame using the game's own `Main.npcFrameCount` rather than a
+      shape heuristic, verified against every sheet height measured
+- [x] Grid sheets (Queen Slime 2x8, Deerclops 5 columns, Moon Lord 3x3, the Ogres) are cropped
+      to their top-left cell, and the rule provably leaves 678 of 697 sheets untouched
+- [x] A variant netID takes its sprite from its base type, not its id
+- [x] The 11 NPCs the game tints (`NPC.color` at +0x1A8, e.g. Blue Slime's
+      `(0, 80, 255, 100)`) render in their own colours rather than the neutral grey of the
+      shared sheet, each as its own cached icon since the tint is per netID
+- [x] Queen Slime's crop is a whole cell: its 16 frames are 2 columns of 8, so dividing the
+      height by 16 gave half a slime. Columns are counted first and the height divided by the
+      rows that implies
+- [x] NPC and item cache filenames cannot collide
+- [x] If the frame counts are not published yet, NPC sheets are skipped rather than cached
+      whole, and the cache reports itself incomplete so the next run finishes the job
 
 ## Executive Summary
 
@@ -370,7 +434,17 @@ Reviewers for phase 2: `Service.spawn_npc` (the write order and why `active` is 
 `npcs.NPC_COPY_SPANS` (which fields must not be copied, and why), and
 `CompendiumTab._spawn` / `_tick` (the boss gate).
 
-Deferred: NPC sprites (Phase 3).
+**Phase 3** put artwork on the NPC rows. The item de-animator could not be reused — it infers
+a strip from the sheet's shape, which is right for tall item strips and wrong for wide NPCs —
+so the crop uses the game's own `Main.npcFrameCount` instead, an `int[697]` at Main-static
++0x0C34 that divides every sheet height measured. A second, conservative pass handles the
+sheets that are grids rather than strips, because the frame count counts frames and not rows;
+it changes 19 sheets of 697 and is prevented from slicing single sprites by requiring the
+blocks to be evenly sized.
+
+Reviewers for phase 3: `sprites._first_frame` and `_first_grid_cell` (the two rules and what
+stops the second one over-reaching), and `Service._publish_npc_frame_counts` (why the counts
+travel between processes as a file).
 
 ## Testing
 
@@ -436,6 +510,18 @@ objects had been allocated beside them. See the Technical and Risks sections.
 Live, maintainer-verified: spawning works. Two Bunnies and a Zombie were placed into slots
 12, 29 and 30 with correct netID, type, life, size and `whoAmI`, the game stayed up, and the
 maintainer confirmed spawns arrive in-game from the tab.
+
+### Phase 3
+
+- `tests/test_npc_sprites.py` (15): strips cropped to one frame; a wide two-frame sheet
+  cropped where the item rule provably would not; a genuinely single-frame sheet left alone;
+  a few rows of padding tolerated; an absurd implied frame ignored; NPC and item cache paths
+  cannot collide; frame counts round-trip and a missing file is not an error; a stale scope
+  and a cache with no NPCs both re-extract; extraction with no counts writes no NPC icon at
+  all; grid sheets cropped to the top-left cell; **and a single sprite with a detached piece
+  left untouched**, which is the dangerous direction.
+- `tests/test_compendium_tab.py` (+2): an NPC variant takes its sprite from its base type,
+  not its netID (mutation-checked), and an item row still uses the item icon.
 
 All of phases 1 and 2 are now maintainer-confirmed in a running session, including the two
 buttons held open through phase 2 (Wiki and Give) and the boss gate — a boss spawned from the

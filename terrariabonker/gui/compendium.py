@@ -12,10 +12,11 @@ an item and logging, so everything that touches memory still goes through the CL
 from __future__ import annotations
 
 from PyQt6.QtCore import QProcess, QSize, QSortFilterProxyModel, Qt, QTimer
-from PyQt6.QtGui import QKeySequence, QShortcut, QStandardItem, QStandardItemModel
-from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QHBoxLayout, QHeaderView,
-                             QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
-                             QTreeView, QVBoxLayout, QWidget)
+from PyQt6.QtGui import (QIcon, QKeySequence, QShortcut, QStandardItem,
+                         QStandardItemModel)
+from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog,
+                             QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
+                             QPushButton, QSpinBox, QTreeView, QVBoxLayout, QWidget)
 
 from terrariabonker.gui import uitext
 
@@ -33,6 +34,9 @@ ALL_KINDS = "All kinds"
 BOSS_KIND = "Boss"
 BOSS_COUNTDOWN = 5              # seconds
 DEFAULT_DISTANCE = 25           # tiles behind the player
+# Rows built between repaints. Small enough that the bar moves, large enough that the
+# pumping itself is not the cost.
+_BUILD_CHUNK = 500
 
 # Sortable stat columns, so the catalog can be ranked by what it is rather than only named.
 # Each is (header, stats key); a value of 0 or less shows blank but still sorts by its real
@@ -150,12 +154,17 @@ class EntryDialog(QDialog):
 class CompendiumTab(QWidget):
     """Browse every item and NPC. ``fetch`` is called once, lazily, with a callback."""
 
-    def __init__(self, parent, fetch, on_give, icon_for, log, on_spawn=None):
+    def __init__(self, parent, fetch, on_give, icon_for, log, on_spawn=None,
+                 icon_for_npc=None, on_busy=None):
+        """``fetch(callback, refresh)`` delivers the catalog; everything privileged is
+        somebody else's job."""
         super().__init__(parent)
         self._fetch = fetch
         self._on_give = on_give
         self._on_spawn = on_spawn
         self._icon_for = icon_for
+        self._icon_for_npc = icon_for_npc
+        self._on_busy = on_busy or (lambda *_a, **_k: None)
         self._log = log
         self._loaded = False
         self._countdown = None          # QTimer while a boss spawn is pending
@@ -237,32 +246,66 @@ class CompendiumTab(QWidget):
         self.status = QLabel("Open this tab to load the catalog…")
         col.addWidget(self.status)
 
+        # Mirrors the Recipes tab: both catalogs are read from the game once and cached
+        # per build, and both need the same escape hatch after a game update.
+        row = QHBoxLayout()
+        self.rescan = QPushButton("Re-scan from game")
+        self.rescan.clicked.connect(self.reload)
+        row.addWidget(self.rescan)
+        note = QLabel("<i>Item and NPC stats are read from the game once and cached per "
+                      "build. Re-scan after a game update.</i>")
+        note.setWordWrap(True)
+        row.addWidget(note, 1)
+        col.addLayout(row)
+
     # --- data ---------------------------------------------------------------
     def ensure_loaded(self) -> None:
-        """Called when the tab is first shown; the scan behind it takes a second or two."""
+        """Called when the tab is first shown; the work behind it takes a few seconds."""
         if self._loaded:
             return
         self._loaded = True
         self.status.setText("Reading the game's item templates…")
-        self._fetch(self._fill)
+        # No percentage to give: this is a privileged read of the game's own memory, and
+        # how long it takes depends on whether the per-build caches are warm.
+        self._on_busy("Reading the game's catalog…")
+        self._fetch(self._fill, False)
+
+    def reload(self) -> None:
+        """Throw the per-build cache away and read the game again."""
+        self.cancel_spawn()
+        self._model.removeRows(0, self._model.rowCount())
+        self.kind.clear()
+        self.kind.addItem(ALL_KINDS)
+        self._loaded = True
+        self.status.setText("Re-scanning the game…")
+        self._log("[compendium] re-scan from game")
+        self._on_busy("Re-scanning the game…")
+        self._fetch(self._fill, True)
 
     def _fill(self, catalog: dict | None) -> None:
         if not catalog:
             self._loaded = False        # let a later visit retry
+            self._on_busy(None)
             self.status.setText("Could not read the catalog — is the game running?")
             return
-        rows = []
+        entries = list(catalog.get("items", [])) + list(catalog.get("npcs", []))
+        total = len(entries)
+        root = self._model.invisibleRootItem()
         kinds = set()
-        for entry in catalog.get("items", []):
-            rows.append(self._row(entry, icon=True))
-            kinds.add(entry.get("kind", "Unknown"))
-        for entry in catalog.get("npcs", []):
-            rows.append(self._row(entry, icon=False))
-            kinds.add(entry.get("kind", "NPC"))
-        for row in rows:
-            self._model.invisibleRootItem().appendRow(row)
+        # Built in slices with the event loop pumped between them. Nearly 7,000 rows of
+        # seven cells each, every one carrying an icon and a tooltip, takes over a second;
+        # doing it in one go freezes the window and leaves the progress bar unpainted.
+        for start in range(0, total, _BUILD_CHUNK):
+            for entry in entries[start:start + _BUILD_CHUNK]:
+                kinds.add(entry.get("kind", "Unknown"))
+                root.appendRow(self._row(entry, icon=True))
+            self._on_busy("Building the catalog…", min(start + _BUILD_CHUNK, total), total)
+            app = QApplication.instance()
+            if app is not None:
+                app.processEvents()
         for k in sorted(kinds):
             self.kind.addItem(k)
+        self._on_busy(None)
         self._count()
 
     def _row(self, entry: dict, icon: bool) -> list:
@@ -276,7 +319,7 @@ class CompendiumTab(QWidget):
 
         first = QStandardItem(name)
         if icon:
-            first.setIcon(self._icon_for(int(entry["id"])))
+            first.setIcon(self._entry_icon(entry))
         first.setData(name.lower(), ROLE_SORT)
         second = QStandardItem(kind)
         second.setData(kind, ROLE_SORT)
@@ -305,6 +348,22 @@ class CompendiumTab(QWidget):
             cell.setData(f"{name.lower()} #{entry.get('id')}", ROLE_SEARCH)
         return cells
 
+    def _entry_icon(self, entry: dict):
+        """An NPC's sprite is keyed by its *type*, not its netID.
+
+        The variants — every coloured slime, every Hornet — are separate netIDs sharing one
+        base type, and the game ships one sheet per type. Falling back to the id would ask
+        for `NPC_-65.xnb`, which does not exist.
+        """
+        if not entry.get("npc"):
+            return self._icon_for(int(entry["id"]))
+        if self._icon_for_npc is None:
+            return QIcon()
+        npc_type = (entry.get("stats") or {}).get("type")
+        if not isinstance(npc_type, int):
+            npc_type = int(entry["id"])
+        return self._icon_for_npc(npc_type, int(entry["id"]))
+
     def _count(self) -> None:
         shown, total = self._proxy.rowCount(), self._model.rowCount()
         self.status.setText(f"{shown} of {total} entries"
@@ -318,7 +377,7 @@ class CompendiumTab(QWidget):
         if item is None:
             return
         entry = item.data(ROLE_ENTRY)
-        icon = None if entry.get("npc") else item.icon()
+        icon = item.icon()
         self._opening = True
         try:
             EntryDialog(self, entry, icon, self._give, self._spawn).exec()

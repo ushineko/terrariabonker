@@ -36,7 +36,7 @@ def tab(app, monkeypatch):
     opened = []
     monkeypatch.setattr(compendium, "EntryDialog",
                         lambda *a, **k: type("D", (), {"exec": lambda self: opened.append(1)})())
-    t = compendium.CompendiumTab(None, lambda done: done(CATALOG), lambda i: None,
+    t = compendium.CompendiumTab(None, lambda done, refresh=False: done(CATALOG), lambda i: None,
                                  lambda i: QIcon(), lambda m: None)
     t.ensure_loaded()
     t._opened = opened
@@ -89,7 +89,7 @@ def test_stat_columns_are_blank_for_absent_values_but_still_sort(app, monkeypatc
         {"id": 1, "name": "Blade", "kind": "Weapon", "stats": {"damage": 50}, "wiki": ""},
         {"id": 2, "name": "Rock", "kind": "Material", "stats": {"damage": -1}, "wiki": ""},
     ], "npcs": []}
-    t = compendium.CompendiumTab(None, lambda done: done(catalog), lambda i: None,
+    t = compendium.CompendiumTab(None, lambda done, refresh=False: done(catalog), lambda i: None,
                                  lambda i: QIcon(), lambda m: None)
     t.ensure_loaded()
     dmg = compendium.COLUMNS.index("Damage")
@@ -132,9 +132,99 @@ def test_give_is_offered_for_items_and_withheld_from_npcs(app):
 
 def test_the_kind_dropdown_widens_for_kinds_added_after_it_is_shown(app):
     """The catalog loads lazily, so Qt's adjust-on-first-show left every kind truncated."""
-    tab = compendium.CompendiumTab(None, lambda cb: None, lambda _i: None,
+    tab = compendium.CompendiumTab(None, lambda cb, refresh=False: None, lambda _i: None,
                                    lambda _i: QIcon(), lambda _m: None)
     narrow = tab.kind.sizeHint().width()
     tab._fill({"items": [], "npcs": [
         {"id": 1, "name": "x", "kind": "A Very Long Kind Label", "npc": True, "stats": {}}]})
     assert tab.kind.sizeHint().width() > narrow, "the dropdown did not grow to fit"
+
+
+def test_an_npc_variant_takes_its_sprite_from_its_type_not_its_id(app):
+    """Every coloured slime and every Hornet is a separate netID sharing one base type,
+    and the game ships one sheet per type. Asking by id would request NPC_-65.xnb."""
+    asked = []
+    tab = compendium.CompendiumTab(None, lambda cb, refresh=False: None, lambda _i: None,
+                                   lambda _i: QIcon(), lambda _m: None,
+                                   None,
+                                   lambda t, nid=None: (asked.append((t, nid)),
+                                                        QIcon())[1])
+    tab._fill({"items": [], "npcs": [
+        {"id": -65, "name": "Big Hornet Stingy", "kind": "Monster", "npc": True,
+         "stats": {"type": 235, "life": 45}}]})
+    assert asked == [(235, -65)], "the base type must drive the sheet, the netID the tint"
+
+
+def test_an_item_row_still_uses_the_item_icon(app):
+    asked = []
+    tab = compendium.CompendiumTab(None, lambda cb, refresh=False: None, lambda _i: None,
+                                   lambda i: (asked.append(i), QIcon())[1],
+                                   lambda _m: None, None, lambda _t, _n=None: QIcon())
+    tab._fill({"items": [{"id": 3507, "name": "Zenith", "kind": "Weapon", "stats": {}}],
+               "npcs": []})
+    assert asked == [3507]
+
+
+def test_loading_reports_progress_from_fetch_through_to_the_last_row(app):
+    """The wait is the privileged catalog read plus ~7,000 rows of widgets, and neither
+    was covered: the only progress bar tracked sprite extraction, which is usually
+    already cached and so never appeared at all."""
+    calls = []
+    fetches = []
+    tab = compendium.CompendiumTab(None,
+                                   lambda cb, refresh=False: fetches.append(cb),
+                                   lambda _i: None,
+                                   lambda _i: QIcon(), lambda _m: None, None,
+                                   lambda _t, _n=None: QIcon(),
+                                   lambda text, done=0, total=0: calls.append(
+                                       (text, done, total)))
+    tab.ensure_loaded()
+    assert calls and calls[0][0] and calls[0][2] == 0, "no indeterminate bar during fetch"
+
+    npcs = [{"id": i, "name": f"n{i}", "kind": "Monster", "npc": True,
+             "stats": {"type": 1}} for i in range(1200)]
+    fetches[0]({"items": [], "npcs": npcs})
+
+    counted = [c for c in calls if c[2] > 0]
+    assert counted, "no per-row progress while building"
+    assert counted[-1][1] == counted[-1][2] == 1200, "progress never reached the end"
+    assert calls[-1][0] is None, "the bar was left on screen"
+    assert tab._model.rowCount() == 1200
+
+
+def test_a_failed_fetch_takes_the_progress_bar_down(app):
+    calls = []
+    fetches = []
+    tab = compendium.CompendiumTab(None,
+                                   lambda cb, refresh=False: fetches.append(cb),
+                                   lambda _i: None,
+                                   lambda _i: QIcon(), lambda _m: None, None,
+                                   lambda _t, _n=None: QIcon(),
+                                   lambda text, done=0, total=0: calls.append(
+                                       (text, done, total)))
+    tab.ensure_loaded()
+    fetches[0](None)
+    assert calls[-1][0] is None, "bar stuck on screen after the catalog failed to load"
+
+
+def test_the_rescan_button_clears_the_catalog_and_asks_for_a_fresh_read(app):
+    """Recipes has had 'Re-extract from game' since v0.9; the Compendium's catalog is
+    cached per build the same way and needs the same escape hatch."""
+    seen = []
+    tab = compendium.CompendiumTab(None,
+                                   lambda cb, refresh=False: seen.append((cb, refresh)),
+                                   lambda _i: None, lambda _i: QIcon(), lambda _m: None,
+                                   None, lambda _t, _n=None: QIcon())
+    tab.ensure_loaded()
+    seen[0][0]({"items": [], "npcs": [
+        {"id": 1, "name": "n", "kind": "Monster", "npc": True, "stats": {"type": 1}}]})
+    assert tab._model.rowCount() == 1
+    assert seen[0][1] is False, "the first read should use the cache"
+
+    tab.reload()
+    assert tab._model.rowCount() == 0, "stale rows survived the re-scan"
+    assert tab.kind.count() == 1, "the kind filter kept stale kinds"
+    assert seen[1][1] is True, "re-scan did not ask the game to be re-read"
+    seen[1][0]({"items": [], "npcs": [
+        {"id": 2, "name": "m", "kind": "Boss", "npc": True, "stats": {"type": 2}}]})
+    assert tab._model.rowCount() == 1

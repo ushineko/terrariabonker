@@ -30,7 +30,7 @@ def app():
 @pytest.fixture
 def tab(app):
     spawned = []
-    t = compendium.CompendiumTab(None, lambda cb: None, lambda _i: None,
+    t = compendium.CompendiumTab(None, lambda cb, refresh=False: None, lambda _i: None,
                                  lambda _i: None, lambda _m: None,
                                  lambda nid, dist: spawned.append((nid, dist)))
     t.spawned = spawned

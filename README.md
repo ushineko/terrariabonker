@@ -60,12 +60,17 @@ holds no state; stopping it ends every effect.*
   the running game's `Main.recipe[]` and cached — vanilla Terraria has no such browser.
   The item sprites are decoded from the game's own `Content/Images/*.xnb` (a
   self-contained XNB + LZX decoder, no external tools) into a local, gitignored cache on
-  first use — reconstitutable on any machine from that machine's game files.
+  first use — reconstitutable on any machine from that machine's game files. NPC sprites
+  use the same decoder: their sheets are cropped to a single frame with the game's own
+  frame-count table rather than a guess, the handful laid out as grids rather than strips
+  are cropped to their first cell, and the slimes whose sheets are neutral grey (the game
+  tints them at draw time) are painted with the colour the game would use.
 - **Item & NPC compendium** — a browsable catalog of **every** item in the game (6,195) and
-  every NPC (763), not just the craftable ones. Sortable columns for damage, defense, life
+  every NPC (759), not just the craftable ones. Sortable columns for damage, defense, life
   and rarity; filter by kind (weapon / tool / accessory / armour / potion / block / material,
   and for NPCs boss / town NPC / critter / monster) or by name and ID; each entry shows the
-  game's own tooltip, its sprite, and a link to the official wiki. Items can be given to you;
+  game's own tooltip, its sprite — items and NPCs alike — and a link to the official wiki.
+  Items can be given to you;
   **NPCs can be spawned** beside you at a distance you choose. Neither items' nor NPCs' stats
   exist in `Terraria.exe` at all — they are assigned at runtime by `SetDefaults` — so they are
   read from the game's own template objects in memory and cached per build.
@@ -271,16 +276,17 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   local cache (a few seconds, one-time); **Re-extract from game** regenerates both the
   recipe database and the icons after a game update.
 
-- **Compendium** tab — every item and NPC in one sortable list. Filter by kind or search by
+- **Compendium** tab — every item and NPC in one sortable list, with a **Re-scan from game**
+  button for after a game update. Filter by kind or search by
   name/ID; click a column to sort (damage, defense, rarity, ID). Double-click an entry (or
   press Enter) for its tooltip, stats, a **Wiki** button that opens the official article in
   your browser, and **Give**, which puts the item in your first empty slot. The catalog is
   built on first open by reading the game's item templates — about two seconds — and cached
   per game build under `~/.cache/terrariabonker/`, so reopening the tab is instant. NPC
-  entries show life, damage, defense and their kind, and offer **Spawn** with a distance in
-  tiles (it appears behind you; around 50 clears the screen). Spawning a **boss** asks for
-  confirmation naming it, then counts down five seconds with a Cancel button. NPC sprites are
-  still to come.
+  entries show their **sprite**, life, damage, defense and their kind, and offer **Spawn**
+  with a distance in tiles (it appears behind you; around 50 clears the screen). Spawning a
+  **boss** asks for confirmation naming it, then counts down five seconds with a Cancel
+  button.
 
 The panel reopens at the size you left it (stored under `~/.cache/terrariabonker/`). Its
 on-screen position is remembered by **KWin**, not by the app: under Wayland `QWidget.move()`
@@ -346,8 +352,12 @@ terrariabonker/
 │   ├── prefixes.py             modifier names + per-class applicability + good/bad quality
 │   ├── profile.py              cross-session desired config (cheats + item edits) for auto-restore
 │   ├── recipes.py              recipe extraction (from Main.recipe[]) + browse/search
-│   ├── xnb.py                  self-contained XNB + LZX + Texture2D decoder (item sprites)
-│   ├── sprites.py              item-icon cache (decode Content/Images -> ~/.cache)
+│   ├── xnb.py                  self-contained XNB + LZX + Texture2D decoder (sprites)
+│   ├── sprites.py              item + NPC icon cache (decode Content/Images -> ~/.cache)
+│   ├── npcs.py                 NPC names, field offsets, Main.npc + frame-count lookup
+│   ├── content.py              item/NPC template scan + kind classification
+│   ├── data/npcs.json          NPCID name map (extracted from Terraria.exe)
+│   ├── data/tooltips.json      ItemID tooltip map (extracted from Terraria.exe)
 │   ├── data/items.json         ItemID name map (extracted from Terraria.exe)
 │   ├── data/prefixes.json      modifier-id name map (extracted from Terraria.exe)
 │   ├── data/recipes.json       recipe cache (extracted from the running game)

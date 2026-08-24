@@ -88,8 +88,8 @@ def set_item_argv(slot: int, item_type: int, *, stack=None, damage=None,
     return argv
 
 
-def compendium_argv() -> list[str]:
-    return ["compendium", "--json"]
+def compendium_argv(refresh: bool = False) -> list[str]:
+    return ["compendium", "--json"] + (["--refresh"] if refresh else [])
 
 
 def parse_compendium(raw: str) -> dict | None:

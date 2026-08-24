@@ -22,7 +22,8 @@ from PyQt6.QtGui import (QColor, QFont, QIcon, QPainter, QPixmap, QStandardItem,
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
                              QLabel, QLineEdit, QListView, QMessageBox, QPlainTextEdit,
-                             QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout,
+                             QProgressBar, QPushButton, QScrollArea, QSpinBox,
+                             QTabWidget, QVBoxLayout,
                              QWidget)
 
 from terrariabonker import __version__, names, prefixes, profile, recipes, sprites
@@ -65,6 +66,8 @@ def _cli_args_user(sub_args: list[str]) -> tuple[str, list[str]]:
     return sys.executable, [ENTRY, *sub_args]
 
 
+# Grid rows built between repaints; see _rebuild_recipe_grid.
+GRID_CHUNK = 500
 ROLE_ITEM_ID = int(Qt.ItemDataRole.UserRole)
 ROLE_SEARCH = int(Qt.ItemDataRole.UserRole) + 1
 
@@ -260,10 +263,18 @@ class MainWindow(QWidget):
         self.compendium = CompendiumTab(self, self._fetch_compendium, self._give_item,
                                         self._icon_for,
                                         lambda msg: self.log.appendPlainText(msg),
-                                        self._spawn_npc)
+                                        self._spawn_npc, self._icon_for_npc, self.busy)
         tabs.addTab(self.compendium, "Compendium")
         tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(tabs, 1)
+
+        # Sprite extraction takes ~25s and used to report itself into the Recipes tab's
+        # status label, which is invisible when the Compendium tab triggered it. This sits
+        # under the tabs, so it is visible whichever tab started the work.
+        self.progress = QProgressBar()
+        self.progress.setTextVisible(True)
+        self.progress.setVisible(False)
+        root.addWidget(self.progress)
 
         self.log = QPlainTextEdit(readOnly=True)
         self.log.setMaximumBlockCount(500)
@@ -361,15 +372,32 @@ class MainWindow(QWidget):
         b.clicked.connect(lambda _=False, s=slot: self._on_cell_clicked(s))
         return b
 
-    def _fetch_compendium(self, done):
+    def _fetch_compendium(self, done, refresh: bool = False):
         """Hand the catalog to the tab when it arrives; None if the command failed."""
         def got(raw):
             done(client.parse_compendium(raw))
 
-        self._call(client.compendium_argv(), on_output=got)
+        self._call(client.compendium_argv(refresh), on_output=got)
 
     def _give_item(self, item_id: int):
         self._run(client.give_argv(item_id, 1))
+
+    def busy(self, text: str | None, done: int = 0, total: int = 0) -> None:
+        """Drive the shared progress bar. ``text=None`` hides it.
+
+        ``total=0`` means "no idea how long", which Qt renders as a moving bar. Shared
+        rather than per-tab because the work it covers — a privileged catalog read, a
+        sprite extraction — is started by one tab and blocks all of them.
+        """
+        if text is None:
+            self.progress.setVisible(False)
+            self.progress.setRange(0, 100)
+            return
+        self.progress.setRange(0, max(total, 0))
+        if total:
+            self.progress.setValue(done)
+        self.progress.setFormat(f"{text} %p%" if total else text)
+        self.progress.setVisible(True)
 
     def _spawn_npc(self, net_id: int, distance: int):
         self._run(client.spawn_npc_argv(net_id, distance))
@@ -1000,6 +1028,33 @@ class MainWindow(QWidget):
             self._pixmap_cache[item_id] = pm
         return pm
 
+    def _icon_for_npc(self, npc_type: int, net_id: int | None = None) -> QIcon:
+        """NPC sprites live in the same cache under their own name, so they get their own
+        cache key too — an NPC type and an item id are different things with the same
+        small integers.
+
+        A tinted variant is preferred where one exists: every coloured slime shares one
+        neutral sheet and is told apart only by its netID's tint.
+        """
+        key = ("npc", npc_type, net_id)
+        ic = self._icon_cache.get(key)
+        if ic is not None:
+            return ic
+        pm = QPixmap()
+        if net_id is not None:
+            pm = QPixmap(sprites.npc_tinted_icon_path(net_id))
+        if pm.isNull():
+            pm = QPixmap(sprites.npc_icon_path(npc_type))
+        if pm.isNull():
+            ic = self._placeholder()
+        else:
+            if pm.width() > 40 or pm.height() > 40:
+                pm = pm.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio,
+                               Qt.TransformationMode.SmoothTransformation)
+            ic = QIcon(pm)
+        self._icon_cache[key] = ic
+        return ic
+
     def _icon_for(self, item_id: int) -> QIcon:
         ic = self._icon_cache.get(item_id)
         if ic is not None:
@@ -1071,17 +1126,28 @@ class MainWindow(QWidget):
             return
         mode = self.recipe_mode.currentText()
         self._recipe_src_model.clear()
-        rows = []
-        for i in self._recipe_item_ids(mode):
-            label = names.label(i)
-            it = QStandardItem(self._icon_for(i), invgrid.abbrev(label))   # truncate; full
-            it.setEditable(False)                                          # name on hover
-            it.setToolTip(f"{label}  (#{i})")
-            it.setData(i, ROLE_ITEM_ID)
-            it.setData(f"{label.lower()} #{i}", ROLE_SEARCH)               # filter on full
-            it.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-            rows.append(it)
-        self._recipe_src_model.invisibleRootItem().appendRows(rows)   # one batch insert
+        ids = list(self._recipe_item_ids(mode))
+        root = self._recipe_src_model.invisibleRootItem()
+        # Built in slices for the same reason the compendium is: a few thousand icons in
+        # one go freezes the window, and a frozen window cannot paint a progress bar.
+        for start in range(0, len(ids), GRID_CHUNK):
+            rows = []
+            for i in ids[start:start + GRID_CHUNK]:
+                label = names.label(i)
+                it = QStandardItem(self._icon_for(i), invgrid.abbrev(label))  # truncate;
+                it.setEditable(False)                                         # full on hover
+                it.setToolTip(f"{label}  (#{i})")
+                it.setData(i, ROLE_ITEM_ID)
+                it.setData(f"{label.lower()} #{i}", ROLE_SEARCH)      # filter on the full
+                it.setTextAlignment(Qt.AlignmentFlag.AlignHCenter
+                                    | Qt.AlignmentFlag.AlignTop)
+                rows.append(it)
+            root.appendRows(rows)                                    # batch insert a slice
+            if len(ids) > GRID_CHUNK:
+                self.busy("Building the recipe grid…",
+                          min(start + GRID_CHUNK, len(ids)), len(ids))
+                QApplication.processEvents()
+        self.busy(None)
         self._filter_recipe_grid()
 
     def _filter_recipe_grid(self, *_):
@@ -1126,15 +1192,23 @@ class MainWindow(QWidget):
         if self._sprites_extracting:                 # one extraction at a time
             return
         self._sprites_extracting = True
-        self.recipe_status.setText("Extracting item icons (one-time, ~15s)…")
+        self.recipe_status.setText("Extracting sprites (one-time, ~25s)…")
         self.log.appendPlainText("$ terrariabonker extract-sprites")
 
+        self.busy("Extracting sprites…")             # until the first count arrives
+
         def prog(line):
-            if "/" in line and line.split("/", 1)[0].isdigit():
-                self.recipe_status.setText(f"Extracting item icons… {line}")
+            if "/" not in line:
+                return
+            head, _, tail = line.partition("/")
+            if not (head.isdigit() and tail.isdigit()):
+                return
+            self.busy("Extracting sprites…", int(head), int(tail))
+            self.recipe_status.setText(f"Extracting sprites… {line}")
 
         def done(_out):
             self._sprites_extracting = False
+            self.busy(None)
             self._invalidate_icons()                 # drop placeholders + force a full redraw
             self._recipe_status_hint()
             if after:

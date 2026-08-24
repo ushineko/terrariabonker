@@ -28,9 +28,9 @@ from terrariabonker.inventory import (ITEM_ACCESSORY, ITEM_BODY_SLOT, ITEM_BUFF_
                                       ITEM_HEAL_MANA, ITEM_LEG_SLOT, ITEM_MAGIC, ITEM_MELEE,
                                       ITEM_PICK, ITEM_RANGED, ITEM_RARE, ITEM_SUMMON,
                                       ITEM_TYPE, ITEM_USE_TIME)
-from terrariabonker.npcs import (MAX_NPC_TYPE, NPC_BOSS, NPC_DAMAGE, NPC_DEFENSE,
-                                 NPC_HEIGHT, NPC_LIFE_MAX, NPC_NET_ID, NPC_OBJECT_SIZE,
-                                 NPC_TOWN, NPC_TYPE, NPC_WIDTH)
+from terrariabonker.npcs import (MAX_NPC_TYPE, NPC_BOSS, NPC_COLOR, NPC_DAMAGE,
+                                 NPC_DEFENSE, NPC_HEIGHT, NPC_LIFE_MAX, NPC_NET_ID,
+                                 NPC_OBJECT_SIZE, NPC_TOWN, NPC_TYPE, NPC_WIDTH)
 from terrariabonker.recipes import ITEM_CREATE_TILE
 
 # Addresses further apart than this start a new run. Chosen from live data: it merges the
@@ -147,6 +147,8 @@ def _read_npc_stats(buf: bytes, off: int) -> dict:
         "height": i32(NPC_HEIGHT),
         "boss": bool(buf[off + NPC_BOSS]),
         "town": bool(buf[off + NPC_TOWN]),
+        # The tint the game paints a neutral sheet with; (0,0,0,0) means "no tint".
+        "color": list(buf[off + NPC_COLOR: off + NPC_COLOR + 4]),
     }
 
 

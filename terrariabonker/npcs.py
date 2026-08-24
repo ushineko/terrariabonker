@@ -28,6 +28,10 @@ NPC_LIFE_MAX = 0x170
 NPC_BOSS = 0x1CC        # byte bool
 NPC_NET_ID = 0x1E8      # type, but negative for variant entries; keys ContentSamples
 NPC_TOWN = 0x214        # byte bool (townNPC)
+NPC_COLOR = 0x1A8       # packed RGBA the game tints the sheet with, mostly for slimes:
+#                         a Blue Slime's sheet is neutral grey and this field holds
+#                         (0, 80, 255, 100), exactly vanilla's Color(0, 80, 255, 100).
+#                         Non-zero on only 22 of 773 templates.
 NPC_ACTIVE = 0x1CB      # byte bool, packed next to `boss`. Confirmed two ways: clear in
 #                         all 647 ContentSamples templates, and set on exactly the live
 #                         Main.npc slots (the one exception was a despawned Squirrel that
@@ -52,6 +56,13 @@ MAX_NPC_TYPE = 2000      # sanity bound on a plausible NPCID (the game uses up t
 # ``maxNPCs + 1`` long, and a wrong offset is far more likely to miss that than to hit it.
 MAIN_NPC_OFF = 0x9B0
 MAX_NPCS = 200
+
+# Main.npcFrameCount: how many animation frames each type's sprite sheet holds. The sheets
+# are vertical strips of equal frames, so this is the only exact way to crop one to its
+# first frame — the item de-animator guesses from the shape and gets the wide NPCs wrong
+# (Blue Slime is 32x52 and really two frames of 26; Moon Lord is 573x804 and really one).
+MAIN_NPC_FRAME_COUNT_OFF = 0xC34
+MAX_NPC_FRAMES = 64          # sanity bound; the largest vanilla count is well under this
 
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "npcs.json")
 
@@ -142,3 +153,45 @@ def find_npc_vtable(mem) -> int | None:
     """The shared mono vtable of NPC objects, the entry point for the template scan."""
     arr = find_npc_array(mem)
     return npc_vtable_of(mem, arr) if arr else None
+
+
+def read_frame_counts(mem) -> dict[int, int]:
+    """``{type: frame count}`` from ``Main.npcFrameCount``, or ``{}``.
+
+    Validated the same way ``find_npc_array`` is, and for the same reason: the offset is a
+    build constant, so it is checked rather than trusted. A plausible array is one whose
+    length covers the NPC types and whose values are all small non-negative counts.
+    """
+    from terrariabonker.inventory import ARR_DATA_OFF, ARR_LEN_OFF
+    from terrariabonker.locate import main_static_base
+
+    base = main_static_base(mem)
+    if base is None:
+        return {}
+
+    def counts_at(ptr):
+        if not ptr or not (0x10000 < ptr < 0xFFFFFFF0):
+            return None
+        n = mem.read_i32(ptr + ARR_LEN_OFF)
+        if n is None or not (256 <= n <= 4000):
+            return None
+        blob = mem.read(ptr + ARR_DATA_OFF, n * 4)
+        if len(blob) < n * 4:
+            return None
+        vals = [int.from_bytes(blob[i * 4:i * 4 + 4], "little", signed=True)
+                for i in range(n)]
+        if not all(0 <= v <= MAX_NPC_FRAMES for v in vals):
+            return None
+        if not any(v > 1 for v in vals):      # an all-ones array is not this one
+            return None
+        return {i: v for i, v in enumerate(vals) if v > 0}
+
+    got = counts_at(mem.read_u32(base + MAIN_NPC_FRAME_COUNT_OFF))
+    if got:
+        return got
+    blob = mem.read(base, 0x4000)
+    for off in range(0, len(blob) - 4, 4):
+        got = counts_at(int.from_bytes(blob[off:off + 4], "little"))
+        if got:
+            return got
+    return {}

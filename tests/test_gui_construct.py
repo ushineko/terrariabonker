@@ -73,3 +73,37 @@ def test_code_patches_are_split_into_section_tabs(app, monkeypatch):
         assert pages == [name for name, _members in SECTIONS]
     finally:
         w.close()
+
+
+def test_extraction_reports_through_a_progress_bar(app, monkeypatch):
+    """The status text used to go to the Recipes tab's label, which is invisible when the
+    Compendium tab is what triggered the extraction."""
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
+    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    captured = {}
+    monkeypatch.setattr(
+        mw.MainWindow, "_spawn_user",
+        lambda self, argv, on_output=None, on_progress=None: captured.update(
+            on_progress=on_progress, on_output=on_output))
+
+    w = mw.MainWindow()
+    try:
+        _check_progress(w, captured)
+    finally:
+        w.close()
+
+
+def _check_progress(w, captured):
+    assert w.progress.isHidden(), "progress bar showing before anything runs"
+    w._extract_sprites()
+
+    assert not w.progress.isHidden(), "no progress bar while extracting"
+    captured["on_progress"]("120/6892")
+    assert w.progress.maximum() == 6892 and w.progress.value() == 120
+    captured["on_progress"]("not a count")          # must not throw or reset
+    assert w.progress.value() == 120
+    captured["on_output"]("[OK] done")
+    assert w.progress.isHidden(), "progress bar left on screen after extraction"

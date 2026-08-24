@@ -457,7 +457,7 @@ class Service:
         return {"slot": slot, "id": net_id, "name": npc_mod.label(net_id),
                 "x": x / 16.0, "y": py / 16.0, "tiles_away": distance_tiles}
 
-    def compendium(self) -> dict:
+    def compendium(self, refresh: bool = False) -> dict:
         """The full catalog: every item with its stats and kind, plus every NPC name.
 
         Item stats come from the game's own template objects (see ``content``), which needs
@@ -467,7 +467,7 @@ class Service:
         arrives with the spawn work.
         """
         from terrariabonker import content, names, npcs
-        stats = self._item_template_cache()
+        stats = self._item_template_cache(refresh)
         items = []
         for tid, name in sorted(names.all_names().items()):
             st = stats.get(tid)
@@ -476,7 +476,8 @@ class Service:
                 "tooltip": names.tooltip(tid), "stats": st or {},
                 "wiki": content.wiki_url(name),
             })
-        npc_stats = self._npc_template_cache()
+        npc_stats = self._npc_template_cache(refresh)
+        self._publish_npc_draw_data(npc_stats)
         npc_list = []
         for nid, nm in sorted(npcs.all_names().items()):
             st = npc_stats.get(nid)
@@ -487,7 +488,29 @@ class Service:
             })
         return {"items": items, "npcs": npc_list, "build": self.build_key()}
 
-    def _npc_template_cache(self) -> dict[int, dict]:
+    def _publish_npc_draw_data(self, npc_stats: dict) -> None:
+        """Hand the sprite extractor what only this side can read.
+
+        ``Main.npcFrameCount`` and ``NPC.color`` live in the game's memory; extraction runs
+        without sudo. Written through the same give-back-to-the-user path as the caches,
+        for the same reason.
+
+        The tints are keyed by netID rather than type on purpose: every coloured slime
+        shares one neutral sheet and differs only by this colour.
+        """
+        from terrariabonker import npcs as npc_mod
+        from terrariabonker import proc, sprites
+
+        counts = npc_mod.read_frame_counts(self.mem)
+        if not counts:
+            return
+        tints = {nid: {"type": st["type"], "color": st["color"]}
+                 for nid, st in npc_stats.items()
+                 if any(st.get("color") or ())}
+        sprites.save_npc_draw_data(counts, tints)
+        proc.give_back_to_user(sprites._NPC_FRAMES_FILE)
+
+    def _npc_template_cache(self, refresh: bool = False) -> dict[int, dict]:
         """``{net_id: stats}`` for every NPC, cached per build like the item templates."""
         from terrariabonker import content, npcs
 
@@ -495,26 +518,28 @@ class Service:
             vt = npcs.find_npc_vtable(self.mem)
             return content.find_npc_templates(self.mem, vt) if vt else {}
 
-        return self._template_cache("npcs", scan)
+        return self._template_cache("npcs", scan, refresh)
 
-    def _item_template_cache(self) -> dict[int, dict]:
+    def _item_template_cache(self, refresh: bool = False) -> dict[int, dict]:
         from terrariabonker import content
 
         return self._template_cache(
-            "templates", lambda: content.find_item_templates(self.mem, self._item_vtable()))
+            "templates",
+            lambda: content.find_item_templates(self.mem, self._item_vtable()), refresh)
 
-    def _template_cache(self, kind: str, scan) -> dict[int, dict]:
+    def _template_cache(self, kind: str, scan, refresh: bool = False) -> dict[int, dict]:
         import json
         import os
 
         from terrariabonker import proc
         path = os.path.expanduser("~/.cache/terrariabonker/%s-%s.json"
                                   % (kind, self.build_key().replace("+", "-")))
-        try:
-            with open(path) as f:
-                return {int(k): v for k, v in json.load(f).items()}
-        except (OSError, ValueError):
-            pass
+        if not refresh:
+            try:
+                with open(path) as f:
+                    return {int(k): v for k, v in json.load(f).items()}
+            except (OSError, ValueError):
+                pass
         found = scan()
         try:
             cache_dir = os.path.dirname(path)
