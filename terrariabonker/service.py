@@ -364,6 +364,99 @@ class Service:
             inv.set_stack(empty, stack)
         return empty
 
+    # --- NPC spawning ------------------------------------------------------
+    def _npc_template_block(self, net_id: int) -> bytes | None:
+        """The ContentSamples template object for one netID, whole.
+
+        Rescanned rather than cached by address, for the same reason `_template_block`
+        is: the managed heap is collected, so a remembered address stops being the object
+        it was. The parsed-stats cache is a different thing and stays valid, because it
+        holds numbers rather than addresses.
+        """
+        import numpy as np
+
+        from terrariabonker import npcs as npc_mod
+        vt = npc_mod.find_npc_vtable(self.mem)
+        if vt is None:
+            return None
+        span = npc_mod.NPC_OBJECT_SIZE
+        best = None
+        for start, end in self.mem.regions():
+            buf = self.mem.read(start, end - start)
+            n = len(buf) // 4
+            if n < 1:
+                continue
+            arr = np.frombuffer(buf[: n * 4], dtype=np.uint32)
+            for idx in np.where(arr == vt)[0].tolist():
+                off = idx * 4
+                if off + span > len(buf):
+                    continue
+                nid = int.from_bytes(buf[off + npc_mod.NPC_NET_ID:
+                                         off + npc_mod.NPC_NET_ID + 4], "little",
+                                     signed=True)
+                # A template is inactive; a live NPC of the same type is not, and its
+                # stats have been scaled by the world's difficulty.
+                if nid == net_id and buf[off + npc_mod.NPC_ACTIVE] == 0:
+                    best = buf[off:off + span]
+        return best
+
+    def _free_npc_slot(self, arr: int) -> tuple[int, int] | None:
+        """``(index, object address)`` of an unused Main.npc slot, or None if full."""
+        from terrariabonker import npcs as npc_mod
+        from terrariabonker.inventory import ARR_DATA_OFF
+
+        for i in range(npc_mod.MAX_NPCS):
+            obj = self.mem.read_u32(arr + ARR_DATA_OFF + i * 4)
+            if obj and self.mem.read(obj + npc_mod.NPC_ACTIVE, 1) == b"\x00":
+                return i, obj
+        return None
+
+    def spawn_npc(self, net_id: int, distance_tiles: int = 25) -> dict:
+        """Spawn an NPC beside the player by copying its template into a free slot.
+
+        This is `give_item`'s trick one level up: the game keeps a fully-populated
+        template of every NPC, and every Main.npc slot is a real NPC object allocated at
+        world load, so a spawn is a field copy plus a position — no code injection, no
+        managed call, nothing to record in the build ledger.
+
+        `active` is written last, on purpose: until it is set the game skips the slot
+        entirely, so it never sees a half-built NPC.
+        """
+        import struct
+
+        from terrariabonker import npcs as npc_mod
+        from terrariabonker.locate import STATLIFE_FROM_OBJ
+
+        player = self.live_block()
+        arr = npc_mod.find_npc_array(self.mem)
+        if arr is None:
+            raise ServiceError("could not find Main.npc — is a world loaded?")
+        block = self._npc_template_block(net_id)
+        if block is None:
+            raise ServiceError(f"no template for NPC {net_id} ({npc_mod.label(net_id)})")
+        free = self._free_npc_slot(arr)
+        if free is None:
+            raise ServiceError("no free NPC slot — the world is at its NPC limit")
+        slot, obj = free
+
+        base = player.life_addr - STATLIFE_FROM_OBJ
+        px, py = struct.unpack("<ff", self.mem.read(base + npc_mod.NPC_POSITION_X, 8))
+        facing = self.mem.read_i32(base + 0x2C) or 1
+        # Behind the player, so a spawn never lands on top of them. Clamped away from the
+        # world edge, where a negative coordinate would put the NPC outside the map.
+        x = max(100.0 * 16, px - facing * distance_tiles * 16.0)
+
+        for lo, hi in npc_mod.NPC_COPY_SPANS:
+            self.mem.write(obj + lo, block[lo:hi])
+        self.mem.write(obj + npc_mod.NPC_WHO_AMI, struct.pack("<i", slot))
+        self.mem.write(obj + npc_mod.NPC_POSITION_X, struct.pack("<ff", x, py))
+        self.mem.write(obj + npc_mod.NPC_OLD_POSITION_X, struct.pack("<ff", x, py))
+        self.mem.write(obj + npc_mod.NPC_VELOCITY_X, struct.pack("<ffff", 0, 0, 0, 0))
+        self.mem.write(obj + npc_mod.NPC_ACTIVE, b"\x01")
+
+        return {"slot": slot, "id": net_id, "name": npc_mod.label(net_id),
+                "x": x / 16.0, "y": py / 16.0, "tiles_away": distance_tiles}
+
     def compendium(self) -> dict:
         """The full catalog: every item with its stats and kind, plus every NPC name.
 
@@ -383,23 +476,46 @@ class Service:
                 "tooltip": names.tooltip(tid), "stats": st or {},
                 "wiki": content.wiki_url(name),
             })
-        npc_list = [{"id": nid, "name": nm, "kind": "NPC", "wiki": content.wiki_url(nm)}
-                    for nid, nm in sorted(npcs.all_names().items())]
+        npc_stats = self._npc_template_cache()
+        npc_list = []
+        for nid, nm in sorted(npcs.all_names().items()):
+            st = npc_stats.get(nid)
+            npc_list.append({
+                "id": nid, "name": nm, "npc": True,
+                "kind": content.npc_kind(st) if st else "NPC",
+                "stats": st or {}, "wiki": content.wiki_url(nm),
+            })
         return {"items": items, "npcs": npc_list, "build": self.build_key()}
 
+    def _npc_template_cache(self) -> dict[int, dict]:
+        """``{net_id: stats}`` for every NPC, cached per build like the item templates."""
+        from terrariabonker import content, npcs
+
+        def scan():
+            vt = npcs.find_npc_vtable(self.mem)
+            return content.find_npc_templates(self.mem, vt) if vt else {}
+
+        return self._template_cache("npcs", scan)
+
     def _item_template_cache(self) -> dict[int, dict]:
+        from terrariabonker import content
+
+        return self._template_cache(
+            "templates", lambda: content.find_item_templates(self.mem, self._item_vtable()))
+
+    def _template_cache(self, kind: str, scan) -> dict[int, dict]:
         import json
         import os
 
-        from terrariabonker import content, proc
-        path = os.path.expanduser("~/.cache/terrariabonker/templates-%s.json"
-                                  % self.build_key().replace("+", "-"))
+        from terrariabonker import proc
+        path = os.path.expanduser("~/.cache/terrariabonker/%s-%s.json"
+                                  % (kind, self.build_key().replace("+", "-")))
         try:
             with open(path) as f:
                 return {int(k): v for k, v in json.load(f).items()}
         except (OSError, ValueError):
             pass
-        found = content.find_item_templates(self.mem, self._item_vtable())
+        found = scan()
         try:
             cache_dir = os.path.dirname(path)
             os.makedirs(cache_dir, exist_ok=True)

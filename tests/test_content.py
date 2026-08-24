@@ -109,9 +109,21 @@ def test_kind_block_then_material():
 
 
 def test_npc_kind():
-    assert content.npc_kind({"boss": True, "town": True}) == "Boss"
-    assert content.npc_kind({"town": True}) == "Town NPC"
-    assert content.npc_kind({}) == "Monster"
+    """The ladder is most-specific first: a boss that is also flagged town is a boss."""
+    assert content.npc_kind({"boss": True, "town": True, "damage": 40}) == "Boss"
+    assert content.npc_kind({"town": True, "damage": 10}) == "Town NPC"
+    assert content.npc_kind({"damage": 14}) == "Monster"
+
+
+def test_a_damageless_npc_is_a_critter():
+    """Bunnies and birds carry 5 life and 0 damage; nothing on the template says critter."""
+    assert content.npc_kind({"damage": 0, "life": 5}) == "Critter"
+    assert content.npc_kind({}) == "Critter"
+
+
+def test_a_town_npc_is_never_a_critter_despite_dealing_damage():
+    """Town NPCs deal damage, so the critter test must sit below the town test."""
+    assert content.npc_kind({"town": True, "damage": 0}) == "Town NPC"
 
 
 def test_wiki_url_uses_the_official_wiki_and_underscores():

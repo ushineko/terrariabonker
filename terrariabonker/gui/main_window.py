@@ -259,7 +259,8 @@ class MainWindow(QWidget):
         # self.log.appendPlainText here (which would resolve it now, and fail).
         self.compendium = CompendiumTab(self, self._fetch_compendium, self._give_item,
                                         self._icon_for,
-                                        lambda msg: self.log.appendPlainText(msg))
+                                        lambda msg: self.log.appendPlainText(msg),
+                                        self._spawn_npc)
         tabs.addTab(self.compendium, "Compendium")
         tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(tabs, 1)
@@ -369,6 +370,9 @@ class MainWindow(QWidget):
 
     def _give_item(self, item_id: int):
         self._run(client.give_argv(item_id, 1))
+
+    def _spawn_npc(self, net_id: int, distance: int):
+        self._run(client.spawn_npc_argv(net_id, distance))
 
     def _on_tab_changed(self, i: int):
         if i == 3:

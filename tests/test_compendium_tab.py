@@ -14,14 +14,15 @@ pytest.importorskip("PyQt6.QtWidgets")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtGui import QIcon                              # noqa: E402
-from PyQt6.QtWidgets import QApplication                   # noqa: E402
+from PyQt6.QtWidgets import QApplication, QPushButton      # noqa: E402
 
 from terrariabonker.gui import compendium                   # noqa: E402
 
 CATALOG = {
     "items": [{"id": 54, "name": "Hermes Boots", "kind": "Accessory", "tooltip": "fast",
                "stats": {"rare": 1}, "wiki": "https://example.invalid/Hermes_Boots"}],
-    "npcs": [{"id": 4, "name": "Eye of Cthulhu", "kind": "NPC", "wiki": ""}],
+    "npcs": [{"id": 4, "name": "Eye of Cthulhu", "kind": "Boss", "npc": True,
+              "stats": {"life": 2800, "damage": 15, "defense": 12}, "wiki": ""}],
 }
 
 
@@ -57,7 +58,7 @@ def test_rows_carry_name_kind_stats_and_id(tab):
 
 
 def test_kind_filter_narrows_the_list(tab):
-    tab._proxy.set_kind("NPC")
+    tab._proxy.set_kind("Boss")          # a real NPC kind, not the phase 1 placeholder
     assert tab._proxy.rowCount() == 1
     tab._proxy.set_kind(compendium.ALL_KINDS)
     assert tab._proxy.rowCount() == 2
@@ -111,3 +112,29 @@ def test_numeric_headers_are_right_aligned_like_their_values(tab):
         align = tab._model.headerData(col, Qt.Orientation.Horizontal,
                                       Qt.ItemDataRole.TextAlignmentRole)
         assert align & Qt.AlignmentFlag.AlignRight, compendium.COLUMNS[col]
+
+
+def test_give_is_offered_for_items_and_withheld_from_npcs(app):
+    """The NPC test must not key on the kind string: real kinds are Boss/Monster/…"""
+    from terrariabonker.gui.compendium import EntryDialog
+
+    item = {"id": 3507, "name": "Zenith", "kind": "Weapon", "stats": {"damage": 190}}
+    npc = {"id": 4, "name": "Eye of Cthulhu", "kind": "Boss", "npc": True,
+           "stats": {"life": 2800}}
+
+    def buttons(entry):
+        dlg = EntryDialog(None, entry, None, lambda _i: None)
+        return {b.text() for b in dlg.findChildren(QPushButton)}
+
+    assert "Give" in buttons(item)
+    assert "Give" not in buttons(npc), "an NPC cannot be put in the inventory"
+
+
+def test_the_kind_dropdown_widens_for_kinds_added_after_it_is_shown(app):
+    """The catalog loads lazily, so Qt's adjust-on-first-show left every kind truncated."""
+    tab = compendium.CompendiumTab(None, lambda cb: None, lambda _i: None,
+                                   lambda _i: QIcon(), lambda _m: None)
+    narrow = tab.kind.sizeHint().width()
+    tab._fill({"items": [], "npcs": [
+        {"id": 1, "name": "x", "kind": "A Very Long Kind Label", "npc": True, "stats": {}}]})
+    assert tab.kind.sizeHint().width() > narrow, "the dropdown did not grow to fit"

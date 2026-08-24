@@ -159,7 +159,7 @@ def cmd_set_item(args) -> int:
 SERVE_OPS = frozenset({
     "status", "version", "inventory", "inv", "set-hp", "set-max-hp", "set-mana",
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
-    "fast-mining", "long-reach", "compendium",
+    "fast-mining", "long-reach", "compendium", "spawn-npc",
 })
 
 
@@ -242,6 +242,18 @@ def cmd_compendium(args) -> int:
     svc = _svc()
     cat = svc.compendium()
     print(json.dumps(cat))
+    return 0
+
+
+def cmd_spawn_npc(args) -> int:
+    svc = _svc(guard=True, force=args.force)
+    got = svc.spawn_npc(args.id, args.distance)
+    if args.json:
+        print(json.dumps(got))
+    else:
+        print(f"spawned {got['name']} (#{got['id']}) in slot {got['slot']} "
+              f"at tile ({got['x']:.0f}, {got['y']:.0f}), "
+              f"{got['tiles_away']} tiles from you")
     return 0
 
 
@@ -491,6 +503,15 @@ def build_parser() -> argparse.ArgumentParser:
                        help="dump the full item/NPC catalog as JSON (for the GUI tab)")
     p.add_argument("--json", action="store_true", help="machine-readable (always on)")
     p.set_defaults(func=cmd_compendium)
+
+    p = sub.add_parser("spawn-npc", help="spawn an NPC beside the player")
+    p.add_argument("id", type=int, help="NPCID (netID; negatives are the variants)")
+    p.add_argument("--distance", type=int, default=25,
+                   help="tiles behind the player to place it (default 25)")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true",
+                   help="run even when the build is not the verified one")
+    p.set_defaults(func=cmd_spawn_npc)
 
     p = sub.add_parser("give", help="give an item into the first empty inventory slot")
     p.add_argument("type", type=int, help="ItemID")

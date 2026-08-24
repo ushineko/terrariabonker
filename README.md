@@ -61,13 +61,18 @@ holds no state; stopping it ends every effect.*
   The item sprites are decoded from the game's own `Content/Images/*.xnb` (a
   self-contained XNB + LZX decoder, no external tools) into a local, gitignored cache on
   first use — reconstitutable on any machine from that machine's game files.
-- **Item compendium** — a browsable catalog of **every** item in the game (6,195) and every
-  NPC name (763), not just the craftable ones. Sortable columns for damage, defense and
-  rarity; filter by kind (weapon / tool / accessory / armour / potion / block / material)
-  or by name and ID; each entry shows the game's own tooltip, its sprite, and a link to the
-  official wiki, and can be given to you. Item stats do not exist in `Terraria.exe` at all —
-  they are assigned at runtime by `Item.SetDefaults` — so they are read from the game's own
-  template objects in memory and cached per build.
+- **Item & NPC compendium** — a browsable catalog of **every** item in the game (6,195) and
+  every NPC (763), not just the craftable ones. Sortable columns for damage, defense, life
+  and rarity; filter by kind (weapon / tool / accessory / armour / potion / block / material,
+  and for NPCs boss / town NPC / critter / monster) or by name and ID; each entry shows the
+  game's own tooltip, its sprite, and a link to the official wiki. Items can be given to you;
+  **NPCs can be spawned** beside you at a distance you choose. Neither items' nor NPCs' stats
+  exist in `Terraria.exe` at all — they are assigned at runtime by `SetDefaults` — so they are
+  read from the game's own template objects in memory and cached per build.
+- **NPC spawning without code patching** — spawning copies the game's own template of an NPC
+  over an unused `Main.npc` slot, the same trick that has given fully-statted items since
+  v0.2.2. No JIT patching, no code cave. **Bosses are gated twice**: a confirmation naming the
+  boss, then a five-second countdown you can still cancel.
 - **Code-patch cheats** — global mining speed, item-independent placement reach,
   fast placement, **unified tool/interaction reach** (mining, tool use, chests,
   signs, and crafting-station range all extend together), **item pickup range**
@@ -272,7 +277,10 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   your browser, and **Give**, which puts the item in your first empty slot. The catalog is
   built on first open by reading the game's item templates — about two seconds — and cached
   per game build under `~/.cache/terrariabonker/`, so reopening the tab is instant. NPC
-  entries currently list names only; their stats, sprites and spawning are still to come.
+  entries show life, damage, defense and their kind, and offer **Spawn** with a distance in
+  tiles (it appears behind you; around 50 clears the screen). Spawning a **boss** asks for
+  confirmation naming it, then counts down five seconds with a Cancel button. NPC sprites are
+  still to come.
 
 The panel reopens at the size you left it (stored under `~/.cache/terrariabonker/`). Its
 on-screen position is remembered by **KWin**, not by the app: under Wayland `QWidget.move()`

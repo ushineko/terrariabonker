@@ -28,12 +28,42 @@ def test_unprivileged_runs_never_chown(monkeypatch, chowns):
     assert chowns == []
 
 
-def test_root_under_sudo_hands_the_file_back(monkeypatch, chowns):
+@pytest.fixture
+def home_of(monkeypatch):
+    """Point the SUDO_UID lookup at a chosen home directory."""
+    import pwd
+
+    def use(path):
+        monkeypatch.setattr(pwd, "getpwuid",
+                            lambda _uid: type("P", (), {"pw_dir": path})())
+    return use
+
+
+def test_root_under_sudo_hands_the_file_back(monkeypatch, chowns, home_of, tmp_path):
+    home = tmp_path / "u"
+    (home / ".cache" / "terrariabonker").mkdir(parents=True)
+    target = home / ".cache" / "terrariabonker" / "templates-x.json"
+    target.write_text("{}")
+    home_of(str(home))
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.setenv("SUDO_UID", "1000")
     monkeypatch.setenv("SUDO_GID", "1001")
-    proc.give_back_to_user("/home/u/.cache/terrariabonker/templates-x.json")
-    assert chowns == [("/home/u/.cache/terrariabonker/templates-x.json", 1000, 1001)]
+    proc.give_back_to_user(str(target))
+    assert chowns == [(str(target), 1000, 1001)]
+
+
+def test_a_path_outside_the_users_home_is_left_alone(monkeypatch, chowns, home_of,
+                                                     tmp_path):
+    """Without ``sudo -E`` the cache lands under /root; handing that over would widen
+    write access to a path inside root's home rather than fix anything."""
+    home = tmp_path / "u"
+    home.mkdir()
+    home_of(str(home))
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1001")
+    proc.give_back_to_user("/root/.cache/terrariabonker/templates-x.json")
+    assert chowns == []
 
 
 def test_a_real_root_shell_is_left_alone(monkeypatch, chowns):
@@ -68,22 +98,40 @@ def test_a_chown_failure_is_not_an_error(monkeypatch):
 
 def test_the_template_cache_write_hands_back_both_dir_and_file(monkeypatch, tmp_path):
     """The write path itself must call it — the helper is useless if nothing invokes it."""
-    from terrariabonker import content, proc as proc_mod, service
+    from terrariabonker import proc as proc_mod, service
 
     handed = []
     monkeypatch.setattr(proc_mod, "give_back_to_user", handed.append)
-    monkeypatch.setattr(content, "find_item_templates", lambda _mem, _vt: {1: {"type": 1}})
     monkeypatch.setenv("HOME", str(tmp_path))
 
     class FakeService:
-        mem = None
         build_key = staticmethod(lambda: "1.4.5.7+24893155")
-        _item_vtable = staticmethod(lambda: 0xABCD)
 
-    got = service.Service._item_template_cache(FakeService())
+    got = service.Service._template_cache(FakeService(), "templates", lambda: {1: {"type": 1}})
 
     assert got == {1: {"type": 1}}
     cache_dir = tmp_path / ".cache" / "terrariabonker"
     expected = str(cache_dir / "templates-1.4.5.7-24893155.json")
     assert handed == [str(cache_dir), expected]
     assert os.path.exists(expected)
+
+
+def test_items_and_npcs_cache_to_different_files(monkeypatch, tmp_path):
+    """Both catalogs are keyed by build; only the kind keeps them apart."""
+    from terrariabonker import proc as proc_mod, service
+
+    monkeypatch.setattr(proc_mod, "give_back_to_user", lambda _p: None)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    class FakeService:
+        build_key = staticmethod(lambda: "1.4.5.7+24893155")
+
+    service.Service._template_cache(FakeService(), "templates", lambda: {1: {"type": 1}})
+    service.Service._template_cache(FakeService(), "npcs", lambda: {2: {"type": 2}})
+
+    cache_dir = tmp_path / ".cache" / "terrariabonker"
+    assert sorted(p.name for p in cache_dir.iterdir()) == [
+        "npcs-1.4.5.7-24893155.json", "templates-1.4.5.7-24893155.json"]
+    # and a second read comes back from the file, not the scan
+    boom = lambda: (_ for _ in ()).throw(AssertionError("rescanned"))   # noqa: E731
+    assert service.Service._template_cache(FakeService(), "npcs", boom) == {2: {"type": 2}}

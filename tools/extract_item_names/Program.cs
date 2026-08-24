@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 
 // Extract an authoritative ItemID -> display-name map straight from Terraria.exe,
@@ -209,7 +210,12 @@ class Program
                 };
                 if (!allowNonPositive && val < 1) continue;
                 string name = md.GetString(fd.Name);
-                if (name == "Count") continue;
+                // Sentinels and placeholders, not content: ItemID/NPCID carry "Count" and
+                // "NegativeIDCount" as bounds, and NPCID uses "None", "None2", "None3" for
+                // ids nothing occupies. Listing them gives the compendium rows with no
+                // template behind them.
+                if (name.EndsWith("Count")) continue;
+                if (Regex.IsMatch(name, "^None[0-9]*$")) continue;
                 map[name] = val;
             }
         }

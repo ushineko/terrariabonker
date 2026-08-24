@@ -46,6 +46,9 @@ def give_back_to_user(path: str) -> None:
     around them stays user-writable, so root would be reading back a file an unprivileged
     process could have replaced.
 
+    Only paths inside that user's home are handed over, because without ``sudo -E`` HOME
+    is root's and the cache lands under /root instead.
+
     Best effort by design: a cache we cannot chown is still a usable cache, so every failure
     here is swallowed.
     """
@@ -56,9 +59,17 @@ def give_back_to_user(path: str) -> None:
         gid = int(os.environ["SUDO_GID"])
     except (KeyError, ValueError):
         return                      # not under sudo (a real root shell); leave it alone
+    # Only inside the user's own home. Without ``sudo -E`` HOME is root's, and the cache
+    # then lands under /root — handing *that* to the user would widen write access to a
+    # path inside root's home rather than fixing anything.
     try:
+        import pwd
+        home = os.path.realpath(pwd.getpwuid(uid).pw_dir)
+        real = os.path.realpath(path)
+        if real != home and not real.startswith(home + os.sep):
+            return
         os.chown(path, uid, gid)
-    except OSError:
+    except (OSError, KeyError):
         pass
 
 

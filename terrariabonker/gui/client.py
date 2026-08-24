@@ -105,6 +105,10 @@ def give_argv(item_type: int, stack: int) -> list[str]:
     return ["give", str(item_type), "--stack", str(stack)]
 
 
+def spawn_npc_argv(net_id: int, distance: int) -> list[str]:
+    return ["spawn-npc", str(net_id), "--distance", str(distance)]
+
+
 def fast_mining_argv() -> list[str]:
     return ["fast-mining"]
 
@@ -172,7 +176,8 @@ def freeze_argv(godmode: bool, mana: bool) -> list[str]:
 # real subcommand of the CLI parser (and that --json reads are supported).
 COMMANDS: set[str] = {
     "status", "inventory", "set-hp", "set-mana", "set-max-hp", "set-max-mana",
-    "set-stack", "set-item", "give", "compendium", "fast-mining", "long-reach", "freeze",
+    "set-stack", "set-item", "give", "spawn-npc", "compendium", "fast-mining",
+    "long-reach", "freeze",
     "patch",
     "extract-recipes",
 }
@@ -186,7 +191,8 @@ SAMPLE_ARGVS: list[list[str]] = [
     set_item_argv(10, 3507, use_anim=8, pick=200, tile_boost=30),
     set_item_argv(20, 285, defense=5, prefix=25),   # accessory: defense + Warding
     set_item_argv(10, 0),                       # clear a slot
-    give_argv(2, 999), compendium_argv(), fast_mining_argv(), long_reach_argv(25),
+    give_argv(2, 999), spawn_npc_argv(46, 25), compendium_argv(),
+    fast_mining_argv(), long_reach_argv(25),
     freeze_argv(True, True),
     patch_status_argv(), patch_set_argv("mining", True, value=0.2),
     patch_set_argv("reach", False), patch_set_argv("fast_place", True),
