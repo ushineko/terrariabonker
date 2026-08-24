@@ -165,6 +165,117 @@ def test_silt_and_slush_are_swept_by_default_and_gems_are_not():
     assert T.whitelist(gems=True) > T.whitelist(gems=False)
 
 
+# --- the stub's slot ---------------------------------------------------------
+
+def _ore_stub():
+    """Build the extractor stub against stand-ins for the addresses it bakes in."""
+    from terrariabonker import patcher as P
+    import terrariabonker.locate as L
+
+    class FakePatcher:
+        _inj = {}
+
+        def _resolve(self, key):
+            return 0x2178CD48
+
+        class mem:
+            @staticmethod
+            def read_u32(a):
+                return 0x5BDBAD4 if a == 0x1000 - 0xA else 0x5BDBAD0
+
+    real = L.find_localplayer_anchor
+    L.find_localplayer_anchor = lambda mem: 0x1000
+    try:
+        inj = P.INJECTIONS["ore_extract"]
+        return inj.build_body(FakePatcher(), inj)
+    finally:
+        L.find_localplayer_anchor = real
+
+
+def test_the_slot_address_matches_what_the_stub_emits():
+    """`ore_slot` derives the address from stub_len rather than remembering it, so this
+    pins the derivation to the layout `_ore_extract_body` actually emits."""
+    from terrariabonker import patcher as P
+
+    inj = P.INJECTIONS["ore_extract"]
+    body = _ore_stub()
+
+    stub_len = len(body) + 5
+    derived = stub_len - 5 - len(inj.overwrite) - P.ORE_SLOT_BYTES
+    # the emitted `cmp dword [esi+delta],1` must point at exactly that offset
+    assert body[7:9] == b"\x83\x7e", "the guard is no longer a disp8 cmp on esi"
+    delta = body[9]
+    assert 6 + delta == derived, "the slot the stub reads is not where ore_slot says"
+    assert body[derived:derived + P.ORE_SLOT_BYTES] == b"\x00" * P.ORE_SLOT_BYTES
+    assert body[-len(inj.overwrite):] == inj.overwrite, "displaced prologue not reproduced"
+
+
+def test_the_stub_holds_its_guard_across_the_nested_call():
+    """PickTile re-enters this stub, so the guard has to stay closed for the whole nested
+    call -- not merely until the queued tile has been read.
+
+    Clearing a boolean flag on entry is *not* enough, and that is not a theoretical
+    concern: the queueing loop polls that flag to decide when to hand over the next tile,
+    so it re-arms within a poll interval (10ms) while the nested call is still running
+    (dust, drops, sound and net take longer than that). The re-entered stub then finds the
+    flag armed again and calls PickTile once more, recursing as deep as the vein is long
+    until the game thread's stack gives out -- a hard crash with no managed exception.
+
+    So the slot holds a state: the stub acts only on 1 (armed), moves it to 2 (in flight)
+    *before* the call, and returns it to 0 only *after* the call has returned.
+    """
+    body = _ore_stub()
+    arm = body.index(b"\x83\x7e")        # cmp dword [esi+delta],imm8
+    assert body[arm + 3] == 1, "the stub acts on a state other than 1 (armed)"
+    inflight = body.index(b"\xff\x46")   # inc dword [esi+delta]   (armed -> in flight)
+    call = body.index(b"\xff\xd0")       # call eax
+    idle = body.index(b"\x83\x66")       # and dword [esi+delta],0 (-> idle)
+    assert arm < inflight < call < idle, \
+        "the guard does not span the nested call — this recurses until the stack dies"
+
+
+def test_the_stub_hands_pick_tile_a_mono_aligned_stack():
+    """Mono's x86 JIT builds 16-byte-aligned frames assuming esp is 12 (mod 16) on entry
+    (PickTile's own prologue: 4 pushes + `sub esp,0x7C` == 140 bytes, which only lands on
+    16 from that start). pushad plus the five args do not preserve that, so the stub has
+    to realign before the pushes."""
+    body = _ore_stub()
+    align = body.index(b"\x83\xe4\xf0")      # and esp,-16
+    pad = body.index(b"\x83\xec")             # sub esp,imm8
+    call = body.index(b"\xff\xd0")            # call eax
+    assert align < pad < call, "the stack is not realigned before the call"
+    # 5 args are pushed after the padding; entry must land back on 12 (mod 16)
+    assert (-body[pad + 2] - 5 * 4 - 4) % 16 == 12, \
+        "the padding does not leave PickTile the entry alignment mono assumes"
+
+
+def test_pending_covers_the_tile_still_being_mined():
+    """`ore_pending` must stay true through state 2, not just state 1. Reporting "done"
+    when the stub dequeues the tile — rather than when the mining it triggers has
+    finished — is what let the queueing loop re-arm mid-call."""
+    from terrariabonker import patcher as P
+
+    class FakeSlot:
+        def __init__(self, state):
+            self.state = state
+            self.writes = []
+
+        def read_i32(self, a):
+            return self.state
+
+        def write(self, a, b):
+            self.writes.append((a, b))
+
+    for state, pending in ((0, False), (1, True), (2, True)):
+        p = P.Patcher.__new__(P.Patcher)
+        p.mem = FakeSlot(state)
+        p.ore_slot = lambda: 0x4000
+        assert p.ore_pending() is pending, f"state {state} pending should be {pending}"
+        # and a tile is only ever queued onto an idle slot
+        assert p.ore_queue(7, 9) is (state == 0), \
+            f"queueing onto state {state} should be {state == 0}"
+
+
 def test_a_mined_out_tile_does_not_join_the_vein():
     """Terraria clears a tile's active bit when it is mined but leaves `type` alone, so a
     dug-out copper vein still reads as copper. Matching on the raw id hands the game

@@ -1,6 +1,7 @@
 # Spec 040: Ore extractor lite — auto-mine contiguous ores
 
-**Status**: IN PROGRESS — the read half is built, tested and verified in-game.
+**Status**: IN PROGRESS — the read half is built, tested and verified in-game. The
+write half is built but **crashes the game**; see "Where the write half stands".
 The write half (the per-frame stub) is not started
 
 > **Note**: No issue tracker ticket (personal utility).
@@ -111,8 +112,13 @@ code can mine a tile properly.
 
 1. ~~**The `Tilemap` layout.**~~ **Answered** — see above. The flood fill can be written in
    Python today.
-2. ~~**Is `PickTile` safe to call from a cave?**~~ **Answered — and it is safer than
-   expected.** Four things were checked in the IL rather than assumed:
+2. ~~**Is `PickTile` safe to call from a cave?**~~ **Answered from the IL — and the answer
+   was over-confident. Calling it crashes the game; see "Where the write half stands".**
+   Four things were checked in the IL rather than assumed, and all four still hold. What
+   they do not cover is the part that actually breaks a tile: every check below concerns a
+   path the call takes *before* damage reaches 100, and the destruction path past that
+   point has never once run without killing the process. Reasoning from IL established
+   that nothing *should* go wrong; it did not establish that nothing does.
 
    - **The net traffic is free.** `NetMessage.SendData` opens with
      `ldsfld Main::netMode; brtrue; ret` — in single player every SendData on the kill
@@ -140,7 +146,63 @@ code can mine a tile properly.
    `PickTile_DetermineDamage`, so calling `KillTile` directly would skip the one check that
    keeps a flood fill away from tiles the game forbids breaking.
 4. **How much per frame?** A large vein mined in one frame will spike; a few tiles per frame
-   is smoother and is also a natural way to keep the stub simple.
+   is smoother and is also a natural way to keep the stub simple. Still open, and now
+   blocked behind the crash below.
+
+## Where the write half stands
+
+The stub is written, injected and verified byte-for-byte against its disassembly, and it
+**crashes the game** whenever the tile it is given actually breaks. Mining an *empty* tile
+has always worked, which is what made the first two diagnoses look right and both wrong.
+
+**Two real bugs found and fixed, neither of which was the crash:**
+
+- **The re-entrancy guard was not a guard.** The stub cleared its "armed" flag as the first
+  guarded instruction, so `ore_pending` reported "done" milliseconds before the mining it
+  triggered had finished, and the queueing loop re-armed while the nested `PickTile` was
+  still running. The re-entered stub then called `PickTile` again, recursing as deep as the
+  vein was long. The slot is now a three-state machine (0 idle, 1 armed, 2 in flight) and
+  the guard holds for the whole nested call, so depth is one by construction.
+- **The active flag was never located.** `type_at` matched on the raw tile id, but Terraria
+  clears only bit 5 of `sTileHeader` when a tile is mined and leaves `type` alone — so the
+  flood fill matched tiles that no longer exist. Harmless (`CanKillTile` zeroes the damage)
+  but pure wasted work. `solid_type_at` now gates on the active bit, and
+  `check_active_offset` validates the field offset against the live world rather than
+  trusting mono's field layout.
+
+**The crash itself is not diagnosed.** What the evidence constrains:
+
+- It is a **hard native fault**, not a managed exception: nothing is appended to
+  `client-crashlog.txt` (whose last entry predates both crashes), and wine traps SIGSEGV
+  itself so the kernel logs nothing either.
+- It is **not the code cave** — the cave is genuine `int3` padding in the same anonymous
+  `r-xp` region the working `smart_cursor` stub has lived in all along.
+- It is **not the signature** — `PickTile(this, x, y, pickPower, -1)` matches the game's own
+  call site in `ItemCheck_UseMiningTools_ActuallyUseMiningTool` exactly.
+- It is **not recursion** — a single queued tile has nothing to re-arm with and cannot
+  recurse, and it crashes.
+- It is **not stack alignment**, or at least not that alone: the `teleport` stub hands its
+  callee `esp ≡ 8 (mod 16)` where mono assumes 12, and has never crashed. (The extractor
+  now realigns anyway; mono builds 16-byte frames assuming `esp ≡ 12` at entry, which
+  `PickTile`'s own prologue confirms — 4 pushes plus `sub esp,0x7C` is 140 bytes.)
+
+**Prime suspect: `this`.** The stub computes it as `[Main.player][Main.myPlayer]` and that
+number has never been checked against anything. The destruction path opens with
+`this.IntentionGuesser.AllowTracking(60)`; a wrong `this` there gives a managed
+NullReferenceException, which then has to unwind through an unmanaged cave frame mono has
+no `MonoJitInfo` for — a hard death with no crashlog, matching every observation.
+
+**Next steps, in strict risk order.** 1-3 cannot crash the game:
+
+1. *Read-only, no injection.* Compare `[Main.player][Main.myPlayer]` against the player
+   object `live_block()` already resolves. If they differ, that is the bug and no stub
+   needs to run.
+2. *Read-only.* Run `check_active_offset` against the live world to confirm `0x0C`.
+3. *Stub with no call.* Compute `this`, write it to the slot, return. Confirms the stub
+   agrees with Python and that the injection alone is inert.
+4. *Bisect the destruction path.* Call with `pickPower=1` on a hard tile so damage stays
+   under 100. Survives -> the fault is in destruction; crashes -> it is in the general
+   machinery.
 
 ## Risks & Assumptions
 

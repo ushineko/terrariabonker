@@ -141,6 +141,14 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # otherwise a cold re-resolve fails once it is applied and it could not be turned off
     # again (the trap specs 032-034 each hit). The mono type-init immediate, the init
     # call, Main.PylonSystem's address and the call to HasPylonOfType are ASLR'd.
+    # Player.PickTile's entry (spec 040). The first five bytes are the ones the cheat
+    # overwrites with its jump, so they are WILDCARDED — the trap specs 032-034 and 037
+    # each hit. The prologue alone is far from unique (190 methods share it), so the
+    # pattern runs on through the argument loads, the mono type-init check and the two
+    # zeroed locals to the `mov eax,[Main.tile]`; that is unique.
+    "pick_tile": _pat("?? ?? ?? ?? ?? 56 83 EC 7C 8B 7D 08 8B 5D 0C B8 ?? ?? ?? ?? "
+                      "F7 00 01 00 00 00 74 08 8D 6D 00 E8 ?? ?? ?? ?? "
+                      "C7 45 E4 00 00 00 00 C7 45 E0 00 00 00 00 8B 05 ?? ?? ?? ??"),
     "pylon_place": _pat("?? ?? ?? 83 EC 18 B8 ?? ?? ?? ?? F7 00 01 00 00 00 74 05 "
                         "E8 ?? ?? ?? ?? 8B 45 14 0F B6 C0 0F B6 C8 8B 05 ?? ?? ?? ?? "
                         "89 4C 24 04 89 04 24 39 00 8D 6D 00 E8 ?? ?? ?? ??"),
@@ -284,6 +292,8 @@ _VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
     # Cavern pylon already in the world, and both appear on the map wired into the pylon
     # network. Nothing downstream dedupes by type, as the recon predicted.
     "pylon_place": ("1.4.5.8+24893155",),
+    # 2026-08-24: derived on 1.4.5.8 but not yet watched working, so it claims nothing.
+    "pick_tile": (),
 }
 
 ANCHORS: dict[str, Anchor] = {
@@ -434,6 +444,110 @@ def _teleport_body(player_base: int, call_target: int) -> bytes:
             + b"\x61"                           # popad
             + b"\x8b\x4d\x08"                   # mov ecx,[ebp+08]   \ reproduce the two
             + b"\x89\x4c\x24\x04")              # mov [esp+04],ecx   / displaced instructions
+
+
+# The extractor's slot, laid out at the tail of its own stub: a flag the game side
+# clears when it consumes a tile, then the tile's x and y. One tile at a time on purpose —
+# a cave is *borrowed* padding (see _find_cave), so its size is the risk, and a queue big
+# enough for a vein would be a far bigger borrow than a 12-byte slot.
+ORE_SLOT_BYTES = 12
+
+
+def _ore_extract_body(patcher, inj) -> bytes:
+    """Mine one queued tile per ``PickTile`` call, from inside ``PickTile`` itself.
+
+    The unprivileged side does the thinking — read the tile map, flood-fill the vein,
+    decide what may be taken — and writes a single coordinate here. This stub does one
+    dumb thing with it: call ``Player.PickTile(this, x, y, 100, -1)``, which is the same
+    call the game makes when you swing a pickaxe, so drops, framing, lighting and the
+    ``CanKillTile`` check all happen exactly as they normally would.
+
+    **Why hook PickTile rather than a per-frame method.** The call has to happen on the
+    game thread, and PickTile already runs there — while you are mining, which is the only
+    time this cheat should be doing anything. Nothing happens when you put the pickaxe
+    away, and no new hot path is patched.
+
+    **Re-entrancy is handled by an explicit in-flight state, not by clearing a flag.**
+    Calling PickTile from inside PickTile re-enters this stub, so the guard has to hold
+    for the whole nested call -- not just until the queued tile has been read. Clearing a
+    boolean flag on entry is *not* enough: the unprivileged side polls that flag to decide
+    when to queue the next tile, so it re-arms within a poll interval while the nested
+    call is still running (dust, drops, sound, net take milliseconds; the poll is 10ms).
+    The nested entry then finds the flag armed again and calls PickTile once more, and so
+    on -- recursion as deep as the vein is long, which overflows the game thread's stack
+    and kills the process with no managed exception to show for it.
+
+    So the slot holds a state, not a flag: 0 idle, 1 armed, 2 in flight. The stub only
+    acts on 1, and its first act is to make the state 2, which it holds until the nested
+    call returns. A re-entered stub sees 2, fails the ``== 1`` test and falls straight
+    through to the displaced bytes. Depth is one by construction, whatever the other side
+    does. State 2 also reads as "still pending" to ``ore_pending``, so the queueing loop
+    waits for the tile to actually be mined rather than for it to be dequeued.
+
+    **Stack alignment.** Mono's x86 JIT builds 16-byte-aligned frames assuming esp is
+    12 (mod 16) at entry -- PickTile's own prologue is proof: 4 pushes + ``sub esp,0x7C``
+    is 140 bytes, which lands the frame on 16 only from that start. The pushad and the
+    args do not preserve that, so esp is realigned before the pushes and restored from
+    ebx afterwards.
+
+    The stub finds its own data with ``call/pop``: the cave address is not known when the
+    body is built (the cave is chosen from the body's length), so a baked absolute address
+    is not available.
+    """
+    from terrariabonker.locate import find_localplayer_anchor
+
+    pick_tile = patcher._resolve(inj.anchor)          # the anchor sits at the entry
+    tail = find_localplayer_anchor(patcher.mem)
+    if tail is None:
+        raise PatchError("could not locate Main.player / Main.myPlayer")
+    player_arr = patcher.mem.read_u32(tail - 0xA)
+    my_player = patcher.mem.read_u32(tail - 4)
+    if not (player_arr and my_player):
+        raise PatchError("Main.player / Main.myPlayer are not readable")
+
+    # Built in two passes: the data lives after the code, so the displacement from the
+    # call/pop anchor is only known once the code's length is.
+    def emit(delta: int) -> bytes:
+        # The slot is a three-state machine, not a boolean: 0 idle, 1 armed (the
+        # unprivileged side queued a tile), 2 in flight (we are inside the nested call).
+        # State 2 is what makes the re-entrancy guard real -- see the docstring.
+        assert 0 <= delta + 8 < 128, "slot no longer reachable with a disp8"
+        # The work, so the guard's jump distance is measured rather than counted by hand.
+        guarded = (b"\xff\x46" + bytes([delta])       # inc dword [esi+delta]  (1 -> 2)
+                   + b"\x8b\xdc"                       # mov ebx,esp
+                   + b"\x83\xe4\xf0"                   # and esp,-16   \ mono wants esp==12
+                   + b"\x83\xec\x0c"                   # sub esp,12    / (mod 16) at entry
+                   + b"\xa1" + _u32(player_arr)        # mov eax,[Main.player]
+                   + b"\x8b\x0d" + _u32(my_player)     # mov ecx,[Main.myPlayer]
+                   + b"\x8b\x44\x88\x10"               # mov eax,[eax+ecx*4+0x10]
+                   + b"\x6a\xff"                       # push -1    (cap)
+                   + b"\x6a\x64"                       # push 100   (pickPower)
+                   + b"\xff\x76" + bytes([delta + 8])  # push [esi+delta+8]   (y)
+                   + b"\xff\x76" + bytes([delta + 4])  # push [esi+delta+4]   (x)
+                   + b"\x50"                            # push eax   (this)
+                   + b"\xb8" + _u32(pick_tile)         # mov eax,PickTile
+                   + b"\xff\xd0"                       # call eax
+                   + b"\x8b\xe3"                       # mov esp,ebx (either convention)
+                   + b"\x83\x66" + bytes([delta]) + b"\x00")   # and [esi+delta],0 (idle)
+        assert len(guarded) < 128, "guard jump no longer fits in a short branch"
+        return (b"\x60"                                     # pushad
+                + b"\xe8\x00\x00\x00\x00"                  # call $+5  (push next addr)
+                + b"\x5e"                                    # pop esi   (esi = here)
+                + b"\x83\x7e" + bytes([delta]) + b"\x01"     # cmp dword [esi+delta],1
+                + b"\x75" + bytes([len(guarded)])            # jne skip  (idle, or in flight)
+                + guarded
+                + b"\x61"                                    # popad  <- skip lands here
+                + b"\xeb" + bytes([ORE_SLOT_BYTES])          # jmp over the slot
+                + b"\x00" * ORE_SLOT_BYTES                   # state, x, y
+                + inj.overwrite)                             # the displaced prologue
+
+    probe = emit(0)
+    # delta is measured from the pop's *next* instruction, which is where esi points.
+    esi_at = 6                                             # pushad(1) + call(5)
+    slot_at = len(probe) - ORE_SLOT_BYTES - len(inj.overwrite)
+    body = emit(slot_at - esi_at)
+    assert len(body) == len(probe), "two-pass emit changed length"
+    return body
 
 
 def _clamp_vanity_slot(_value: int = 0) -> bytes:
@@ -673,6 +787,14 @@ INJECTIONS: dict[str, Injection] = {
     # is resolved via the player_teleport anchor (entry = match - 0x32). A game restart
     # clears it; re-toggle after a world/character reload (the player object base is
     # baked into the stub at enable time).
+    # Ore extractor (spec 040). The stub is deliberately tiny: the unprivileged side
+    # reads the tile map, floods the vein and decides what may be taken, then writes one
+    # coordinate into the stub's own slot. See _ore_extract_body.
+    "ore_extract": Injection(
+        "ore_extract", "Ore extractor (vein mining)", "pick_tile",
+        0x0, _b("55 8B EC 53 57"), None,
+        build_body=_ore_extract_body, rerun_overwrite=False,
+        note="Mines the rest of an ore vein while you mine it. Whitelisted ores only."),
     "teleport": Injection(
         "teleport", "Map-ping teleport (TriggerPing)", "trigger_ping",
         0x0, _b("8B 4D 08 89 4C 24 04"), None,
@@ -725,7 +847,7 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
 # falls into the last section, so adding one never hides it.
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Build", ("mining", "reach", "fast_place", "tool_reach", "smart_cursor",
-               "pylons")),
+               "pylons", "ore_extract")),
     ("Combat", ("max_minions", "spawn_rate", "loot")),
     ("Accessories", ("vanity_accs", "inventory_accs")),
     ("Misc", ("pickup", "teleport")),
@@ -1006,6 +1128,53 @@ class Patcher:
         self._apply_edits(inj.edits, on=True)
         self._inj[inj.name] = {"sites": sites, "stub_len": stub_len}
         self._save_state()
+
+    def ore_slot(self) -> int | None:
+        """Address of the extractor's slot, or None when the cheat is off.
+
+        The slot sits at the tail of the stub, before the displaced prologue and the jump
+        back: ``stub_len`` counts the body plus that 5-byte jump, and the body ends with
+        the slot, the 5 displaced bytes. Derived rather than remembered so it cannot drift
+        away from what ``_ore_extract_body`` actually emits — a test pins the two together.
+        """
+        rec = self._inj.get("ore_extract") or {}
+        sites = rec.get("sites") or []
+        if not sites or not rec.get("stub_len"):
+            return None
+        overwrite = len(INJECTIONS["ore_extract"].overwrite)
+        return sites[0]["cave"] + rec["stub_len"] - 5 - overwrite - ORE_SLOT_BYTES
+
+    def ore_state(self) -> int:
+        """The stub's slot state: 0 idle, 1 armed, 2 in flight. -1 when the cheat is off.
+
+        See ``_ore_extract_body``: 2 is held for the whole nested ``PickTile`` call, which
+        is what stops the caller re-arming mid-call and recursing into the stub.
+        """
+        slot = self.ore_slot()
+        return -1 if slot is None else self.mem.read_i32(slot)
+
+    def ore_pending(self) -> bool:
+        """True until the queued tile has actually been mined.
+
+        Both 1 (armed) and 2 (in flight) count as pending. Treating only 1 as pending is
+        the bug that overflowed the game's stack: it reports "done" the moment the stub
+        dequeues the tile, milliseconds before the mining it triggers has finished.
+        """
+        return self.ore_state() > 0
+
+    def ore_queue(self, x: int, y: int) -> bool:
+        """Hand one tile to the stub, if and only if it is idle.
+
+        The state is written **last**, so the game can never see a coordinate that is only
+        half written; and it is only written from 0, so a tile is never queued on top of
+        one still in flight.
+        """
+        slot = self.ore_slot()
+        if slot is None or self.mem.read_i32(slot) != 0:
+            return False
+        self.mem.write(slot + 4, struct.pack("<ii", int(x), int(y)))
+        self.mem.write(slot, struct.pack("<i", 1))
+        return True
 
     def _disable_injection(self, inj: Injection) -> None:
         rec = self._inj.get(inj.name)

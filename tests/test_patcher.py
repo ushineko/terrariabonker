@@ -40,7 +40,8 @@ def test_status_all_off_initially(game):
                           "tool_reach": False, "pickup": False, "spawn_rate": False,
                           "loot": False, "teleport": False, "max_minions": False,
                           "vanity_accs": False, "inventory_accs": False,
-                          "smart_cursor": False, "pylons": False}
+                          "smart_cursor": False, "pylons": False,
+                          "ore_extract": False}
 
 
 def test_tool_reach_injection_roundtrip(game):

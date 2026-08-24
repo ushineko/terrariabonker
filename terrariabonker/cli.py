@@ -160,7 +160,7 @@ SERVE_OPS = frozenset({
     "status", "version", "inventory", "inv", "set-hp", "set-max-hp", "set-mana",
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
     "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
-    "accept-build", "vein",
+    "accept-build", "vein", "extract",
 })
 
 
@@ -277,6 +277,23 @@ def cmd_vein(args) -> int:
             row = "".join("#" if (xx, yy) in seen else ("." if tm.type_at(xx, yy) else " ")
                           for xx in range(min(xs) - 1, max(xs) + 2))
             print("       " + row)
+    return 0
+
+
+def cmd_extract(args) -> int:
+    """Mine the vein at a tile. THIS WRITES TO THE WORLD."""
+    svc = _svc(guard=True, force=args.force)
+    if args.x is None or args.y is None:
+        x, y = svc.player_tile()
+    else:
+        x, y = args.x, args.y
+    got = svc.extract_vein(x, y, gems=args.gems, limit=args.limit,
+                           timeout=args.timeout)
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    print(f"[extract] {got['mined']} of {got['queued']} tiles mined at ({x}, {y})"
+          + (f" — {got['reason']}" if got["reason"] else ""))
     return 0
 
 
@@ -578,6 +595,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--map", action="store_true", help="draw the vein")
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.set_defaults(func=cmd_vein)
+
+    p = sub.add_parser("extract",
+                       help="mine the vein at a tile (WRITES to the world)")
+    p.add_argument("x", type=int, nargs="?", help="tile x (default: the player's tile)")
+    p.add_argument("y", type=int, nargs="?", help="tile y")
+    p.add_argument("--gems", action="store_true", help="include gems")
+    p.add_argument("--limit", type=int, help="stop after this many tiles")
+    p.add_argument("--timeout", type=float, default=20.0,
+                   help="seconds to wait for each tile before giving up")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_extract)
 
     p = sub.add_parser("build-check",
                        help="report the running build and whether the cheats resolve on it")

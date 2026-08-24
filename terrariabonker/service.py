@@ -655,6 +655,45 @@ class Service:
         px, py = struct.unpack("<ff", self.mem.read(base + 0x0C, 8))
         return int(px // 16), int(py // 16)
 
+    def extract_vein(self, x: int, y: int, *, gems: bool = False,
+                     limit: int | None = None, timeout: float = 20.0) -> dict:
+        """Mine the vein at ``(x, y)`` through the game's own ``PickTile`` (spec 040).
+
+        The tiles are fed to the stub one at a time. It only runs while the player is
+        mining, because that is where it is hooked — so this waits for each tile to be
+        taken rather than assuming it was, and gives up rather than hanging if the player
+        stops swinging.
+        """
+        import time
+
+        from terrariabonker import tiles as T
+
+        p = self.patcher()
+        if not p.is_enabled("ore_extract"):
+            raise ServiceError("the ore extractor cheat is not enabled")
+        tm = self.tilemap()
+        vein = T.flood(tm, x, y, T.whitelist(gems), limit=limit or T.DEFAULT_LIMIT)
+        if not vein:
+            return {"at": [x, y], "queued": 0, "mined": 0, "left": 0,
+                    "reason": "not a whitelisted tile"}
+
+        mined = 0
+        for tx, ty in vein:
+            if tm.type_at(tx, ty) not in T.whitelist(gems):
+                continue                      # already gone (the player got there first)
+            if not p.ore_queue(tx, ty):
+                break
+            deadline = time.time() + timeout
+            while p.ore_pending() and time.time() < deadline:
+                time.sleep(0.01)
+            if p.ore_pending():
+                break                         # not mining any more; stop rather than hang
+            mined += 1
+        return {"at": [x, y], "queued": len(vein), "mined": mined,
+                "left": len(vein) - mined,
+                "reason": "" if mined == len(vein) else
+                          "stopped early — the stub only runs while you are mining"}
+
     def build_check(self) -> dict:
         """Is this build one we know, and do the cheats still resolve on it? (spec 036)
 
