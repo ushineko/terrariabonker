@@ -23,8 +23,13 @@ STRIDE = 40                  # buffer height (bigger than the world, as in the g
 WORLD_W, WORLD_H = 20, 30
 
 
-def _world(fill=None):
-    """A tiny world with its own oversized buffer, laid out exactly like the game's."""
+def _world(fill=None, active=None):
+    """A tiny world with its own oversized buffer, laid out exactly like the game's.
+
+    ``active`` decides which tiles carry the active bit; by default any non-zero id does,
+    which is how a real world looks. Pass one to model tiles that have been mined out --
+    the game keeps their id and only clears the bit.
+    """
     m = FakeMem(BASE, 0x200000)
     m.write(STATIC + T.MAIN_TILE_OFF, struct.pack("<I", BUF))
     m.poke_i32(STATIC + T.MAIN_MAX_TILES_OFF, WORLD_W)
@@ -38,7 +43,10 @@ def _world(fill=None):
             obj = OBJS + slot * 0x18
             slot += 1
             t = 0 if fill is None else fill(x, y)
+            on = bool(t) if active is None else active(x, y)
             m.write(obj + T._TILE_TYPE_OFF, struct.pack("<H", t))
+            m.write(obj + T._TILE_HEADER_OFF,
+                    struct.pack("<H", T._ACTIVE_BIT if on else 0))
             m.write(TILES + 4 * (STRIDE * x + y), struct.pack("<I", obj))
     return m
 
@@ -155,3 +163,42 @@ def test_silt_and_slush_are_swept_by_default_and_gems_are_not():
     assert T.whitelist(gems=False) >= {123, 224}
     assert not (T.whitelist(gems=False) & set(T.GEMS))
     assert T.whitelist(gems=True) > T.whitelist(gems=False)
+
+
+def test_a_mined_out_tile_does_not_join_the_vein():
+    """Terraria clears a tile's active bit when it is mined but leaves `type` alone, so a
+    dug-out copper vein still reads as copper. Matching on the raw id hands the game
+    coordinates for tiles that are not there — `CanKillTile` zeroes the damage so nothing
+    breaks, but the vein looks bigger than it is and every one of those tiles costs a
+    swing to discover. Only the three tiles still standing are part of the vein."""
+    def fill(x, y):
+        return 7 if x == 3 and 2 <= y <= 6 else 1
+
+    # the top two of that copper run have already been mined out
+    def active(x, y):
+        return not (x == 3 and y in (2, 3))
+    tm = T.TileMap(_world(fill, active), STATIC)
+
+    assert tm.type_at(3, 2) == 7, "premise: the mined tile still reports its id"
+    assert tm.active_at(3, 2) is False
+    assert tm.solid_type_at(3, 2) is None
+
+    assert T.flood(tm, 3, 4, {7}) == [(3, 4), (3, 5), (3, 6)] or \
+        sorted(T.flood(tm, 3, 4, {7})) == [(3, 4), (3, 5), (3, 6)]
+    assert T.flood(tm, 3, 2, {7}) == [], "a vein cannot start on a tile that is not there"
+
+
+def test_the_active_offset_check_rejects_a_wrong_offset():
+    """`check_active_offset` is what stops us trusting a field offset mono is free to move.
+    Point it at the wrong field and it must say so rather than quietly reading garbage."""
+    # a surface world: empty above, stone below
+    tm = T.TileMap(_world(lambda x, y: 0 if y < 10 else 1), STATIC)
+    assert tm.check_active_offset(5, 15)["ok"], "the real offset should validate"
+
+    real = T._TILE_HEADER_OFF
+    try:
+        T._TILE_HEADER_OFF = 0x08          # point it at `type` instead
+        got = tm.check_active_offset(5, 15)
+        assert not got["ok"], "a wrong offset validated: %r" % (got,)
+    finally:
+        T._TILE_HEADER_OFF = real

@@ -25,6 +25,8 @@ MAIN_MAX_TILES_OFF = 0x5A4      # maxTilesX, then maxTilesY
 _BOUNDS_OFF = 0x08              # -> {width, originX, height, originY}
 _ENTRIES_OFF = 0x10             # the per-tile pointer array
 _TILE_TYPE_OFF = 0x08           # ushort, within a tile object
+_TILE_HEADER_OFF = 0x0C         # sTileHeader, ushort: type(2) wall(1) liquid(1)
+_ACTIVE_BIT = 0x20              # Tile.active() is (sTileHeader & 32) == 32
 
 # Vanilla ore tile ids. A whitelist is what keeps a flood fill from eating a region, so it
 # is deliberately a list of ores rather than "anything that looks minable". Gems are listed
@@ -86,10 +88,12 @@ class TileMap:
         return self.mem.read_u32(self.buf + _ENTRIES_OFF + 4 * idx) or 0
 
     def type_at(self, x: int, y: int) -> int | None:
-        """The tile id at ``(x, y)``, or None outside the world / with no tile object.
+        """The raw tile id at ``(x, y)``, or None outside the world / with no tile object.
 
-        Note id 0 is Dirt *and* an empty tile — the active flag has not been located. It
-        does not matter to this module: every ore id is non-zero.
+        **This is not "what is there".** A mined-out tile keeps its id and only loses its
+        active bit, so this reports "copper" for a vein someone already dug out. Use
+        :meth:`solid_type_at` for anything that decides what to mine; this stays raw
+        because the map view wants to show ids without a second read per tile.
         """
         if not self.in_world(x, y):
             return None
@@ -100,6 +104,53 @@ class TileMap:
         if len(raw) < 2:
             return None
         return struct.unpack("<H", raw)[0]
+
+    def active_at(self, x: int, y: int) -> bool | None:
+        """Is there actually a tile at ``(x, y)``? None outside the world.
+
+        ``Tile.active()`` is ``(sTileHeader & 32) == 32`` (verified against the game's own
+        IL). Terraria clears that bit when a tile is mined but leaves ``type`` alone, so
+        this is the only thing that separates "copper ore" from "where copper ore used to
+        be". :meth:`check_active_offset` validates the field offset against the live game.
+        """
+        if not self.in_world(x, y):
+            return None
+        p = self._entry(x, y)
+        if not p:
+            return None
+        raw = self.mem.read(p + _TILE_HEADER_OFF, 2)
+        if len(raw) < 2:
+            return None
+        return bool(struct.unpack("<H", raw)[0] & _ACTIVE_BIT)
+
+    def solid_type_at(self, x: int, y: int) -> int | None:
+        """The tile id at ``(x, y)``, but only when a tile is really there.
+
+        None for empty space, whatever stale id the entry still carries.
+        """
+        return self.type_at(x, y) if self.active_at(x, y) else None
+
+    def check_active_offset(self, x: int, y: int) -> dict:
+        """Sanity-check :data:`_TILE_HEADER_OFF` against the live world.
+
+        The offset is derived from the field order, which mono is free to lay out as it
+        likes, so it is checked rather than trusted: a column from the sky down to below
+        the surface must be inactive at the top and active further down, and every id-0
+        tile must be inactive. A wrong offset reads some other field and fails both.
+        """
+        col = [(y0, self.type_at(x, y0), self.active_at(x, y0))
+               for y0 in range(max(0, y - 200), min(self.max_y, y + 60))]
+        col = [c for c in col if c[2] is not None]
+        sky = [c for c in col if c[1] == 0]
+        bad_sky = [c for c in sky if c[2]]
+        active = [c for c in col if c[2]]
+        return {
+            "sampled": len(col),
+            "empty_ids": len(sky),
+            "empty_but_active": len(bad_sky),      # must be 0: id 0 is never a real tile
+            "active": len(active),
+            "ok": bool(col) and not bad_sky and bool(active) and len(sky) > 0,
+        }
 
     def column(self, x: int, y0: int, y1: int) -> list[int | None]:
         """Tile ids down one column, in a single read.
@@ -130,11 +181,16 @@ def flood(tiles: TileMap, x: int, y: int, whitelist, limit: int = DEFAULT_LIMIT,
     Matching on the **starting tile's own id** rather than on "any whitelisted id" is what
     stops a copper vein touching an iron one from taking both: a vein is one ore.
 
+    Matching uses :meth:`~TileMap.solid_type_at`, so already-mined tiles do not join the
+    vein. Matching on the raw id instead would hand the game coordinates for tiles that no
+    longer exist -- harmless (``CanKillTile`` zeroes the damage) but pure wasted work, and
+    it makes a vein look bigger than it is.
+
     Returns [] when the start is not whitelisted. The cap is a safety rail, not a
     performance one — a real vein is tens of tiles, and stopping early is far better than
     a mistake that strips a region.
     """
-    want = tiles.type_at(x, y)
+    want = tiles.solid_type_at(x, y)
     if want is None or want not in whitelist:
         return []
     steps = ((1, 0), (-1, 0), (0, 1), (0, -1))
@@ -150,7 +206,7 @@ def flood(tiles: TileMap, x: int, y: int, whitelist, limit: int = DEFAULT_LIMIT,
             if n in seen:
                 continue
             seen.add(n)
-            if tiles.type_at(*n) == want:
+            if tiles.solid_type_at(*n) == want:
                 out.append(n)
                 queue.append(n)
                 if len(out) >= limit:
