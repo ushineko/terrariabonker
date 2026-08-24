@@ -1,8 +1,7 @@
 # Spec 035: Item compendium tab
 
 **Status**: INCOMPLETE — Phases 1 (catalog + browse) and 2 (NPC stats + spawn)
-implemented and validated, except the boss gate, which needs nightfall in-game;
-Phase 3 (NPC sprites) open
+implemented and fully validated in-game; Phase 3 (NPC sprites) open
 **Implementation Date**: 2026-08-23 (Phases 1 and 2)
 
 > **Note**: No issue tracker ticket (personal utility).
@@ -20,8 +19,8 @@ At the maintainer's request the work is split, with a validation stop after each
 
 | Phase | Scope | State |
 | --- | --- | --- |
-| 1 | Catalog: read every item's stats, browse/filter/sort, tooltip, wiki, give | implemented |
-| 2 | NPC stats and real kinds, spawning, placement offset, boss gate | implemented |
+| 1 | Catalog: read every item's stats, browse/filter/sort, tooltip, wiki, give | done |
+| 2 | NPC stats and real kinds, spawning, placement offset, boss gate | done |
 | 3 | NPC sprites from the 838 `Content/Images/NPC_*.xnb` sheets | open |
 
 ### What the recon found
@@ -230,8 +229,10 @@ exists. `Main.myPlayer` is already read by `resolve_local_player`.
   and then `NewNPC`, which do bookkeeping beyond populating fields — boss-specific statics
   (`NPC.plantBoss`, `golemBoss`), bestiary entries, and net sync. Copying the template gets
   the NPC itself right, which is what a trainer needs, but a boss that reads one of those
-  statics may behave oddly. This is the reason the boss path is the one part of phase 2 held
-  back for in-game verification rather than declared done.
+  statics could in principle behave oddly. Held back for in-game verification for exactly that
+  reason, and **confirmed working**: a boss spawned this way fights normally. The concern is
+  recorded rather than removed, because it is the first thing to suspect if some future boss
+  does misbehave.
 - **The slot's own arrays are kept, and their contents are not reset.** `ai[]` and the rest
   belong to the slot, not the template, so a spawned NPC starts with whatever the previous
   occupant left in them. Zeroing them was considered and not done: the two length-4 float
@@ -288,12 +289,10 @@ exists. `Main.myPlayer` is already read by `resolve_local_player`.
 - [x] A double-click opens exactly one dialog, and Enter opens one from the keyboard
 - [x] The app makes no network request of its own: the wiki button hands the URL to
       `xdg-open` via `QProcess.startDetached` with the URL as its own argv element
-- [ ] The wiki button opens the correct article in the default browser — NOT YET EXERCISED
-      live. The code path is in place and unit-tested for URL shape; nobody has clicked it
+- [x] The wiki button opens the correct article in the default browser — maintainer-confirmed
       in a running session
-- [ ] **Give** from a compendium entry puts the item in the first empty inventory slot — NOT
-      YET EXERCISED live from this tab. It reuses `give_item`, which has worked since v0.2.2,
-      but the compendium's own button has not been clicked in a running session
+- [x] **Give** from a compendium entry puts the item in the first empty inventory slot —
+      maintainer-confirmed in a running session
 - [x] All tests pass headless (269); flake8 clean on changed code; security review recorded
 - [x] The template cache is handed back to the invoking user rather than left root-owned
       in their cache directory (`proc.give_back_to_user`)
@@ -317,10 +316,11 @@ exists. `Main.myPlayer` is already read by `resolve_local_player`.
 - [x] The spawn writes `active` last, so the game never sees a half-built NPC
 - [x] The copy skips every reference field, so a spawned NPC never shares the template's
       arrays
-- [ ] Spawning a **boss** requires an explicit confirmation naming it, followed by a
-      cancellable countdown; cancelling spawns nothing — **gate is built and unit-tested in
-      both directions, but NOT yet exercised in-game**: it needs nightfall for a boss the
-      maintainer can actually summon. Held open until then
+- [x] Spawning a **boss** requires an explicit confirmation naming it, followed by a
+      cancellable countdown; cancelling spawns nothing — maintainer-confirmed in-game. The
+      template-copy spawn produces a working boss, so the concern that it might miss
+      bookkeeping `SetDefaults`/`NewNPC` does (`NPC.plantBoss` and friends) did not
+      materialise
 - [x] The catalog holds only real NPCs: `NPCID`'s sentinels (`NegativeIDCount`, and the
       `None`/`None2`/`None3` placeholders for unoccupied ids) are dropped at extraction,
       taking `data/npcs.json` from 763 entries to 759
@@ -437,5 +437,7 @@ Live, maintainer-verified: spawning works. Two Bunnies and a Zombie were placed 
 12, 29 and 30 with correct netID, type, life, size and `whoAmI`, the game stayed up, and the
 maintainer confirmed spawns arrive in-game from the tab.
 
-Not yet exercised live: the Wiki and Give buttons on a compendium entry, and the boss gate
-(which needs nightfall for a summonable boss).
+All of phases 1 and 2 are now maintainer-confirmed in a running session, including the two
+buttons held open through phase 2 (Wiki and Give) and the boss gate — a boss spawned from the
+template copy behaves correctly, so the `SetDefaults`/`NewNPC` bookkeeping concern recorded
+under Risks did not materialise.
