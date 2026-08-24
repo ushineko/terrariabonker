@@ -1,7 +1,6 @@
 # Spec 034: Clamp the smart-cursor search range
 
-**Status**: INCOMPLETE (1 criterion open: the not-yet-JIT-compiled path,
-pending a fresh game launch)
+**Status**: COMPLETE
 **Implementation Date**: 2026-08-23
 
 > **Note**: No issue tracker ticket (personal utility).
@@ -114,10 +113,11 @@ spanning player-to-cursor rather than one point is what makes it behave (see Ris
 
 ## Risks & Assumptions
 
-- **`SmartCursorLookup` may not be JIT-compiled until the smart cursor is first used**, like
-  fast placement. If so the anchor resolves only after the player holds Shift once, and the
-  cheat reports "matched nothing" until then — which the honest reasons from spec 030 already
-  express, and which auto-restore's retry loop already tolerates.
+- **`SmartCursorLookup` was expected to compile only on first use**, like fast placement, so
+  that the anchor would resolve only after the player held Shift once. Checked on a fresh
+  launch and it does **not** behave that way: the anchor resolves as soon as the player is
+  in a world. The concern was unfounded for this method; the honest-reason path that would
+  have covered it is still correct and still covers the anchors that do behave that way.
 - **Shrinking the box changes behaviour, not just cost**: the smart cursor will not reach as
   far as it did. That is the point, but it means the cheat is not purely an optimisation and
   belongs under the user's control with a visible value.
@@ -147,10 +147,15 @@ spanning player-to-cursor rather than one point is what makes it behave (see Ris
 - [x] Changing the value changes the search box live, without a re-enable
 - [x] Disabling restores the displaced bytes and the original smart-cursor behaviour returns
 - [x] The anchor still resolves with the cheat applied (cold re-resolve)
-- [ ] Behaviour when the method has not been JIT-compiled yet — NOT VERIFIED. It was
-      already compiled in the session this was built in, so the path was never exercised.
-      By design it reports "matched nothing" honestly (spec 030) and auto-restore retries,
-      but that is reasoning, not evidence. Confirm on the next fresh game launch
+- [x] Behaviour when the method has not been JIT-compiled yet — CHECKED, and **the premise
+      was wrong**. On a freshly launched game, in-world, before the maintainer had held
+      Shift even once, the anchor resolved: `available=True sites=1`, from a real scan
+      (the cheat was off, so the status took the resolution path rather than reporting a
+      cached result). `SmartCursorLookup` is therefore already compiled by the time a
+      player is in a world, and the "not yet JIT-compiled" state does not occur where it
+      would matter. The honest-reason path is still there and still correct; it is simply
+      not reached by this anchor. Not checked at the main menu, before a world is loaded —
+      but nothing writes patches there
 - [x] The stutter is gone in play, maintainer-confirmed, with reach/tool_reach still at 75.
       Note it was triggerable by *holding Shift alone*, i.e. by the per-frame search rather
       than by placing. The interleaved CPU measurement used for spec 033 was deliberately

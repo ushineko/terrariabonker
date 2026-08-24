@@ -68,6 +68,8 @@ def _cli_args_user(sub_args: list[str]) -> tuple[str, list[str]]:
 
 # Grid rows built between repaints; see _rebuild_recipe_grid.
 GRID_CHUNK = 500
+# Auto-restore passes before giving up, whether it is making progress or erroring.
+RESTORE_RETRIES = 8
 ROLE_ITEM_ID = int(Qt.ItemDataRole.UserRole)
 ROLE_SEARCH = int(Qt.ItemDataRole.UserRole) + 1
 
@@ -731,6 +733,15 @@ class MainWindow(QWidget):
             if rep is None:
                 # A refusal (e.g. require_compatible on a misread build) used to vanish
                 # here, so auto-restore looked like it simply never ran.
+                #
+                # It is also worth retrying. The refusal that actually happens is a
+                # startup race — the version string is scanned out of live memory, and
+                # for a moment after launch the game's own has not been allocated — so
+                # giving up on the first error killed auto-restore for the whole session
+                # over a condition that clears itself within seconds.
+                if self._restore_attempts < RESTORE_RETRIES:
+                    QTimer.singleShot(2000, self._do_restore)
+                    return
                 if "[ERROR]" in out:
                     self.log.appendPlainText(f"[auto-restore FAILED] {out.strip()}")
                 return
@@ -747,7 +758,7 @@ class MainWindow(QWidget):
             left = (sorted(rep["pending"]), sorted(rep["skipped"]))
             progressed = left != self._restore_last_left
             self._restore_last_left = left
-            if any(left) and progressed and self._restore_attempts < 8:
+            if any(left) and progressed and self._restore_attempts < RESTORE_RETRIES:
                 QTimer.singleShot(2000, self._do_restore)
             elif any(left) and not progressed and self._restore_attempts > 1:
                 for line in client.restore_summary(rep, profile.items()):

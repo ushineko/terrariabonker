@@ -36,10 +36,33 @@ KNOWN_BUILD_KEY = build_key(KNOWN_VERSION, KNOWN_BUILDID)
 
 # UTF-16LE "vX.Y.Z[.W]" as the menu/version string appears in memory.
 _VER_RE = re.compile(rb"v\x00((?:\d\x00)+(?:\.\x00(?:\d\x00)+)+)")
+# No component of a Terraria version is anywhere near this. The mono runtime's own
+# version string — "v2.0.50727", the .NET 2.0 build number — matches the pattern above,
+# and right after the game launches it can be the *only* match in memory, because
+# Terraria's own string has not been allocated yet. Left unfiltered it won the vote and
+# the whole program concluded the game was "Terraria 2.0.50727".
+_MAX_COMPONENT = 1000
+
+
+def _plausible(version: str) -> bool:
+    """Could this be a game version at all?
+
+    Returning None when nothing plausible is found is the point: "I cannot read the
+    version yet" is recoverable — the caller retries — while a confident wrong answer
+    aborts everything with a message about the offsets being wrong.
+    """
+    try:
+        return all(int(part) < _MAX_COMPONENT for part in version.split("."))
+    except ValueError:
+        return False
 
 
 def detect_version(mem) -> str | None:
-    """Return the game's version string (e.g. "1.4.5.7") scanned from memory."""
+    """Return the game's version string (e.g. "1.4.5.7") scanned from memory, or None.
+
+    None means "not readable yet", which happens for a moment after launch: it is a
+    scan of live memory, and the string it looks for has to have been allocated first.
+    """
     counts: dict[str, int] = {}
     for start, end in mem.regions():
         buf = mem.read(start, end - start)
@@ -47,8 +70,11 @@ def detect_version(mem) -> str | None:
             continue
         for m in _VER_RE.finditer(buf):
             s = m.group(1).replace(b"\x00", b"").decode("ascii", "ignore")
-            if s.count(".") >= 2:            # want X.Y.Z or X.Y.Z.W, not "v1.0"
-                counts[s] = counts.get(s, 0) + 1
+            if s.count(".") < 2:             # want X.Y.Z or X.Y.Z.W, not "v1.0"
+                continue
+            if not _plausible(s):            # a runtime's version, not the game's
+                continue
+            counts[s] = counts.get(s, 0) + 1
     if not counts:
         return None
     return max(counts, key=counts.get)
