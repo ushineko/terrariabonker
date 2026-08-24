@@ -18,8 +18,8 @@ from __future__ import annotations
 import os
 import re
 
-KNOWN_VERSION = "1.4.5.7"       # the build these offsets were derived against
-KNOWN_BUILDID = "24825745"      # Steam buildid of that build (extra fingerprint)
+KNOWN_VERSION = "1.4.5.8"       # the build the project currently targets
+KNOWN_BUILDID = "24893155"      # Steam buildid of that build (extra fingerprint)
 
 
 def build_key(version: str | None, buildid: str | None) -> str:

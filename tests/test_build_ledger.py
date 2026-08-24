@@ -53,6 +53,17 @@ def test_build_key_survives_missing_pieces():
 # Anchors derived after the original build, so they were never seen on it.
 LATER_ANCHORS = {"equip_apply", "equip_benefits", "inventory_scan", "smart_cursor"}
 
+# The build the original AOBs were derived against. Distinct from KNOWN_BUILD_KEY, which
+# names whatever the project currently targets and moves when the game updates.
+DERIVATION_BUILD = "1.4.5.7+24825745"
+# Every build any anchor is allowed to claim, and why. The ledger records proof: each of
+# these was watched working in-game on the build it names.
+CONFIRMED_BUILDS = {
+    DERIVATION_BUILD,           # where the AOBs came from
+    "1.4.5.7+24893155",         # a mixed key: 1.4.5.7 running, 1.4.5.8 already downloaded
+    "1.4.5.8+24893155",         # the update, all twelve cheats confirmed after it loaded
+}
+
 
 def test_the_original_anchors_are_verified_on_the_derivation_build():
     for key, anchor in ANCHORS.items():
@@ -71,22 +82,34 @@ def test_the_original_anchors_record_the_rebuild_they_were_reconfirmed_on():
 
 def test_a_later_anchor_never_inherits_the_default_verification():
     """Honesty is the point of the ledger: anchors derived after the original build were
-    never seen on it, so they must not pick up the default set."""
+    never seen on it, so they must not pick up the default set.
+
+    Asserted against the derivation build rather than KNOWN_BUILD_KEY, which moves when
+    the game updates — it now names 1.4.5.8, a build these anchors *were* confirmed on.
+    """
     for key in LATER_ANCHORS:
-        assert ver.KNOWN_BUILD_KEY not in ANCHORS[key].verified, key
+        assert DERIVATION_BUILD not in ANCHORS[key].verified, key
 
 
-def test_confirmed_later_anchors_claim_only_the_build_they_were_proven_on():
+def test_confirmed_later_anchors_claim_only_the_builds_they_were_proven_on():
     for key in LATER_ANCHORS:
-        assert ANCHORS[key].verified == frozenset({"1.4.5.7+24893155"}), key
+        assert ANCHORS[key].verified == frozenset(
+            {"1.4.5.7+24893155", "1.4.5.8+24893155"}), key
 
 
 def test_an_anchor_claims_a_build_only_once_it_is_confirmed_in_game():
     """The ledger records proof, not derivation: every entry here was watched working
-    in-game on the build it names."""
+    in-game on the build it names. Adding a build to this set is a claim about reality,
+    so the allowlist has to be edited deliberately alongside it."""
     for key, anchor in ANCHORS.items():
         for build in anchor.verified:
-            assert build.startswith("1.4.5.7+"), (key, build)
+            assert build in CONFIRMED_BUILDS, (key, build)
+
+
+def test_the_current_target_is_a_confirmed_build():
+    """KNOWN_BUILD_KEY is what the panel compares against; it must not name a build
+    nobody has confirmed."""
+    assert ver.KNOWN_BUILD_KEY in CONFIRMED_BUILDS
 
 
 def test_per_anchor_divergence_is_supported():

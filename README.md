@@ -1,6 +1,6 @@
 # terrariabonker
 
-A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.7**
+A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8**
 (Steam appid 105600), the Windows build running under Proton (wine-mono). It
 finds the player in memory with no hardcoded address, then reads, edits and
 freezes player state and inventory items by reading and writing
@@ -52,7 +52,7 @@ holds no state; stopping it ends every effect.*
 - **Long reach** — extends placement distance on all items.
 - **Give items by name** — the editor dialog's item field autocompletes over all
   6,195 item names, extracted from the game's own `Terraria.exe` for the exact
-  1.4.5.7 build.
+  1.4.5.8 build.
 - **Recipe browser** — a crafting-panel-style **icon grid** of every craftable item,
   with a search box that filters in real time; click an item for a popup detailing its
   ingredients (icon + count) and crafting station. Toggle **Makes** (how an item is
@@ -148,7 +148,7 @@ a spot on the fullscreen map to warp there.
 
 **Credit:** the pickup-range, spawn-rate, drop-chance, and map-ping teleport cheats
 were **ported from the FearLess Forums "TerrariaReGrind" Cheat Engine table**. That
-table targets 1.4.5; the method sites and offsets were re-derived here for the 1.4.5.7
+table targets 1.4.5; the method sites and offsets were re-derived here for the 1.4.5.7/.8
 build (the drop hook, for instance, moved from `[esi+0C]` to `[esi+10]` and now floors
 four CommonDrop twins instead of one; the teleport reads the ping in tile units and
 scales ×16 to the pixel coordinates `Player.Teleport` expects). Reverse-engineering
@@ -312,14 +312,34 @@ the **Refresh** button and the reload after an edit.
 
 ## Version safety
 
-The offsets are specific to one game build. `version.py` reads the running game's
-version string and Steam buildid and compares them to the known-good build:
+The offsets are specific to one game build, so knowing which build is running matters.
+The version comes from the **version constant in the exe the process maps**, after checking
+that mapping still refers to the file on disk — Steam replaces the file while the game keeps
+running the code it already loaded, and in that window the file describes a build the
+process is not executing. (Scanning live memory for a version string was tried and is kept
+only as a fallback for that window: the process contains several version-shaped strings that
+are not the game's, and picking the most numerous returns the wrong one.)
 
 | Situation | Behaviour |
 | :--- | :--- |
-| Exact match (`1.4.5.7`, buildid `24825745`) | proceeds |
-| Hotfix only (`1.4.5.8`) or buildid drift | warns, proceeds |
+| Exact match (`1.4.5.8`, buildid `24893155`) | proceeds |
+| Hotfix only or buildid drift | warns, proceeds |
+| Version not readable yet (just launched) | reports unknown, retries |
 | Major/minor/patch differs (`1.4.6`, `1.5.x`) | refuses without `--force` |
+
+**When the game updates**, the panel says so instead of quietly half-working. An
+unrecognised build raises a dialog naming what is running and what is known, and offers to
+check every cheat against it without patching anything:
+
+- all of them still match — one click records the build and you are not asked again;
+- some do not — they are listed by name with the reason, and you choose between carrying on
+  without them (disabled and greyed, reason on hover) or exiting.
+
+A build you accept is recorded in `~/.config/terrariabonker/accepted-builds.json` and is
+deliberately *not* the same claim as a build the project has verified: accepting means the
+byte patterns still match, while the ledger in `patcher.py` means somebody watched each
+cheat work in-game on that exact build. `terrariabonker build-check` runs the same check
+from the command line.
 
 The locator also fails safe: a shifted layout matches nothing rather than writing
 to a wrong address. After an update, see [docs/discovery.md](docs/discovery.md).

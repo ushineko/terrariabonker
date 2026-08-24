@@ -159,7 +159,8 @@ def cmd_set_item(args) -> int:
 SERVE_OPS = frozenset({
     "status", "version", "inventory", "inv", "set-hp", "set-max-hp", "set-mana",
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
-    "fast-mining", "long-reach", "compendium", "spawn-npc",
+    "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
+    "accept-build",
 })
 
 
@@ -242,6 +243,32 @@ def cmd_compendium(args) -> int:
     svc = _svc()
     cat = svc.compendium(refresh=getattr(args, "refresh", False))
     print(json.dumps(cat))
+    return 0
+
+
+def cmd_build_check(args) -> int:
+    """What build is running, is it recognised, and do the cheats resolve on it."""
+    svc = _svc()
+    got = svc.build_check()
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    print(f"build {got['build']} ({got['level']})")
+    print(f"  recognised: {got['recognised']}  known-good: {got['known']}"
+          f"  decision: {got['decision']}")
+    for name, r in sorted(got["cheats"].items()):
+        mark = "ok " if r["resolved"] else "NO "
+        extra = f"  {r['reason']}" if r["reason"] else ""
+        print(f"  {mark} {name:16} sites={r['sites']}{extra}")
+    return 0
+
+
+def cmd_accept_build(args) -> int:
+    """Record this machine's decision about the running build (spec 036)."""
+    svc = _svc()
+    got = svc.accept_build(args.decision, args.failed or ())
+    print(json.dumps(got) if args.json else
+          f"recorded {got['build']} as {got['decision']}")
     return 0
 
 
@@ -505,6 +532,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--refresh", action="store_true",
                    help="rescan the game instead of using the per-build cache")
     p.set_defaults(func=cmd_compendium)
+
+    p = sub.add_parser("build-check",
+                       help="report the running build and whether the cheats resolve on it")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.set_defaults(func=cmd_build_check)
+
+    p = sub.add_parser("accept-build",
+                       help="record this machine's decision about the running build")
+    p.add_argument("decision", choices=["accepted", "degraded"])
+    p.add_argument("--failed", nargs="*", default=[],
+                   help="cheats that did not resolve (recorded so they stay disabled)")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.set_defaults(func=cmd_accept_build)
 
     p = sub.add_parser("spawn-npc", help="spawn an NPC beside the player")
     p.add_argument("id", type=int, help="NPCID (netID; negatives are the variants)")

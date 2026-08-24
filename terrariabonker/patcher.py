@@ -227,11 +227,21 @@ _RAW_ANCHORS: dict[str, Pattern] = {
 # Builds every anchor here has been confirmed on, newest last. "Verified" means the AOB
 # resolved AND the cheat was seen working in-game on that build — not merely that it matched.
 _VERIFIED_BUILDS: tuple[str, ...] = (
-    ver.KNOWN_BUILD_KEY,        # the build these AOBs were derived against
-    # 2026-08-23 rebuild. It left every field displacement identical but JIT'd ResetEffects
-    # into two arenas, so reset_block/reset_minions match twice; both copies are patched
-    # now. All nine cheats confirmed working in-game on it by the maintainer.
+    ver.KNOWN_BUILD_KEY,        # 1.4.5.8+24893155 — see the 2026-08-23 note below
+    # The build these AOBs were originally derived against.
+    "1.4.5.7+24825745",
+    # 2026-08-23, and a key to distrust: this one is a *mix*. Steam downloaded 1.4.5.8 at
+    # 12:19 while a 1.4.5.7 process kept running, so the version came from the running
+    # game and the buildid from the already-updated manifest, describing a build that
+    # never existed. It is kept because the panel really did record verifications under
+    # it — those were confirmed on 1.4.5.7 — and dropping it would silently un-verify
+    # them. The detector that produced it has since been fixed to read the version out of
+    # the exe the process maps.
     "1.4.5.7+24893155",
+    # 2026-08-23, after the update was actually loaded: every anchor resolved on 1.4.5.8
+    # and the maintainer confirmed all twelve cheats still working in-game. The update did
+    # not touch the code any of them patch.
+    "1.4.5.8+24893155",
 )
 
 # Per-anchor divergence, for a build that breaks only some anchors: {anchor: (build, ...)}.
@@ -246,17 +256,17 @@ _VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
     # Warding prefixes contributed defense (the equip_benefits edit), the vanity armour in
     # 10..12 stayed inert, and the info accessories that already worked there (Depth Meter,
     # Tungsten Watch) were unchanged.
-    "equip_apply": ("1.4.5.7+24893155",),
-    "equip_benefits": ("1.4.5.7+24893155",),
+    "equip_apply": ("1.4.5.7+24893155", "1.4.5.8+24893155"),
+    "equip_benefits": ("1.4.5.7+24893155", "1.4.5.8+24893155"),
     # 2026-08-23: confirmed in-game — accessories carried in the inventory granted their
     # effects without being equipped, their Warding prefixes kept contributing defense when
     # moved out of a vanity slot into the bag (the GrantPrefixBenefits call), and disabling
     # restored the displaced bytes and stopped the effects with the game still running.
-    "inventory_scan": ("1.4.5.7+24893155",),
+    "inventory_scan": ("1.4.5.7+24893155", "1.4.5.8+24893155"),
     # 2026-08-23: confirmed in-game with reach/tool_reach at 75 — the stutter (triggerable
     # by merely holding Shift, i.e. the per-frame search, not the placing) is gone, while
     # manual placement reach and tool/interaction reach are unchanged.
-    "smart_cursor": ("1.4.5.7+24893155",),
+    "smart_cursor": ("1.4.5.7+24893155", "1.4.5.8+24893155"),
 }
 
 ANCHORS: dict[str, Anchor] = {
@@ -1111,6 +1121,31 @@ class Patcher:
 
     def _anchor_key(self, name: str) -> str:
         return (INJECTIONS[name].anchor if name in INJECTIONS else CHEATS[name].anchor)
+
+    def probe(self, build: str | None = None) -> dict[str, dict]:
+        """Resolve every cheat against the running build, patching nothing (spec 036).
+
+        Unlike ``details`` this reports what a *scan* finds, not what is currently
+        applied, because the question it answers is "would these patterns still match on
+        this build" — and an applied injection overwrites its own anchor, which would
+        otherwise read as a pass for the wrong reason. Applied cheats are therefore
+        reported as resolving, since they demonstrably did.
+        """
+        out: dict[str, dict] = {}
+        for name in PATCH_CATALOG:
+            anchor_key = self._anchor_key(name)
+            try:
+                applied = self.is_enabled(name)
+            except PatchError:
+                applied = False
+            if applied:
+                out[name] = {"resolved": True, "applied": True, "sites": len(
+                    (self._inj.get(name) or {}).get("sites", ())) or 1, "reason": ""}
+                continue
+            res = self.resolution(anchor_key, build)
+            out[name] = {"resolved": bool(res.available), "applied": False,
+                         "sites": len(res.sites), "reason": res.reason}
+        return out
 
     def details(self, build: str | None = None) -> dict[str, dict]:
         """Per-cheat availability for the UI: is it applied, can it be applied here, was

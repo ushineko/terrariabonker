@@ -566,6 +566,39 @@ class Service:
         from terrariabonker.patcher import Patcher
         return Patcher(self.mem)
 
+    def build_check(self) -> dict:
+        """Is this build one we know, and do the cheats still resolve on it? (spec 036)
+
+        Answers the question the panel asks after a game update: what is running, has this
+        machine already decided about it, and which cheats would work. Patches nothing.
+        """
+        from terrariabonker import builds
+        from terrariabonker.patcher import ANCHORS
+
+        key = self.build_key()
+        version, buildid, level, msg = self._build_info()
+        verified = any(key in a.verified for a in ANCHORS.values())
+        decided = builds.decision(key)
+        probe = self.patcher().probe(key)
+        failed = sorted(n for n, r in probe.items() if not r["resolved"])
+        return {
+            "build": key, "version": version, "buildid": buildid,
+            "level": level, "message": msg,
+            "known": bool(verified), "verified_everywhere": all(
+                key in a.verified for a in ANCHORS.values()),
+            "decision": (decided or {}).get("decision"),
+            "recognised": bool(verified) or decided is not None,
+            "cheats": probe, "failed": failed,
+        }
+
+    def accept_build(self, how: str, failed=()) -> dict:
+        """Record this machine's decision about the running build."""
+        from terrariabonker import builds
+
+        key = self.build_key()
+        builds.remember(key, how, failed)
+        return {"build": key, "decision": how, "failed": sorted(failed)}
+
     def restore(self) -> dict:
         """Re-apply the cross-session profile (desired cheats + item edits) to this game.
 

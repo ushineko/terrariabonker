@@ -26,9 +26,10 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QTabWidget, QVBoxLayout,
                              QWidget)
 
-from terrariabonker import __version__, names, prefixes, profile, recipes, sprites
+from terrariabonker import __version__, builds, names, prefixes, profile, recipes
+from terrariabonker import sprites
 from terrariabonker import version as ver
-from terrariabonker.gui import client, invgrid
+from terrariabonker.gui import buildgate, client, invgrid
 from terrariabonker.gui.compendium import CompendiumTab
 from terrariabonker.gui.helper import Helper
 from terrariabonker.gui import uitext
@@ -180,6 +181,9 @@ class MainWindow(QWidget):
         self._dialog_open = False                  # pause syncing while the editor is up
         self._opening_slot = False                 # a pre-dialog slot read is outstanding
         self._restore_pid = None                   # last game pid we auto-restored to
+        self._gated_builds: set[str] = set()       # builds already asked about (spec 036)
+        self._gate_open = False
+        self._unavailable: set[str] = set()        # cheats this build cannot run
         self._restore_attempts = 0                 # retry budget for lazily-JIT'd cheats
         self._restore_last_left = None             # last (pending, skipped): stop when unchanged
         self._build()
@@ -549,9 +553,17 @@ class MainWindow(QWidget):
         for name, cb in self._patch_cbs.items():
             d = detail.get(name) or {}
             if detail:
-                available = bool(d.get("available", True))
+                # A cheat the build gate found dead stays off even if a later scan
+                # resolves it: the user chose to run without it (spec 036).
+                gated = name in self._unavailable
+                available = bool(d.get("available", True)) and not gated
                 cb.setEnabled(available)
-                if not available:
+                if gated:
+                    cb.setToolTip(uitext.wrap(
+                        "Disabled for this build: it did not match when the game "
+                        "updated, and you chose to continue without it. Re-check with "
+                        "'terrariabonker build-check'."))
+                elif not available:
                     cb.setToolTip(uitext.wrap(
                         f"Unavailable on this build: {d.get('reason', '')}"))
                 elif not d.get("verified", True):
@@ -708,7 +720,64 @@ class MainWindow(QWidget):
             f"<b>{d.get('name')}</b> — HP {d.get('hp')}/{d.get('max_hp')} · "
             f"Mana {d.get('mana')}/{d.get('max_mana')} · "
             f"PID {d.get('pid')} · Terraria {build}{god}")
+        self._maybe_gate_build(build, d)
         self._maybe_restore(d)
+
+    def _maybe_gate_build(self, build: str | None, d: dict | None = None):
+        """Ask about a build we do not recognise, once per build (spec 036).
+
+        The trigger is the build key rather than panel startup: the case this exists for
+        is Terraria updating underneath a running panel, so the gate has to fire when the
+        game is restarted into a new build too.
+
+        Waits for a player to be in-world. Several cheats hook methods mono compiles
+        lazily, so a scan at the main menu reports them as unmatched — and a dialog that
+        says a cheat is dead when it is merely not compiled yet is worse than no dialog.
+        """
+        if not build or build in self._gated_builds or self._gate_open:
+            return
+        if d is not None and not d.get("name"):
+            return                                  # no player yet: too early to judge
+        self._gated_builds.add(build)
+        self._gate_open = True
+        self.busy("Checking the cheats against this build…")
+
+        def got(raw):
+            self.busy(None)
+            report = client.parse_build_check(raw)
+            if report is None:
+                self._gate_open = False
+                self._gated_builds.discard(build)      # unreadable: ask again next time
+                return
+            self._apply_build_decision(report)
+
+        self._call(client.build_check_argv(), on_output=got)
+
+    def _apply_build_decision(self, report: dict):
+        """Act on a finished build check: nothing to do, a remembered decision, or ask."""
+        self._gate_open = False
+        failed = set(report.get("failed") or ())
+        if report.get("recognised"):
+            # Known good, or already decided here — honour any cheats recorded as dead.
+            if report.get("decision") == buildgate.CONTINUE:
+                self._unavailable = set(builds.failed_cheats(report["build"]))
+                self.refresh_patches()
+            return
+
+        dlg = buildgate.BuildGateDialog(self, report, ver.KNOWN_BUILD_KEY)
+        dlg.exec()
+        choice = dlg.result_decision
+        if choice == buildgate.EXIT:
+            self.log.appendPlainText(
+                f"[build] {report['build']} not accepted — exiting")
+            QTimer.singleShot(0, self.close)
+            return
+        self._unavailable = failed if choice == buildgate.CONTINUE else set()
+        self.log.appendPlainText(
+            f"[build] {report['build']} recorded as {choice}"
+            + (f"; disabled {', '.join(sorted(failed))}" if failed else ""))
+        self._spawn(client.accept_build_argv(choice, failed))
+        self.refresh_patches()
 
     def _maybe_restore(self, d: dict):
         """Auto-restore the saved profile when a fresh in-world game is detected (any new

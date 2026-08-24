@@ -105,6 +105,26 @@ def give_argv(item_type: int, stack: int) -> list[str]:
     return ["give", str(item_type), "--stack", str(stack)]
 
 
+def build_check_argv() -> list[str]:
+    return ["build-check", "--json"]
+
+
+def accept_build_argv(decision: str, failed=()) -> list[str]:
+    argv = ["accept-build", decision, "--json"]
+    if failed:
+        argv += ["--failed", *sorted(failed)]
+    return argv
+
+
+def parse_build_check(raw: str) -> dict | None:
+    """The build report; None when the command failed or produced nothing."""
+    try:
+        data = json.loads(raw.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    return data if isinstance(data, dict) and "build" in data else None
+
+
 def spawn_npc_argv(net_id: int, distance: int) -> list[str]:
     return ["spawn-npc", str(net_id), "--distance", str(distance)]
 
