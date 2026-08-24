@@ -126,6 +126,9 @@ and teleport like any other pylon.
       placed a second Cavern pylon with one already in the world
 - [x] Both pylons appear on the map, drawn into the pylon network — verified in-game
       from the maintainer's map screenshot showing two Cavern pylons with network lines
+- [x] Both can be teleported to — maintainer-confirmed travelling between two pylons of
+      the same type, so the teleport UI distinguishes them by position as the recon
+      expected
 - [x] Disabling restores the displaced bytes and the vanilla one-per-type rule returns
 - [x] The stub returns **zero** (a test pins the polarity, since returning one would ban
       pylons entirely; mutation-checked)
@@ -156,7 +159,8 @@ The second question was whether anything downstream assumes uniqueness — a pla
 succeeded but never appeared on the map would be worse than no cheat.
 `UpdatePylonsListAndBroadcastChanges` rebuilds the pylon list by walking every pylon tile
 entity and adding each with its own position and type, with no dedupe anywhere. Confirmed in
-play: two Cavern pylons, both on the map, both wired into the network.
+play: two Cavern pylons, both on the map, both wired into the network, and travel between
+them works.
 
 Reviewers: the `pylon_place` anchor (why the first three bytes are wildcarded) and
 `ce/poc_pylon.lua`.
@@ -185,6 +189,6 @@ Live, against the running game:
 - **maintainer-confirmed in play**: a second Cavern pylon placed alongside an existing one,
   both drawn on the map and connected into the pylon network.
 
-Not separately exercised: teleporting to each of two same-type pylons in turn. The map shows
-both as network nodes, and the teleport handler works from positions rather than types, but
-that is reasoning rather than evidence.
+Teleporting between two pylons of the same type is maintainer-confirmed, which was the one
+part the recon could only reason about: the pylon list keeps duplicates and the teleport
+handler works from positions rather than types, and travel between them behaves normally.
