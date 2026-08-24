@@ -1,7 +1,7 @@
 # Spec 040: Ore extractor lite — auto-mine contiguous ores
 
-**Status**: RECON — not implemented. The tile map is now readable; three
-questions remain (below)
+**Status**: RECON — not implemented, but no longer blocked. The tile map is
+readable and the call is understood; one sizing question remains
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -107,16 +107,38 @@ code can mine a tile properly.
 
 ## Open questions, in the order they need answering
 
-*(1 is answered; 2-4 remain.)*
+*(1-3 are answered; only 4 remains.)*
 
 1. ~~**The `Tilemap` layout.**~~ **Answered** — see above. The flood fill can be written in
    Python today.
-2. **Is `PickTile` safe to call from a cave?** It touches `hitTile`/`hitReplace` caches and
-   sends net messages. Calling it re-entrantly, or outside the frame phase it expects, may
-   not be safe.
-3. **`PickTile` or `KillTile` directly?** `PickTile` respects pick power and plays the
-   normal mining pipeline; `KillTile` is immediate but skips it. "Lite" probably wants the
-   first.
+2. ~~**Is `PickTile` safe to call from a cave?**~~ **Answered — and it is safer than
+   expected.** Four things were checked in the IL rather than assumed:
+
+   - **The net traffic is free.** `NetMessage.SendData` opens with
+     `ldsfld Main::netMode; brtrue; ret` — in single player every SendData on the kill
+     path returns immediately.
+   - **Out-of-range coordinates are a no-op, not a crash.** `WorldGen.KillTile` bounds-checks
+     `i`/`j` against `Main.maxTilesX`/`maxTilesY` and returns. (That independently confirms
+     which of the two sizes is the world extent — see above.)
+   - **Protected tiles protect themselves.** `PickTile_DetermineDamage` calls
+     `WorldGen.CanKillTile` and zeroes the damage if the tile may not be broken, so the
+     flood fill inherits the game's own rules without implementing any of them.
+   - **The damage cache does not leak.** Damage accumulates in `this.hitTile` and the tile
+     breaks at 100; `ClearMiningCacheAt` frees the slot on the break. `HitTile` has a fixed
+     `MAX_HITTILES` cap, which only matters if tiles need repeated hits — with a high pick
+     power they break on the first.
+
+   Nothing in the method needs the item-use context: it reads the tile, `this.hitTile` and
+   statics. Two requirements remain — it is an instance method, so the stub needs
+   `this` = `Main.player[Main.myPlayer]`, and it must run on the game thread, which is
+   exactly why the design is a per-frame stub rather than an external call.
+
+   **Signature**, from two real callers: `PickTile(this, int x, int y, int pickPower,
+   int cap)`. `DamageTileWithShovel` passes `(100, -1)`; the mining path passes
+   `(item.pick, -1)`.
+3. ~~**`PickTile` or `KillTile` directly?**~~ **PickTile.** `CanKillTile` is consulted inside
+   `PickTile_DetermineDamage`, so calling `KillTile` directly would skip the one check that
+   keeps a flood fill away from tiles the game forbids breaking.
 4. **How much per frame?** A large vein mined in one frame will spike; a few tiles per frame
    is smoother and is also a natural way to keep the stub simple.
 
