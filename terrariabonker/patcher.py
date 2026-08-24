@@ -131,6 +131,19 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # re-resolve fails once the cheat is applied ("anchor not found"). The invariant
     # prefix (fmulp…mov edi,ecx…jle) plus the downstream store (mov [esp+4],edi;
     # mov eax,[ebp+8]; mov [esp],eax) keep it unique.
+    # TETeleportationPylon.PlacementPreviewHook_CheckIfCanPlace — the whole one-pylon-
+    # per-biome rule for single-player (spec 037). Its IL is
+    #     type = GetPylonTypeFromPylonTileStyle(style)
+    #     return Main.PylonSystem.HasPylonOfType(type) ? 1 : 0
+    # and it is registered with badReturn: 1, so returning 0 always lifts the limit.
+    # GetPylonTypeFromPylonTileStyle is inlined to the two movzx here.
+    # The first three bytes are the ones the cheat overwrites, so they are WILDCARDED —
+    # otherwise a cold re-resolve fails once it is applied and it could not be turned off
+    # again (the trap specs 032-034 each hit). The mono type-init immediate, the init
+    # call, Main.PylonSystem's address and the call to HasPylonOfType are ASLR'd.
+    "pylon_place": _pat("?? ?? ?? 83 EC 18 B8 ?? ?? ?? ?? F7 00 01 00 00 00 74 05 "
+                        "E8 ?? ?? ?? ?? 8B 45 14 0F B6 C0 0F B6 C8 8B 05 ?? ?? ?? ?? "
+                        "89 4C 24 04 89 04 24 39 00 8D 6D 00 E8 ?? ?? ?? ??"),
     "place": _pat("DE C9 DD 5D F0 F2 0F 10 45 F0 F2 0F 2C C8 8B F9 85 C0 7E 0A "
                   "?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 89 7C 24 04 8B 45 08 89 04 24"),
     # TileReachCheckSettings.GetRanges(this, out x, out y). Prologue + mono type-init
@@ -267,6 +280,10 @@ _VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
     # by merely holding Shift, i.e. the per-frame search, not the placing) is gone, while
     # manual placement reach and tool/interaction reach are unchanged.
     "smart_cursor": ("1.4.5.7+24893155", "1.4.5.8+24893155"),
+    # 2026-08-23: confirmed in-game on 1.4.5.8 — a second Cavern pylon was placed with a
+    # Cavern pylon already in the world, and both appear on the map wired into the pylon
+    # network. Nothing downstream dedupes by type, as the recon predicted.
+    "pylon_place": ("1.4.5.8+24893155",),
 }
 
 ANCHORS: dict[str, Anchor] = {
@@ -309,6 +326,11 @@ CHEATS: dict[str, Cheat] = {
         note="Extended placement reach for every item."),
     # Force a low itemTime at the placement-timing read site: `mov edi,N; nop*5`. N is the
     # itemTime (lower = faster), tunable via presets (Fast=4 / Faster=2 / Hyper=1).
+    "pylons": Cheat(
+        "pylons", "Multiple pylons per biome", "pylon_place", 0,
+        _b("55 8B EC"), _b("31 C0 C3"),
+        note="Place more than one pylon of the same type. Needs one pylon placed "
+             "first, so the game compiles the check."),
     "fast_place": Cheat(
         "fast_place", "Fast placement (ApplyItemTime)", "place", 20,
         _b("B8 01 00 00 00 3B F8 0F 4C F8"), b"",
@@ -702,7 +724,8 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
 # How the patches are grouped in the UI, in display order. A cheat missing from here
 # falls into the last section, so adding one never hides it.
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Build", ("mining", "reach", "fast_place", "tool_reach", "smart_cursor")),
+    ("Build", ("mining", "reach", "fast_place", "tool_reach", "smart_cursor",
+               "pylons")),
     ("Combat", ("max_minions", "spawn_rate", "loot")),
     ("Accessories", ("vanity_accs", "inventory_accs")),
     ("Misc", ("pickup", "teleport")),

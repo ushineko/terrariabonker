@@ -85,8 +85,9 @@ holds no state; stopping it ends every effect.*
   **drop-chance floor** (guaranteed or minimum-% common drops), **map-ping
   teleport** (double-click the fullscreen map to warp there), a **minion cap**
   (raise the summon limit), a **smart-cursor radius** clamp (large reach makes auto-place
-  scan a huge area every frame), **working vanity accessories** and **accessories from your
-  inventory** (see below): things a value-write
+  scan a huge area every frame), **multiple pylons per biome** (build a pylon network with
+  several waystations of the same type), **working vanity accessories** and **accessories
+  from your inventory** (see below): things a value-write
   can't hold, applied by patching the game's JIT code through `/proc` — including
   code-cave injections for the reach, pickup, spawn, and drop hooks and a managed
   code-cave *call* into `Player.Teleport` for the map-ping warp (derived with
@@ -244,7 +245,7 @@ Launch from the application menu (**terrariabonker**) or `terrariabonker gui`.
   code-patch cheats (mining speed, placement reach, fast placement, tool/interaction
   reach, item pickup range, spawn rate, drop-chance floor, **map-ping teleport**, and
   **minion cap**, **vanity accessories**, **inventory accessories**, **smart-cursor
-  radius**) with tunable value spinboxes where applicable, grouped into
+  radius**, **multiple pylons**) with tunable value spinboxes where applicable, grouped into
   **Build / Combat / Accessories / Misc** tabs
   (fast placement offers
   **Fast / Faster / Hyper** presets). With teleport on, **double-click a

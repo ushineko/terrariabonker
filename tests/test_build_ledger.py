@@ -52,6 +52,12 @@ def test_build_key_survives_missing_pieces():
 
 # Anchors derived after the original build, so they were never seen on it.
 LATER_ANCHORS = {"equip_apply", "equip_benefits", "inventory_scan", "smart_cursor"}
+# Derived but never yet watched working in-game, so they claim no build at all. The panel
+# reports these as unproven, which is the truth — an empty set is a statement, not a gap.
+UNPROVEN_ANCHORS: set[str] = set()
+# Derived on 1.4.5.8 and confirmed only there — they never existed on the older builds,
+# so they claim neither the derivation build nor the 2026-08-23 rebuild.
+NEWEST_ANCHORS = {"pylon_place"}
 
 # The build the original AOBs were derived against. Distinct from KNOWN_BUILD_KEY, which
 # names whatever the project currently targets and moves when the game updates.
@@ -67,7 +73,7 @@ CONFIRMED_BUILDS = {
 
 def test_the_original_anchors_are_verified_on_the_derivation_build():
     for key, anchor in ANCHORS.items():
-        if key in LATER_ANCHORS:
+        if key in LATER_ANCHORS or key in UNPROVEN_ANCHORS:
             continue
         assert ver.KNOWN_BUILD_KEY in anchor.verified, key
 
@@ -75,7 +81,7 @@ def test_the_original_anchors_are_verified_on_the_derivation_build():
 def test_the_original_anchors_record_the_rebuild_they_were_reconfirmed_on():
     """2026-08-23 rebuild: those nine cheats were confirmed in-game on 24893155."""
     for key, anchor in ANCHORS.items():
-        if key in LATER_ANCHORS:
+        if key in LATER_ANCHORS or key in UNPROVEN_ANCHORS or key in NEWEST_ANCHORS:
             continue
         assert "1.4.5.7+24893155" in anchor.verified, key
 
@@ -336,3 +342,19 @@ def test_an_applied_injection_reports_the_sites_it_installed(monkeypatch):
     detail = patcher.Patcher.details(p, build=None)[name]
     assert detail["on"] is True
     assert detail["sites"] == 4, "reported the empty scan cache, not what is installed"
+
+
+def test_an_unproven_anchor_claims_nothing():
+    """An anchor that resolves but has never been watched working must claim no build.
+
+    Empty is the honest state and the panel renders it as unproven. Filling it in to
+    quiet the banner would be the exact dishonesty this ledger exists to prevent. The set
+    is empty at present — `pylon_place` sat in it until it was confirmed in-game — and it
+    is kept so the next derived-but-unproven anchor has somewhere honest to live.
+    """
+    for key in UNPROVEN_ANCHORS:
+        assert ANCHORS[key].verified == frozenset(), key
+
+
+def test_the_pylon_anchor_is_confirmed_on_the_build_it_was_seen_on():
+    assert ANCHORS["pylon_place"].verified == frozenset({"1.4.5.8+24893155"})

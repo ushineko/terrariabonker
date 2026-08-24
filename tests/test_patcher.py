@@ -40,7 +40,7 @@ def test_status_all_off_initially(game):
                           "tool_reach": False, "pickup": False, "spawn_rate": False,
                           "loot": False, "teleport": False, "max_minions": False,
                           "vanity_accs": False, "inventory_accs": False,
-                          "smart_cursor": False}
+                          "smart_cursor": False, "pylons": False}
 
 
 def test_tool_reach_injection_roundtrip(game):
@@ -356,3 +356,48 @@ def test_resolve_raises_when_anchor_missing(tmp_path, monkeypatch):
     p._exec_regions = lambda: [(BASE, BASE + 0x2000)]
     with pytest.raises(PatchError):
         p.enable("fast_place")
+
+
+def test_pylons_returns_zero_not_one(game):
+    """Polarity is the dangerous part of spec 037.
+
+    The hook is registered with badReturn: 1 and TileObject.CanPlace rejects the
+    placement when the hook's return *equals* badReturn. So the stub must return 0.
+    Returning 1 would not remove the limit — it would ban pylons entirely.
+    """
+    from terrariabonker.patcher import CHEATS
+
+    cheat = CHEATS["pylons"]
+    assert cheat.patched == b"\x31\xc0\xc3", "not xor eax,eax; ret"
+    assert cheat.patched[:2] in (b"\x31\xc0", b"\x33\xc0"), "does not zero eax"
+    assert b"\xb8\x01\x00\x00\x00" not in cheat.patched, "returns 1 — this bans pylons"
+
+
+def test_pylons_patches_the_method_entry(game):
+    """patch_off 0: the stub replaces the prologue, so nothing is displaced that would
+    have to be reproduced, and no code cave is needed."""
+    from terrariabonker.patcher import CHEATS
+
+    cheat = CHEATS["pylons"]
+    assert cheat.patch_off == 0
+    assert cheat.orig == b"\x55\x8b\xec", "push ebp; mov ebp,esp"
+    assert len(cheat.patched) == len(cheat.orig), "patch must not change the length"
+
+
+def test_the_pylon_anchor_wildcards_what_the_cheat_overwrites():
+    """Otherwise a cold re-resolve fails once applied and it could never be turned off —
+    the trap specs 032-034 each hit."""
+    from terrariabonker.patcher import ANCHORS, CHEATS
+
+    anchor = ANCHORS[CHEATS["pylons"].anchor]
+    mask = anchor.pattern.mask if hasattr(anchor.pattern, "mask") else None
+    if mask is None:
+        pytest.skip("pattern exposes no mask")
+    assert not any(mask[:3]), "the overwritten bytes are not wildcarded"
+
+
+def test_pylons_is_a_build_section_cheat():
+    from terrariabonker.patcher import SECTIONS
+
+    build = dict(SECTIONS)["Build"]
+    assert "pylons" in build
