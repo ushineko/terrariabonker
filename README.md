@@ -73,7 +73,9 @@ holds no state; stopping it ends every effect.*
   Items can be given to you;
   **NPCs can be spawned** beside you at a distance you choose. Neither items' nor NPCs' stats
   exist in `Terraria.exe` at all — they are assigned at runtime by `SetDefaults` — so they are
-  read from the game's own template objects in memory and cached per build.
+  read from the game's own template objects in memory and cached per build. An item's base
+  stats are decided by agreement between its pristine copies, so a modifier on a chest
+  weapon (or a stat you edited yourself) is not mistaken for the item's own values.
 - **NPC spawning without code patching** — spawning copies the game's own template of an NPC
   over an unused `Main.npc` slot, the same trick that has given fully-statted items since
   v0.2.2. No JIT patching, no code cave. **Bosses are gated twice**: a confirmation naming the

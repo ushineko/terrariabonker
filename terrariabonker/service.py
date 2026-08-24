@@ -210,6 +210,24 @@ class Service:
         copy is 'live' can't be told apart while the game is paused."""
         return [Inventory(self.mem, b.life_addr) for b in self.players()]
 
+    def _own_item_addrs(self) -> set:
+        """Addresses of the player's own Item objects (spec 039).
+
+        These are the ones this program edits, so they are the likeliest to be mistaken
+        for an item's pristine template — and the cheapest contaminant to remove, because
+        we know exactly where they are.
+        """
+        out = set()
+        try:
+            for inv in self._all_inventories():
+                for s in inv.slots():
+                    addr = inv._item_addr(s.index)
+                    if addr:
+                        out.add(addr)
+        except (ServiceError, AttributeError):
+            pass
+        return out
+
     def _item_vtable(self) -> int | None:
         """The shared mono vtable of Item objects, read from any real item."""
         for s in self._all_inventories()[0].slots():
@@ -488,6 +506,22 @@ class Service:
             })
         return {"items": items, "npcs": npc_list, "build": self.build_key()}
 
+    def _live_npc_addrs(self) -> set:
+        """Addresses of the NPCs currently in the world. Their stats have been scaled by
+        the world's difficulty, so they are not templates (spec 039)."""
+        from terrariabonker import npcs as npc_mod
+        from terrariabonker.inventory import ARR_DATA_OFF
+
+        out = set()
+        arr = npc_mod.find_npc_array(self.mem)
+        if not arr:
+            return out
+        for i in range(npc_mod.MAX_NPCS):
+            obj = self.mem.read_u32(arr + ARR_DATA_OFF + i * 4)
+            if obj:
+                out.add(obj)
+        return out
+
     def _publish_npc_draw_data(self, npc_stats: dict) -> None:
         """Hand the sprite extractor what only this side can read.
 
@@ -516,7 +550,9 @@ class Service:
 
         def scan():
             vt = npcs.find_npc_vtable(self.mem)
-            return content.find_npc_templates(self.mem, vt) if vt else {}
+            if not vt:
+                return {}
+            return content.find_npc_templates(self.mem, vt, self._live_npc_addrs())
 
         return self._template_cache("npcs", scan, refresh)
 
@@ -525,7 +561,8 @@ class Service:
 
         return self._template_cache(
             "templates",
-            lambda: content.find_item_templates(self.mem, self._item_vtable()), refresh,
+            lambda: content.find_item_templates(self.mem, self._item_vtable(),
+                                                self._own_item_addrs()), refresh,
             # A cache written before spec 038 lacks these, and without them an edit
             # cannot be told from an item's own defaults. Rescan rather than guess.
             wants=("use_anim", "auto_reuse", "tile_boost"))

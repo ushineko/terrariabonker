@@ -50,34 +50,53 @@ def test_ignores_absurd_type_values():
     assert set(content.find_item_templates(m, VT)) == {2}
 
 
-def test_a_repeated_type_run_is_not_mistaken_for_the_template_table():
-    """Live items repeat types heavily; a template table holds one object per type."""
-    chest = [(2, {ITEM_DAMAGE: 777}) for _ in range(40)]      # 40 copies of one type
-    m = _mem(chest)
-    # the run is 40 objects for 1 type, far from one-to-one, so it is not a template table
-    assert content.find_item_templates(m, VT) == {}
+def test_copies_that_agree_are_taken_as_the_template():
+    """Forty identical copies in a chest are pristine copies; their shared stats are the
+    template. The old rule discarded any run that repeated a type, which is what let a
+    lone modified copy elsewhere supply the value instead (spec 039)."""
+    m = _mem([(2, {ITEM_DAMAGE: 7}) for _ in range(40)])
+    assert content.find_item_templates(m, VT)[2]["damage"] == 7
 
 
-def test_the_larger_table_wins_when_a_type_appears_in_two(monkeypatch):
-    """A chest of distinct items can look one-to-one; the real table is bigger.
+def test_one_modified_copy_does_not_outvote_the_pristine_ones():
+    """The bug: an edited item was returned as its own type's template, and spec 038 then
+    compared the edit against itself and pruned it."""
+    m = _mem([(2, {ITEM_DAMAGE: 7}), (2, {ITEM_DAMAGE: 7}), (2, {ITEM_DAMAGE: 999})])
+    assert content.find_item_templates(m, VT)[2]["damage"] == 7
 
-    The runs must be further apart than CLUSTER_GAP to be separate runs at all, which is
-    the knob that decides what counts as one table.
+
+def test_a_prefixed_copy_never_wins_over_an_unprefixed_one():
+    """A modifier changes damage and use time, so a prefixed copy is not a template —
+    a Muramasa with a damage prefix was being reported as the base item."""
+    from terrariabonker.inventory import ITEM_PREFIX
+
+    m = _mem([(2, {ITEM_DAMAGE: 26, ITEM_PREFIX: 65}),
+              (2, {ITEM_DAMAGE: 26, ITEM_PREFIX: 65}),
+              (2, {ITEM_DAMAGE: 24})])
+    assert content.find_item_templates(m, VT)[2]["damage"] == 24, \
+        "prefixed copies outvoted the pristine one"
+
+
+def test_the_prefix_is_not_reported_as_a_stat():
+    m = _mem([(2, {ITEM_DAMAGE: 7})])
+    assert "prefix" not in content.find_item_templates(m, VT)[2]
+
+
+def test_excluded_objects_are_not_considered():
+    """The player's own items are excluded by address: they are what this program edits,
+    so they are the likeliest to be mistaken for a template.
+
+    The excluded copies are deliberately the *majority* here — with the exclusion ignored
+    they would carry the vote, so the test fails rather than passing by luck on a tie.
     """
-    monkeypatch.setattr(content, "CLUSTER_GAP", 0x4000)
-    m = _mem([(2, {ITEM_DAMAGE: 111})])                        # a lone "chest" object
-    far = BASE + 0x18000                                       # a separate run
-    for i, itype in enumerate(range(2, 40)):
-        at = far + i * STRIDE
-        m.write(at, struct.pack("<I", VT))
-        m.poke_i32(at + ITEM_TYPE, itype)
-        m.poke_i32(at + ITEM_HEAD_SLOT, -1)
-        m.poke_i32(at + ITEM_DAMAGE, 1)
-    found = content.find_item_templates(m, VT)
-    assert found[2]["damage"] == 1, "stats should come from the bigger table"
+    m = _mem([(2, {ITEM_DAMAGE: 14}),
+              (2, {ITEM_DAMAGE: 31}), (2, {ITEM_DAMAGE: 31}), (2, {ITEM_DAMAGE: 31})])
+    mine = {BASE + 0x1000 + STRIDE * i for i in (1, 2, 3)}
+    got = content.find_item_templates(m, VT, exclude=mine)
+    assert got[2]["damage"] == 14, "an excluded object still decided the template"
+    loose = content.find_item_templates(m, VT)
+    assert loose[2]["damage"] == 31, "premise: without the exclusion they would win"
 
-
-# --- classification ---------------------------------------------------------
 
 def test_kind_accessory_beats_damage():
     assert content.item_kind({"accessory": True, "damage": 20}) == "Accessory"

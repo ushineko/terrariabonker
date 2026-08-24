@@ -26,7 +26,8 @@ from terrariabonker.inventory import (ITEM_ACCESSORY, ITEM_AUTOREUSE, ITEM_BODY_
                                       ITEM_BUFF_TYPE, ITEM_DAMAGE,
                                       ITEM_DEFENSE, ITEM_HEAD_SLOT, ITEM_HEAL_LIFE,
                                       ITEM_HEAL_MANA, ITEM_LEG_SLOT, ITEM_MAGIC, ITEM_MELEE,
-                                      ITEM_PICK, ITEM_RANGED, ITEM_RARE, ITEM_SUMMON,
+                                      ITEM_PICK, ITEM_PREFIX, ITEM_RANGED, ITEM_RARE,
+                                      ITEM_SUMMON,
                                       ITEM_TILEBOOST, ITEM_TYPE, ITEM_USE_ANIM,
                                       ITEM_USE_TIME)
 from terrariabonker.npcs import (MAX_NPC_TYPE, NPC_BOSS, NPC_COLOR, NPC_DAMAGE,
@@ -62,6 +63,8 @@ def _read_stats(buf: bytes, off: int) -> dict:
         "head_slot": i32(ITEM_HEAD_SLOT),
         "body_slot": i32(ITEM_BODY_SLOT),
         "leg_slot": i32(ITEM_LEG_SLOT),
+        # Kept only to tell a modified copy from a pristine one; stripped before use.
+        "prefix": int(buf[off + ITEM_PREFIX]),
         "accessory": bool(buf[off + ITEM_ACCESSORY]),
         "melee": bool(buf[off + ITEM_MELEE]),
         "ranged": bool(buf[off + ITEM_RANGED]),
@@ -128,15 +131,55 @@ def _template_table(found: list[tuple[int, dict]], key: str) -> dict[int, dict]:
     return out
 
 
-def find_item_templates(mem, vtable: int) -> dict[int, dict]:
-    """``{type: stats}`` for every item the game has a template for."""
+def _consensus(candidates: list[dict]) -> dict | None:
+    """The stats a *pristine* copy of an item has (spec 039).
+
+    Two rules, in order. A modifier changes damage and use time, so a prefixed copy is not
+    a template: where any copy is unprefixed, only those are considered. Then take the
+    most common stat tuple — a pristine template agrees with every other pristine copy of
+    its type, while an edited one stands alone.
+
+    Choosing by position instead let a live, modified item be returned as the template. It
+    reported the maintainer's own edits as Boomstick's base stats, and spec 038 then used
+    those as the baseline for deciding which saved edits were redundant, destroying eight
+    of them.
+    """
+    clean = [c for c in candidates if not c.get("prefix")] or candidates
+    if len(clean) == 1:
+        return clean[0]
+    keys = tuple(k for k in clean[0] if k != "prefix")
+    tally = Counter(tuple(c[k] for k in keys) for c in clean)
+    winner = tally.most_common(1)[0][0]
+    for c in clean:
+        if tuple(c[k] for k in keys) == winner:
+            return c
+    return clean[0]
+
+
+def find_item_templates(mem, vtable: int, exclude=()) -> dict[int, dict]:
+    """``{type: stats}`` for every item the game has a template for.
+
+    ``exclude`` is the addresses of objects known to be the player's own — the ones this
+    program edits, and so the likeliest to be mistaken for a template.
+    """
     span = max(ITEM_TYPE, ITEM_DAMAGE, ITEM_DEFENSE, ITEM_RARE, ITEM_PICK, ITEM_USE_TIME,
                ITEM_CREATE_TILE, ITEM_ACCESSORY, ITEM_SUMMON, ITEM_LEG_SLOT,
                ITEM_HEAL_MANA, ITEM_BUFF_TYPE, ITEM_USE_ANIM, ITEM_TILEBOOST,
-               ITEM_AUTOREUSE) + 4
+               ITEM_AUTOREUSE, ITEM_PREFIX) + 4
+    skip = set(exclude or ())
     found = _scan_objects(mem, vtable, span, _read_stats,
-                          lambda s: 0 <= s["type"] < MAX_TYPE)
-    return _template_table(found, "type")
+                          lambda s: 0 < s["type"] < MAX_TYPE)
+    by_type: dict[int, list[dict]] = {}
+    for addr, stats in found:
+        if addr in skip:
+            continue
+        by_type.setdefault(stats["type"], []).append(stats)
+    out = {}
+    for t, cands in by_type.items():
+        got = _consensus(cands)
+        if got is not None:
+            out[t] = {k: v for k, v in got.items() if k != "prefix"}
+    return out
 
 
 def _read_npc_stats(buf: bytes, off: int) -> dict:
@@ -158,7 +201,7 @@ def _read_npc_stats(buf: bytes, off: int) -> dict:
     }
 
 
-def find_npc_templates(mem, vtable: int) -> dict[int, dict]:
+def find_npc_templates(mem, vtable: int, exclude=()) -> dict[int, dict]:
     """``{net_id: stats}`` for every NPC the game has a template for.
 
     Keyed on ``netID`` rather than ``type`` because ContentSamples is: the variant entries
@@ -169,9 +212,13 @@ def find_npc_templates(mem, vtable: int) -> dict[int, dict]:
     have been scaled by the world's difficulty, so a Blue Slime in an expert world reads
     60 life where its template says 25.
     """
+    skip = set(exclude or ())
     found = _scan_objects(mem, vtable, NPC_OBJECT_SIZE, _read_npc_stats,
                           lambda s: -MAX_NPC_TYPE < s["net_id"] < MAX_NPC_TYPE
                           and 0 <= s["type"] < MAX_NPC_TYPE)
+    # The NPCs in the world have had their stats scaled by the world's difficulty, so they
+    # are not templates however they happen to be laid out (spec 039).
+    found = [(a, st) for a, st in found if a not in skip]
     return _template_table(found, "net_id")
 
 
