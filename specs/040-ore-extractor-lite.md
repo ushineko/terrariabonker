@@ -1,6 +1,7 @@
 # Spec 040: Ore extractor lite — auto-mine contiguous ores
 
-**Status**: RECON ONLY — not implemented, open questions below
+**Status**: RECON — not implemented. The tile map is now readable; three
+questions remain (below)
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -38,14 +39,45 @@ mount drill and the Digtoise projectile as well as by hand mining, and it ends i
 | `Player.PickTile` | JIT `0x2178CD48` |
 | `WorldGen.KillTile` | JIT `0x25900000` |
 
-**The tile map is not a managed array.** Scanning every heap object for an array of
-`W*H`, `(W+1)*(H+1)`, `W*(H+1)` or `(W+1)*H` entries found nothing real — the three hits had
-implausible vtables. `Tilemap` keeps its data in unmanaged memory, which is consistent with
-1.4.4's move to a struct-of-arrays tile store. `PickTile` reaches it as
-`mov eax,[Main.tile]` then `mov eax,[eax+0x08]`, so the buffer hangs off the Tilemap object
-at +0x08 (or +0x0C, also a plausible raw pointer). The evenly spaced pointers at +0x10
-onwards were checked and are **not** data descriptors: they are identical small objects of
-one class.
+**The tile map is not a managed array**, which is why scanning every heap object for an
+array of `W*H`, `(W+1)*(H+1)`, `W*(H+1)` or `(W+1)*H` entries found nothing real. Guessing
+at it was the wrong approach; `PickTile`'s own indexing gives the layout exactly, and since
+its JIT address is known the disassembly can be read straight out of memory without CE:
+
+```
+obj    = [Main.tile + 0x08]         ; width @0, originX @4, height @8, originY @0xC
+idx    = height * (x - originX) + (y - originY)      ; column-major
+entry  = *(u32*)(Main.tile + 0x10 + 4*idx)           ; one POINTER per tile
+type   = *(u16*)(entry + 0x08)
+```
+
+So `Main.tile` is the base of a large buffer — 8401 x 2401 = 20,170,801 entries of 4 bytes,
+about 81 MB, matching an 81 MB anonymous mapping — and `[Main.tile + 0x0C]` holds that entry
+count. Each entry points at a 24-byte tile object. The evenly spaced pointers seen at +0x10
+during the first pass were **not** descriptors: they were consecutive *tile* objects, and
+they looked identical because they were all air.
+
+**Verified against reality**, twice, on two different worlds. Reading the column through the
+player returned air above, Plants (3) then Grass (2) at their feet, air carrying a dirt wall,
+then Stone (1) — Terraria's own tile ids, in the arrangement the player was standing in.
+
+**The two sizes mean different things, and confusing them would send a flood fill out of the
+world.** The bounds object reported 8401 x 2401 on a *small* (4200 x 1200) world:
+
+| source | value | meaning |
+| --- | --- | --- |
+| `maxTilesX` / `maxTilesY` (Main-static +0x5A4) | 4200 x 1200 | the world actually loaded |
+| bounds object at `[Main.tile + 0x08]` | 8401 x 2401 | the buffer's stride |
+
+The buffer is allocated at the largest supported size and reused across worlds, so its
+height is the **indexing stride** and must be used for the index arithmetic, while
+`maxTilesX/maxTilesY` is the **extent** and must be used for bounds checks. Reading this the
+other way round — as an earlier draft of this spec did — would walk a flood fill past the
+world edge into tiles left over from whatever was loaded before.
+
+**Air versus dirt does not need solving.** Tile id 0 is Dirt, and an empty tile is also 0
+with an "active" flag clear that has not been located. It does not matter here: every ore is
+a non-zero id, so a whitelist of ore ids can never match an empty tile.
 
 ## Why it is challenging
 
@@ -75,10 +107,10 @@ code can mine a tile properly.
 
 ## Open questions, in the order they need answering
 
-1. **The `Tilemap` layout** — which pointer holds the tile buffer, the per-tile stride, and
-   where the type field sits within it. Without this there is no flood fill. Approach: read
-   `[Main.tile + 0x08]` and `+0x0C`, and correlate against tiles whose type is known because
-   the player is standing on them.
+*(1 is answered; 2-4 remain.)*
+
+1. ~~**The `Tilemap` layout.**~~ **Answered** — see above. The flood fill can be written in
+   Python today.
 2. **Is `PickTile` safe to call from a cave?** It touches `hitTile`/`hitReplace` caches and
    sends net messages. Calling it re-entrantly, or outside the frame phase it expects, may
    not be safe.
