@@ -1,7 +1,11 @@
 # terrariabonker
 
 A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8**
-(Steam appid 105600), the Windows build running under Proton (wine-mono). It
+(Steam appid 105600), the Windows build running under Proton (wine-mono).
+**1.4.5.7 also works** — the AOBs were originally derived there and every cheat but
+two was confirmed on it; the ore extractor and multiple-pylons were derived later on
+1.4.5.8 and claim nothing about 1.4.5.7, which the panel shows as unproven rather
+than hiding (see [Version safety](#version-safety)). It
 finds the player in memory with no hardcoded address, then reads, edits and
 freezes player state and inventory items by reading and writing
 `/proc/<pid>/mem`. A PyQt6 control panel drives the same operations as the CLI.
@@ -88,12 +92,43 @@ holds no state; stopping it ends every effect.*
   teleport** (double-click the fullscreen map to warp there), a **minion cap**
   (raise the summon limit), a **smart-cursor radius** clamp (large reach makes auto-place
   scan a huge area every frame), **multiple pylons per biome** (build a pylon network with
-  several waystations of the same type), **working vanity accessories** and **accessories
-  from your inventory** (see below): things a value-write
+  several waystations of the same type), an **ore extractor** (break one ore by hand and
+  the connected vein goes with it — see below), **working vanity accessories** and
+  **accessories from your inventory** (see below): things a value-write
   can't hold, applied by patching the game's JIT code through `/proc` — including
   code-cave injections for the reach, pickup, spawn, and drop hooks and a managed
   code-cave *call* into `Player.Teleport` for the map-ping warp (derived with
   Cheat Engine, but no CE needed at runtime).
+
+### Ore extractor (vein mining)
+
+Break one ore block by hand and the rest of that vein goes with it, whitelist-driven, at
+whatever range your reach cheat gives you. Silt, slush and desert fossils are swept by
+default; gems are opt-in. Available as `terrariabonker extract --watch` or the trainer
+panel's **Ore extractor (vein mining)** toggle.
+
+Unlike every other cheat here there is no existing behaviour to widen — vein mining is new
+behaviour, needing a flood fill and a whitelist the game never does in one place. So the
+work is split: **Python decides** (read the tile map, flood-fill the contiguous run of the
+*same* ore, so copper touching iron does not take both) and **the game mines**, through its
+own `Player.PickTile`, so drops, framing, lighting and the protected-tile check behave
+exactly as when you swing.
+
+Two details are load-bearing. The stub hooks `Player.Update`'s per-frame call to
+`GrabItems`, not `PickTile` — hooked on `PickTile` it only ran while you were swinging, so
+breaking one block and stopping did nothing. And it lives in memory the program allocates
+(it makes the game call `VirtualAlloc` for itself) rather than in borrowed code padding: a
+stub that writes to a borrowed cave faults, because those pages are read-execute.
+
+It takes 32 tiles per frame — the cap VeinMiner uses — so a big vein does not stall a
+frame, and a vein cannot grow into a neighbouring deposit: the search that follows a
+falling silt pile stops at the ground the pile rests on, and a vein never yields more tiles
+than it held. Derivation, and the four wrong diagnoses it took to get there:
+`specs/040-ore-extractor-lite.md`.
+
+**This one is not reversible.** Every other cheat here is a memory change you undo by
+switching it off; a mined tile is a permanent change to your world. Try it somewhere you do
+not mind losing first.
 
 ### Working vanity accessories
 
@@ -218,13 +253,20 @@ terrariabonker patch enable teleport              # map-ping teleport: double-cl
 terrariabonker patch enable max_minions --value 10 # raise the minion (summon) cap
 terrariabonker patch disable fast_place           # fast placement (ApplyItemTime)
 
+terrariabonker patch enable ore_extract           # vein mining (see Ore extractor above)
+terrariabonker vein                # DRY RUN: what a vein miner would take from your tile
+terrariabonker extract             # mine the vein at your tile (WRITES to the world)
+terrariabonker extract --watch     # keep watching: break one ore and its vein follows
+
 terrariabonker restore             # re-apply the saved profile (cheats + item edits) to the game
 terrariabonker extract-recipes     # read Main.recipe[] -> data/recipes.json (for the Recipes tab)
 terrariabonker extract-sprites     # decode item icons from Content/Images -> local cache
 ```
 
 `--value` overrides the enabled value; omit it to use the default (mining `0.2`,
-reach `20`). `fast_place` and `teleport` carry no value (on/off only).
+reach `20`). `fast_place`, `teleport`, `pylons` and `ore_extract` carry no value
+(on/off only). `vein` only reads — use it to see what `extract` would take before
+letting it loose on a world you care about.
 
 Every memory-touching command elevates through sudo first and is gated on the
 game build (see below).

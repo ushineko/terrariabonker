@@ -352,8 +352,15 @@ _VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
     # Cavern pylon already in the world, and both appear on the map wired into the pylon
     # network. Nothing downstream dedupes by type, as the recon predicted.
     "pylon_place": ("1.4.5.8+24893155",),
-    # 2026-08-24: derived on 1.4.5.8 but not yet watched working, so it claims nothing.
-    "pick_tile": (),
+    # 2026-08-24: confirmed in-game on 1.4.5.8 — the extractor calls PickTile through this
+    # for every tile it takes, and whole veins came out (45 tiles in two batches) with the
+    # game healthy. Only ever derived on 1.4.5.8, so it claims nothing about 1.4.5.7.
+    "pick_tile": ("1.4.5.8+24893155",),
+    # 2026-08-24: Player.Update's per-frame call to GrabItems, where the extractor hooks.
+    # Derived and confirmed on 1.4.5.8 only. It must be listed here even though it is
+    # verified on the *current* build: the default is every build in _VERIFIED_BUILDS, so
+    # an anchor that says nothing silently claims two 1.4.5.7 builds it has never run on.
+    "grabitems_call": ("1.4.5.8+24893155",),
 }
 
 ANCHORS: dict[str, Anchor] = {

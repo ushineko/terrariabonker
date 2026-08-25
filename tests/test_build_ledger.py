@@ -54,10 +54,17 @@ def test_build_key_survives_missing_pieces():
 LATER_ANCHORS = {"equip_apply", "equip_benefits", "inventory_scan", "smart_cursor"}
 # Derived but never yet watched working in-game, so they claim no build at all. The panel
 # reports these as unproven, which is the truth — an empty set is a statement, not a gap.
-UNPROVEN_ANCHORS: set[str] = {"pick_tile"}
+UNPROVEN_ANCHORS: set[str] = set()
 # Derived on 1.4.5.8 and confirmed only there — they never existed on the older builds,
 # so they claim neither the derivation build nor the 2026-08-23 rebuild.
-NEWEST_ANCHORS = {"pylon_place"}
+NEWEST_ANCHORS = {"pylon_place", "pick_tile", "grabitems_call"}
+# Derived against the original build and re-confirmed on every rebuild since, so they
+# legitimately inherit the default verification set. Listed so that adding an anchor
+# fails the classification test rather than silently joining them.
+ORIGINAL_ANCHORS = {
+    "getranges", "grabitems", "get_spawn_rate", "trydrop", "trigger_ping",
+    "player_teleport", "place", "reset_block", "reset_minions",
+}
 
 # The build the original AOBs were derived against. Distinct from KNOWN_BUILD_KEY, which
 # names whatever the project currently targets and moves when the game updates.
@@ -352,12 +359,38 @@ def test_an_unproven_anchor_claims_nothing():
 
     Empty is the honest state and the panel renders it as unproven. Filling it in to
     quiet the banner would be the exact dishonesty this ledger exists to prevent. The set
-    is empty at present — `pylon_place` sat in it until it was confirmed in-game — and it
-    is kept so the next derived-but-unproven anchor has somewhere honest to live.
+    is empty at present — `pylon_place` sat in it until it was confirmed in-game, and
+    `pick_tile` until the extractor was watched taking whole veins — and it is kept so the
+    next derived-but-unproven anchor has somewhere honest to live.
     """
     for key in UNPROVEN_ANCHORS:
         assert ANCHORS[key].verified == frozenset(), key
 
 
-def test_the_pylon_anchor_is_confirmed_on_the_build_it_was_seen_on():
-    assert ANCHORS["pylon_place"].verified == frozenset({"1.4.5.8+24893155"})
+def test_the_newest_anchors_claim_only_the_build_they_were_seen_on():
+    """They never existed on 1.4.5.7, so they must claim neither of those keys."""
+    for key in NEWEST_ANCHORS:
+        assert ANCHORS[key].verified == frozenset({"1.4.5.8+24893155"}), key
+
+
+def test_every_anchor_is_classified_so_a_new_one_cannot_slip_through():
+    """The ledger is only worth anything if it does not silently over-claim.
+
+    An anchor absent from `_VERIFIED_INSTEAD` inherits `_VERIFIED_BUILDS` — every build we
+    have ever confirmed anything on. That is right for the originals and wrong for every
+    later one: `grabitems_call` was added for the ore extractor, derived and tested only
+    on 1.4.5.8, and silently claimed two 1.4.5.7 builds it had never run on.
+
+    Classifying every anchor makes a new one fail here, which forces the question the
+    ledger exists to ask: where has this actually been seen working?
+    """
+    from terrariabonker import patcher as P
+
+    known = LATER_ANCHORS | UNPROVEN_ANCHORS | NEWEST_ANCHORS | ORIGINAL_ANCHORS
+    unclassified = set(P._RAW_ANCHORS) - known
+    assert not unclassified, (
+        f"{sorted(unclassified)} are not classified. If derived on the original build, "
+        "add them to ORIGINAL_ANCHORS; otherwise give them an entry in _VERIFIED_INSTEAD "
+        "naming the builds they were actually confirmed on, and list them here.")
+    stale = known - set(P._RAW_ANCHORS)
+    assert not stale, f"{sorted(stale)} no longer exist — update these sets"
