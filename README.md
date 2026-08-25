@@ -358,13 +358,26 @@ the **Refresh** button and the reload after an edit.
 
 ## Version safety
 
-The offsets are specific to one game build, so knowing which build is running matters.
-The version comes from the **version constant in the exe the process maps**, after checking
-that mapping still refers to the file on disk — Steam replaces the file while the game keeps
-running the code it already loaded, and in that window the file describes a build the
-process is not executing. (Scanning live memory for a version string was tried and is kept
-only as a fallback for that window: the process contains several version-shaped strings that
-are not the game's, and picking the most numerous returns the wrong one.)
+The offsets are specific to one game build, so what matters is which build is **executing**
+— not which one is installed. Those differ more often than you would think.
+
+The version is read from the **version constant in `Terraria.exe`**, and only when the
+process's mapping still refers to that same file (checked by inode). Steam replaces the exe
+in place while the game carries on running the code it already loaded; for the rest of that
+session the file on disk describes a build the process is not executing. The inode check is
+what stops the file being believed then. This is not hypothetical: it produced a version
+string of `1.4.5.7` against a buildid from the already-downloaded `1.4.5.8` — a key
+describing a build that never existed, which is still in the ledger with a note not to trust
+it.
+
+If the exe cannot be trusted (replaced, or not locatable), it falls back to scanning memory
+for version-shaped strings and taking the most common. **That fallback is known to be
+unreliable** and is a last resort, not a second opinion: the process holds several
+version-shaped strings that are not the game's, and on 1.4.5.8 the heap carries four stale
+`"Version":"v1.4.5.7"` JSON copies against a single copy of the real one — so the vote
+returns the wrong answer in exactly the case that triggers it. It is kept because a doubtful
+version is more useful than none, and because nothing downstream acts on a version silently:
+a mismatch warns, and an unrecognised build raises the dialog below.
 
 | Situation | Behaviour |
 | :--- | :--- |
