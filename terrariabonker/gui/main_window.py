@@ -622,7 +622,10 @@ class MainWindow(QWidget):
                         f"[extract] {e.get('mined', 0)} tiles at ({at[0]}, {at[1]})"
                         + (f" — {e['reason']}" if e.get("reason") else ""))
 
-        if not self.helper.request(["extract-tick", "--json"], done):
+        argv = ["extract-tick", "--json"]
+        if self._patch_value("ore_extract"):        # "Ores + gems"
+            argv.append("--gems")
+        if not self.helper.request(argv, done):
             self._vein_inflight = False
 
     def _set_vein_watch(self, on: bool):

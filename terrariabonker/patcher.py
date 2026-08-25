@@ -936,6 +936,13 @@ _VALUE_SPECS: dict[str, ValueSpec] = {
     # itemTime presets (lower = faster placement). "Fast" is the original behaviour.
     "fast_place": ValueSpec("i32", 4, 1, 4, "placement speed",
                             presets=(("Fast", 4), ("Faster", 2), ("Hyper", 1))),
+    # Not a value patched into the game -- the extractor's stub is built by build_body,
+    # which ignores it. It rides the same plumbing so the choice gets a widget, is saved
+    # with the profile and comes back on auto-restore; the watcher reads it to decide
+    # whether to sweep gems. Without this, `--gems` existed on the CLI and was simply
+    # unreachable from the panel.
+    "ore_extract": ValueSpec("i32", 0, 0, 1, "what to sweep",
+                             presets=(("Ores only", 0), ("Ores + gems", 1))),
 }
 
 

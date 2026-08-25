@@ -100,7 +100,8 @@ holds no state; stopping it ends every effect.*
 
 Break one ore block by hand and the rest of that vein goes with it, whitelist-driven, at
 whatever range your reach cheat gives you. Silt, slush and desert fossils are swept by
-default; gems are opt-in. Run it as `terrariabonker extract --watch`, or tick **Ore
+default; gems are opt-in — `--gems` on the CLI, or the **Ores only / Ores + gems** choice
+beside the panel toggle. Run it as `terrariabonker extract --watch`, or tick **Ore
 extractor (vein mining)** in the panel.
 
 Unlike the other cheats there is no existing behaviour to widen — vein mining needs a flood

@@ -324,7 +324,8 @@ def test_values_default_before_any_apply(game):
     assert p.values() == {"mining": 0.2, "reach": 20, "tool_reach": 30,
                           "pickup": 50, "spawn_rate": 15, "loot": 100,
                           "max_minions": 10, "fast_place": 4,   # Fast preset default
-                          "smart_cursor": 20}
+                          "smart_cursor": 20,
+                          "ore_extract": 0}    # "Ores only"; gems are the opt-in
 
 
 def test_applied_value_is_recorded_and_restored(game):

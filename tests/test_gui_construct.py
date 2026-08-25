@@ -192,3 +192,36 @@ def test_the_vein_watcher_follows_the_extractor_checkbox(app, monkeypatch):
         assert not sent, "overlapping ticks would pile up on the worker"
     finally:
         w.close()
+
+
+def test_the_gems_choice_actually_reaches_the_watcher(app, monkeypatch):
+    """`--gems` existed on the CLI from the start, but the panel never sent it — so for
+    anyone not editing the source, "gems are opt-in" was untrue. The choice has to be
+    reachable *and* has to arrive at the worker."""
+    from PyQt6.QtWidgets import QComboBox
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
+    for n in ("_call", "_spawn", "_spawn_user"):
+        monkeypatch.setattr(mw.MainWindow, n, lambda self, *a, **k: None)
+    w = mw.MainWindow()
+    try:
+        combo = w._patch_vals.get("ore_extract")
+        assert isinstance(combo, QComboBox), "no way to choose from the panel"
+        assert [combo.itemData(i) for i in range(combo.count())] == [0, 1]
+
+        sent = []
+        w.helper.available = True
+        w.helper.request = lambda argv, cb: (sent.append(argv), True)[1]
+
+        combo.setCurrentIndex(0)                      # ores only
+        w._vein_inflight = False
+        w._tick_veins()
+        assert "--gems" not in sent[-1], "swept gems without being asked"
+
+        combo.setCurrentIndex(1)                      # ores + gems
+        w._vein_inflight = False
+        w._tick_veins()
+        assert "--gems" in sent[-1], "the choice never reached the worker"
+    finally:
+        w.close()
