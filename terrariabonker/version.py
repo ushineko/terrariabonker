@@ -156,6 +156,28 @@ def detect_version(mem) -> str | None:
     return max(counts, key=counts.get)
 
 
+def detect_runtime(mem) -> str | None:
+    """The .NET runtime executing the game, e.g. ``"wine-mono-11.2.0"``.
+
+    Worth knowing because the code patches match machine code that runtime's JIT
+    *emitted*, not anything in Terraria.exe. The same game under a different runtime
+    compiles to different bytes, so a Proton update can break a cheat with the game
+    untouched -- and without this, that would look like the game had changed.
+
+    Read from the module paths the process has mapped, which carry the version
+    (``.../wine/mono/wine-mono-11.2.0/bin/libmono-2.0-x86.dll``). The files themselves
+    live inside Proton's container and are not readable from outside it.
+    """
+    try:
+        with open(f"/proc/{mem.pid}/maps") as f:
+            found = set(re.findall(r"wine-mono-([0-9][0-9.]*[0-9])", f.read()))
+    except OSError:
+        return None
+    if not found:
+        return None
+    return "wine-mono-" + sorted(found)[0]
+
+
 def read_buildid(exe_path: str | None) -> str | None:
     """Read the Steam buildid from ``appmanifest_105600.acf`` next to the game."""
     if not exe_path:

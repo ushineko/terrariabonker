@@ -453,3 +453,48 @@ def test_the_scan_falls_through_variants_until_one_matches(monkeypatch):
     assert p._scan("fake", "9.9.9+0") == [CODE + 2], "fell through to no pattern at all"
     assert p._scan("fake", "1.4.6+2") == [CODE + 2]
     assert p._scan("fake", None) == [CODE + 2]
+
+
+def test_the_runtime_is_tracked_beside_the_build_not_inside_it():
+    """A build key names the game. It says nothing about the .NET runtime executing it —
+    and the patterns match machine code that runtime's JIT emitted, so a Proton update can
+    break a cheat with Terraria untouched.
+
+    Tracked beside the key rather than folded into it, deliberately: every existing
+    verification predates the tracking, and rewriting the key would either invalidate all
+    of them at a stroke or require backfilling a runtime nobody recorded.
+    """
+    import inspect
+    from terrariabonker import builds, version as ver
+
+    # detection reads the module paths, which carry the version
+    maps = ("7f00-7f01 r-xp 0 0:0 0 /files/share/wine/mono/wine-mono-11.2.0/bin/"
+            "libmono-2.0-x86.dll\n")
+
+    class mem:
+        pid = 4242
+
+    import builtins
+    real_open = builtins.open
+
+    def fake_open(path, *a, **k):
+        if str(path) == "/proc/4242/maps":
+            import io
+            return io.StringIO(maps)
+        return real_open(path, *a, **k)
+
+    builtins.open = fake_open
+    try:
+        assert ver.detect_runtime(mem()) == "wine-mono-11.2.0"
+    finally:
+        builtins.open = real_open
+
+    # a key is still just the game
+    assert ver.build_key("1.4.5.8", "24893155") == "1.4.5.8+24893155"
+    assert "mono" not in ver.KNOWN_BUILD_KEY
+
+    # and remember() carries the runtime as its own field, omitted when unknown
+    src = inspect.getsource(builds.remember)
+    assert 'entry["runtime"] = runtime' in src, "the runtime is not recorded"
+    assert "if runtime:" in src, \
+        "an unknown runtime must be omitted, not stored as a guess"

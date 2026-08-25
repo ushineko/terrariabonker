@@ -353,6 +353,10 @@ def cmd_build_check(args) -> int:
         print(json.dumps(got))
         return 0
     print(f"build {got['build']} ({got['level']})")
+    # The runtime is reported because the patches match code its JIT emitted: a Proton
+    # update can break a cheat with the game untouched, and this is the only thing on
+    # screen that would show it changed.
+    print(f"  runtime: {got.get('runtime') or 'unknown'}")
     print(f"  recognised: {got['recognised']}  known-good: {got['known']}"
           f"  decision: {got['decision']}")
     for name, r in sorted(got["cheats"].items()):

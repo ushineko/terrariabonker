@@ -893,6 +893,7 @@ class Service:
         failed = sorted(n for n, r in probe.items() if not r["resolved"])
         return {
             "build": key, "version": version, "buildid": buildid,
+            "runtime": ver.detect_runtime(self.mem),
             "level": level, "message": msg,
             "known": bool(verified), "verified_everywhere": all(
                 key in a.verified for a in ANCHORS.values()),
@@ -906,7 +907,7 @@ class Service:
         from terrariabonker import builds
 
         key = self.build_key()
-        builds.remember(key, how, failed)
+        builds.remember(key, how, failed, runtime=ver.detect_runtime(self.mem))
         return {"build": key, "decision": how, "failed": sorted(failed)}
 
     def record_item_edit(self, item_type: int, kwargs: dict) -> dict:

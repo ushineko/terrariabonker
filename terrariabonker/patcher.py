@@ -336,6 +336,11 @@ _RAW_ANCHORS: dict[str, Pattern] = {
 
 # Builds every anchor here has been confirmed on, newest last. "Verified" means the AOB
 # resolved AND the cheat was seen working in-game on that build — not merely that it matched.
+# What a build key does NOT say: which .NET runtime was executing the game. These patterns
+# match machine code wine-mono's JIT emitted, so a Proton update can break a cheat with
+# Terraria untouched. The runtime is tracked beside the key (see version.detect_runtime and
+# builds.remember) rather than folded into it -- every entry below predates that tracking,
+# and backfilling a runtime we never recorded would be a guess dressed as provenance.
 _VERIFIED_BUILDS: tuple[str, ...] = (
     ver.KNOWN_BUILD_KEY,        # 1.4.5.8+24893155 — see the 2026-08-23 note below
     # The build these AOBs were originally derived against.
