@@ -362,13 +362,18 @@ The offsets are specific to one game build, so what matters is which build is **
 — not which one is installed. Those differ more often than you would think.
 
 The version is read from the **version constant in `Terraria.exe`**, and only when the
-process's mapping still refers to that same file (checked by inode). Steam replaces the exe
-in place while the game carries on running the code it already loaded; for the rest of that
-session the file on disk describes a build the process is not executing. The inode check is
-what stops the file being believed then. This is not hypothetical: it produced a version
-string of `1.4.5.7` against a buildid from the already-downloaded `1.4.5.8` — a key
-describing a build that never existed, which is still in the ledger with a note not to trust
-it.
+process's mapping still refers to that same file (checked by inode). A mapped file and the
+path it came from can diverge — replacing a file leaves an existing mapping on the old
+inode — and if that happens the file on disk describes a build the process is not
+executing. The inode check is a cheap guard against believing it; we have not actually
+caught Steam doing this to a running game, so treat it as a precaution rather than a war
+story.
+
+What *was* observed, on 2026-08-23, is the reason the exe is consulted at all: the version
+then came from the memory frequency vote described below, which returned a stale `1.4.5.7`
+while Steam's manifest already reported buildid `24893155`. The result was a key naming a
+build that never existed. It is still in the ledger, with a note not to trust it, because
+verifications really were recorded under it.
 
 If the exe cannot be trusted (replaced, or not locatable), it falls back to scanning memory
 for version-shaped strings and taking the most common. **That fallback is known to be

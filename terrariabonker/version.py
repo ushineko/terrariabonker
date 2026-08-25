@@ -54,11 +54,17 @@ _EXE_CACHE: dict = {}                # path -> ((inode, mtime, size), version)
 def _mapped_exe(mem):
     """``(path, True)`` when the process is running the exe currently on disk.
 
-    The inode check is the whole point. Steam can replace ``Terraria.exe`` while the game
-    keeps running the code it already mapped — which is exactly what happened on
-    2026-08-23: the file became 1.4.5.8 at 12:19 while a 1.4.5.7 process ran on until it
-    was restarted at 21:41. Reading the file in that window describes a build the process
-    is not executing.
+    Replacing a file leaves any existing mapping on the old inode, so a process can be
+    executing code the path no longer describes. Reading the file then reports a build
+    that is not running, which the inode check is a cheap guard against.
+
+    Treat that as a precaution, not an observed failure. On 2026-08-23 the exe's mtime did
+    move to 12:19 during a Steam validate pass while a session was in progress, but the
+    mixed key recorded that day (1.4.5.7 + buildid 24893155) does not need this mechanism
+    to explain it: the version came from the frequency vote in ``detect_version``, which
+    returns a stale 1.4.5.7 even on 1.4.5.8, while the buildid came from Steam's manifest.
+    Reading the exe is what fixed that; the inode check just stops the exe being trusted
+    when it might not be the one running.
     """
     path = mem.exe_path()
     if not path or not os.path.exists(path):

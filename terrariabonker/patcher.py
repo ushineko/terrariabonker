@@ -311,10 +311,10 @@ _VERIFIED_BUILDS: tuple[str, ...] = (
     ver.KNOWN_BUILD_KEY,        # 1.4.5.8+24893155 — see the 2026-08-23 note below
     # The build these AOBs were originally derived against.
     "1.4.5.7+24825745",
-    # 2026-08-23, and a key to distrust: this one is a *mix*. Steam downloaded 1.4.5.8 at
-    # 12:19 while a 1.4.5.7 process kept running, so the version came from the running
-    # game and the buildid from the already-updated manifest, describing a build that
-    # never existed. It is kept because the panel really did record verifications under
+    # 2026-08-23, and a key to distrust: this one is a *mix*. The version came from the
+    # frequency vote in detect_version -- which returns a stale 1.4.5.7 even on 1.4.5.8 --
+    # while the buildid came from Steam's already-updated manifest, so the key describes a
+    # build that never existed. It is kept because the panel really did record verifications under
     # it — those were confirmed on 1.4.5.7 — and dropping it would silently un-verify
     # them. The detector that produced it has since been fixed to read the version out of
     # the exe the process maps.
