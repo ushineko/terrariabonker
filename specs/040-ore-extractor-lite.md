@@ -1,11 +1,34 @@
 # Spec 040: Ore extractor lite — auto-mine contiguous ores
 
-**Status**: IN PROGRESS — works in-game: break one ore by hand and the connected vein
-goes at once, at range, including falling silt/slush piles. Only the GUI surface is
-left; see "The write half: what broke, and what fixed it".
-The write half (the per-frame stub) is not started
+**Status**: COMPLETE — break one ore by hand and the connected vein goes at once, from
+the CLI or the trainer panel, at extended reach, including falling silt/slush piles.
 
 > **Note**: No issue tracker ticket (personal utility).
+
+## Acceptance criteria
+
+Reconciled against the code, not from memory; each was re-verified before this spec was
+closed. The spec was written as recon and had no checkbox list, so these are its
+requirements made explicit.
+
+- [x] Mining one ore tile takes the contiguous run of **the same** ore — matching the
+      starting tile's id, so copper touching iron does not take both (`tiles.flood`).
+- [x] What may be taken is a **whitelist**, checked against the game's own `TileID`
+      names, with gems opt-in and silt/slush/desert-fossil included by default
+      (`tiles.whitelist`).
+- [x] The game does the mining, through its own `Player.PickTile`, so drops, framing,
+      lighting and `CanKillTile` behave exactly as when the player swings.
+- [x] It runs **every frame**, not per swing: break one block and stop, and the vein
+      still goes (hooked at `Player.Update`'s call to `GrabItems`).
+- [x] Bounded work per frame — 32 tiles, the cap VeinMiner uses — so a large vein does
+      not stall a frame (`ORE_MAX_BATCH`).
+- [x] A vein cannot escape into a neighbouring deposit: the search stops at the ground a
+      falling pile rests on, and a vein never yields more tiles than it held.
+- [x] Falling deposits (silt, slush) are followed down rather than lost.
+- [x] Driven from the CLI (`vein`, `extract`, `extract --watch`) **and** the trainer
+      panel, sharing one watcher implementation so the two cannot drift.
+- [x] Verified in-game, not only in tests: 45 tiles in two batches at 20ms each, at
+      extended reach, and silt piles taken whole.
 
 ## Context
 
@@ -114,12 +137,13 @@ code can mine a tile properly.
 
 ## Open questions, in the order they need answering
 
-*(1-3 are answered; only 4 remains.)*
+*(All four are answered; 2 was answered wrongly at first — see below.)*
 
 1. ~~**The `Tilemap` layout.**~~ **Answered** — see above. The flood fill can be written in
    Python today.
 2. ~~**Is `PickTile` safe to call from a cave?**~~ **Answered from the IL — and the answer
-   was over-confident. Calling it crashes the game; see "Where the write half stands".**
+   was over-confident. Calling it crashed the game — though not for any reason in this
+   list; see "The write half: what broke, and what fixed it".**
    Four things were checked in the IL rather than assumed, and all four still hold. What
    they do not cover is the part that actually breaks a tile: every check below concerns a
    path the call takes *before* damage reaches 100, and the destruction path past that
@@ -270,8 +294,25 @@ that does need one, so this fails at install rather than on the first swing.
 | "still a significant delay" | `tilemap()` called `main_static_base()` -- a full scan -- on every trigger | cache the base: 1510ms -> 0.1ms |
 | the watcher silently stopped | watch radius 45 while `tool_reach` is 75 -- mining at range fell outside the window | window derives from live reach |
 
-**Left to do:** no GUI surface — the extractor is CLI-only (`tb vein`, `tb extract`,
-`tb extract --watch`).
+**Surfaces:** CLI (`tb vein` to dry-run, `tb extract` for one vein, `tb extract --watch`
+to follow the player) and the trainer panel's "Ore extractor (vein mining)" toggle. The
+panel cannot block the Qt thread, so it drives the same watcher a slice at a time from a
+timer (`watch_tick`), with its state in the long-lived `serve` worker; unticking sends
+`extract-stop`, because a queue left armed is re-mined every frame.
+
+**Two bugs found by playing it, after it "worked":**
+
+- With the reach cheat on it also took unrelated patches of the same ore far below --
+  "ore suddenly flying at me from below, long after I stopped mining". The search that
+  follows a falling pile ran down the column to the world floor and kept finding fresh
+  deposits. It now stops at the first solid tile that is not ours, since a pile rests on
+  the ground it lands on; and a vein can never yield more tiles than it held.
+- Editing the last hotbar slot was refused for holding a Green Torch while the game and
+  the grid both showed a plain Torch. Unrelated to the extractor, but found the same way:
+  `set_item` verified against `_all_inventories()[0]`, an arbitrary player copy, while
+  `inventory()` reports the live one. The copies are **not** identical, whatever the
+  comment claimed. `give_item` had the same bug and it was worse -- it chose a slot that
+  was empty in a snapshot and occupied in the game, landing on a real item.
 
 **The bisect that got there,** kept because the ordering is the reusable part:
 
@@ -304,4 +345,14 @@ that does need one, so this fails at install rather than on the first swing.
   wrongly mined tile is a permanent change to the save. Testing wants a throwaway world.
 - **The whitelist matters for safety, not just taste.** A flood fill that escapes its
   whitelist could strip a large region.
+
+  This one came true, though not via the whitelist: the search that follows a falling
+  pile escaped the *vein* instead, running down the column and taking unrelated deposits
+  of the same ore. Two guards now bound it — stop at the ground a pile rests on, and
+  never yield more tiles than the vein held — and they are tested separately, because a
+  single test let whichever guard ran first mask the other.
+
+- **Nothing here is reversible, so the checks belong on both sides.** The stub clamps the
+  batch count as well as the caller, because a corrupted count would not crash: it would
+  mine coordinates nobody asked for.
 - **Multiplayer is out of scope**, as with the other cheats.
