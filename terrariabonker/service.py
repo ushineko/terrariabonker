@@ -91,12 +91,14 @@ class Service:
         self._blocks = None                  # cached find_players() result
         self._anchor = None                  # cached Main.get_LocalPlayer anchor
         self._compat = None                  # build never changes while the process lives
+        self._main_base = None               # cached Main static block (see tilemap())
 
     def invalidate(self) -> None:
         """Drop cached locate results; the next call rescans from scratch."""
         self._blocks = None
         self._anchor = None
         self._compat = None
+        self._main_base = None
 
     @classmethod
     def connect(cls) -> "Service":
@@ -611,16 +613,27 @@ class Service:
         return Patcher(self.mem)
 
     def tilemap(self):
-        """A read-only view of the world's tiles (spec 040)."""
+        """A read-only view of the world's tiles (spec 040).
+
+        ``main_static_base`` is a full memory scan and costs ~1.5s; building the TileMap
+        from it is six reads. The statics do not move while the process lives, so the base
+        is cached and only the cheap part is redone -- which matters because the vein
+        watcher calls this on every trigger, and paying 1.5s there made the extractor look
+        like it had a delay when the mining itself takes 20ms. A world change moves
+        ``Main.tile``, not the statics, so the TileMap is still rebuilt each call.
+        """
         from terrariabonker.locate import main_static_base
         from terrariabonker.tiles import TileMap
 
-        base = main_static_base(self.mem)
+        if self._main_base is None:
+            self._main_base = main_static_base(self.mem)
+        base = self._main_base
         if base is None:
             raise ServiceError("could not locate Main's statics — is the game in a world?")
         try:
             return TileMap(self.mem, base)
         except ValueError as e:
+            self._main_base = None            # stale or no world: rescan next time
             raise ServiceError(str(e))
 
     def vein_at(self, x: int, y: int, *, gems: bool = False,
@@ -655,17 +668,141 @@ class Service:
         px, py = struct.unpack("<ff", self.mem.read(base + 0x0C, 8))
         return int(px // 16), int(py // 16)
 
+    # Tiles that fall cannot be identified from a table we trust: the game's own
+    # `Main.tileSand` holds only {53 Sand, 112 Ebonsand, 116 Pearlsand, 234 Crimsand}, yet
+    # silt and slush demonstrably fall too, by some other mechanism. So the search for a
+    # deposit that has moved does not classify tiles at all -- it looks down the whole
+    # column and spends a fixed budget of reads doing it, which is correct for any falling
+    # tile including ones we have not identified.
+    FALL_SEARCH_READS = 40000
+
     def extract_vein(self, x: int, y: int, *, gems: bool = False,
                      limit: int | None = None, timeout: float = 20.0) -> dict:
         """Mine the vein at ``(x, y)`` through the game's own ``PickTile`` (spec 040).
 
-        Tiles are armed one at a time. The stub only runs while the player is mining,
-        because that is where it is hooked, so this waits for each tile to actually be
-        **gone** rather than for the stub to acknowledge anything -- the stub cannot
-        acknowledge, since it may not write to its own cave (see ``_ore_extract_body``).
-        Waiting on the tile is the better test regardless: it is the success condition,
-        not a proxy for it. An armed tile is simply re-mined on every swing until it
-        breaks, which is idempotent, so a slow tile costs swings and nothing else.
+        Tiles are handed over a batch at a time -- the stub mines a whole queue per frame,
+        so a typical 10-30 tile vein goes at once. The batch is capped
+        (``ORE_MAX_BATCH``) because draining a 400-tile vein in a single frame would run
+        400 PickTiles in one frame, each spawning dust, drops and light updates.
+
+        **The vein is re-found between batches rather than remembered.** Silt, slush and
+        sand fall when the tile under them goes, so for a deposit bigger than one batch
+        the coordinates from the first flood are stale by the second: the blocks are still
+        there, just lower down. Re-flooding from whatever tile of the same id is still
+        standing near where the vein was follows them down. Ores do not move, so for them
+        this is the same list twice and costs one extra flood (~2ms).
+
+        The stub only runs while the game is updating, so this waits for tiles to actually
+        be **gone** rather than for the stub to acknowledge anything -- it only reads the
+        queue. Waiting on the tiles is the better test regardless: it is the success
+        condition rather than a proxy for it.
+        """
+        import time
+
+        from terrariabonker import tiles as T
+        from terrariabonker.patcher import ORE_MAX_BATCH
+
+        p = self.patcher()
+        if not p.is_enabled("ore_extract"):
+            raise ServiceError("the ore extractor cheat is not enabled")
+        tm = self.tilemap()
+        want = T.whitelist(gems)
+        cap = limit or T.DEFAULT_LIMIT
+        first = T.flood(tm, x, y, want, cap)
+        if not first:
+            return {"at": [x, y], "queued": 0, "mined": 0, "left": 0, "batches": 0,
+                    "waits": [], "median_wait": None, "reason": "not a whitelisted tile"}
+        tid = tm.solid_type_at(x, y)
+
+        # where to look for the rest of it later: the vein's own extent, and then straight
+        # down for as far as the read budget allows -- a narrow deposit is followed to the
+        # world floor, a wide one is bounded so a re-scan cannot cost seconds
+        xs = [q[0] for q in first]
+        ys = [q[1] for q in first]
+        x0, x1 = max(0, min(xs) - 2), min(tm.max_x - 1, max(xs) + 2)
+        y0 = max(0, min(ys) - 2)
+        rows = max(8, self.FALL_SEARCH_READS // max(1, x1 - x0 + 1))
+        y1 = min(tm.max_y - 1, y0 + rows)
+
+        def still_standing():
+            """A live tile of this id anywhere the vein could have ended up."""
+            for yy in range(y0, y1 + 1):
+                for xx in range(x0, x1 + 1):
+                    if tm.solid_type_at(xx, yy) == tid:
+                        return (xx, yy)
+            return None
+
+        mined, batches, stalled = 0, 0, ""
+        waits = []
+        try:
+            while mined < cap:
+                seed = still_standing()
+                if seed is None:
+                    break                       # the whole deposit is gone
+                batch = T.flood(tm, seed[0], seed[1], {tid}, cap - mined)[:ORE_MAX_BATCH]
+                if not batch:
+                    break
+                if not p.ore_arm(batch):
+                    stalled = "could not arm the stub"
+                    break
+                batches += 1
+                t0 = time.time()
+                deadline = t0 + timeout
+                while time.time() < deadline:
+                    if all(tm.solid_type_at(*q) is None for q in batch):
+                        break
+                    time.sleep(0.02)
+                done = sum(1 for q in batch if tm.solid_type_at(*q) is None)
+                waits.append(round(time.time() - t0, 3))
+                mined += done
+                if done == 0:
+                    stalled = ("stopped early — nothing in a batch of %d broke within "
+                               "%.0fs" % (len(batch), timeout))
+                    break
+        finally:
+            p.ore_disarm()          # a queue left armed is re-mined every frame
+        left = still_standing() is not None
+        return {"at": [x, y], "queued": len(first), "mined": mined,
+                "left": len(first) - mined if not left else -1,
+                "batches": batches, "waits": waits,
+                "median_wait": round(sorted(waits)[len(waits) // 2], 3) if waits else None,
+                "reason": stalled}
+
+    def watch_veins(self, *, gems: bool = False, limit: int | None = None,
+                    radius: int | None = None, timeout: float = 8.0,
+                    rounds: int | None = None, on_event=None) -> dict:
+        """Mine the rest of a vein whenever the player breaks one of its tiles.
+
+        This is the shape people expect from a vein miner (and what the tModLoader mod
+        does): you break one ore by hand and the connected run goes with it, rather than
+        naming a coordinate up front.
+
+        Detection is by observation, because the stub cannot report anything -- it may not
+        write to its own cave. Each round re-reads a window around the player and looks for
+        a whitelisted tile that was there and now is not. That tile is gone, so the vein is
+        found by flooding from whichever **neighbour still standing** carries the same id:
+        breaking copper takes the copper it touched, not the iron behind it.
+
+        ``radius`` must cover how far the player can actually mine, not how far looks
+        reasonable: with the tool-reach cheat on, they break tiles up to 75 away, and a
+        window smaller than that silently stops triggering the moment they mine at range.
+        It defaults to the live reach plus a margin for exactly that reason.
+
+        ``timeout`` is deliberately short. It is the wait for one batch to break, and the
+        loop is blocked for the whole of it -- a tile that will not break (the player
+        wandered off mid-swing) must cost seconds, not half a minute, or one stuck tile
+        stops the watcher noticing anything else.
+
+        Detection has to be quick or it misses the first tile. Rescanning the whole
+        window costs ~0.29s (32k tiles) and with fast-mining the player breaks several
+        blocks inside that, so the vein only goes after a few. Instead the window is
+        scanned once to learn where the ore *is*, and each round re-checks only those
+        tiles -- ~1200 of them, ~0.012s -- which is 18x quicker. The full scan is redone
+        when the player moves away from where it was taken, on a slow heartbeat, and after
+        a vein is mined.
+
+        Runs until ``rounds`` is exhausted (forever when None). ``on_event`` is called with
+        each result dict as it happens, for a caller that wants to stream progress.
         """
         import time
 
@@ -674,37 +811,61 @@ class Service:
         p = self.patcher()
         if not p.is_enabled("ore_extract"):
             raise ServiceError("the ore extractor cheat is not enabled")
-        tm = self.tilemap()
         want = T.whitelist(gems)
-        vein = T.flood(tm, x, y, want, limit=limit or T.DEFAULT_LIMIT)
-        if not vein:
-            return {"at": [x, y], "queued": 0, "mined": 0, "left": 0,
-                    "reason": "not a whitelisted tile"}
+        if radius is None:
+            reach = (p.values() or {}).get("tool_reach")
+            radius = int(reach) + 15 if reach else 90
+        steps = ((1, 0), (-1, 0), (0, 1), (0, -1),
+                 (1, 1), (1, -1), (-1, 1), (-1, -1))
+        RESCAN_EVERY = 3.0        # heartbeat: catches ore revealed by someone else digging
+        RESCAN_MOVE = 12          # tiles the player may drift before the window is stale
 
-        mined = 0
-        stalled = ""
+        def scan(px, py):
+            return {(x, y): t
+                    for y in range(max(0, py - radius), min(tm.max_y, py + radius))
+                    for x in range(max(0, px - radius), min(tm.max_x, px + radius))
+                    if (t := tm.solid_type_at(x, y)) in want}
+
+        tm = self.tilemap()
+        tracked: dict[tuple[int, int], int] = {}
+        at = None
+        last_full = 0.0
+        taken, events, n = 0, [], 0
         try:
-            for tx, ty in vein:
-                if tm.solid_type_at(tx, ty) not in want:
-                    continue                  # already gone (the player got there first)
-                if not p.ore_arm(tx, ty):
-                    stalled = "could not arm the stub"
-                    break
-                deadline = time.time() + timeout
-                while time.time() < deadline:
-                    if tm.solid_type_at(tx, ty) is None:
-                        break
-                    time.sleep(0.02)
-                if tm.solid_type_at(tx, ty) is not None:
-                    stalled = ("stopped early — the stub only runs while you are mining, "
-                               "and (%d,%d) did not break within %.0fs" % (tx, ty, timeout))
-                    break
-                mined += 1
+            while rounds is None or n < rounds:
+                n += 1
+                px, py = self.player_tile()
+                now = time.time()
+                if (at is None or now - last_full > RESCAN_EVERY
+                        or max(abs(px - at[0]), abs(py - at[1])) > RESCAN_MOVE):
+                    tracked = scan(px, py)
+                    at, last_full = (px, py), now
+                # the fast path: only tiles we already know are ore
+                broke = [(xy, t) for xy, t in tracked.items()
+                         if tm.solid_type_at(*xy) is None]
+                for xy, _ in broke:
+                    tracked.pop(xy, None)
+                for (bx, by), tid in broke:
+                    # the tile is gone, so the vein is whatever neighbour of the same id
+                    # is still standing: breaking copper takes copper, not the iron behind
+                    start = next((q for q in ((bx + dx, by + dy) for dx, dy in steps)
+                                  if tm.solid_type_at(*q) == tid), None)
+                    if start is None:
+                        continue                  # a lone tile: nothing connected
+                    got = self.extract_vein(start[0], start[1], gems=gems, limit=limit,
+                                            timeout=timeout)
+                    got["triggered_by"] = [bx, by]
+                    taken += got["mined"]
+                    events.append(got)
+                    if on_event:
+                        on_event(got)
+                if broke:
+                    px, py = self.player_tile()
+                    tracked, at, last_full = scan(px, py), (px, py), time.time()
+                time.sleep(0.01)
         finally:
-            p.ore_disarm()          # never leave a tile armed: it re-mines every swing
-        return {"at": [x, y], "queued": len(vein), "mined": mined,
-                "left": len(vein) - mined,
-                "reason": stalled if stalled else ""}
+            p.ore_disarm()
+        return {"rounds": n, "mined": taken, "events": events}
 
     def build_check(self) -> dict:
         """Is this build one we know, and do the cheats still resolve on it? (spec 036)

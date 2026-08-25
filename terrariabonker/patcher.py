@@ -34,6 +34,57 @@ from terrariabonker.locate import (STATLIFE_FROM_OBJ, find_players,
 _STATE = os.path.expanduser("~/.config/terrariabonker/patches.json")
 
 
+def pe_exports(mem, base: int) -> tuple[str | None, dict]:
+    """``(module_name, {export: address})`` for a PE image mapped at ``base``.
+
+    wine maps its DLLs anonymously, so /proc/pid/maps cannot name them -- the module
+    name has to come out of the image's own export directory. Returns ``(None, None)``
+    for anything that is not a PE with exports.
+    """
+    head = mem.read(base, 0x40)
+    if head[:2] != b"MZ":
+        return None, None
+    lfa = struct.unpack_from("<I", head, 0x3C)[0]
+    if lfa > 0x400:
+        return None, None
+    pe = mem.read(base + lfa, 0x100)
+    if pe[:4] != b"PE\0\0":
+        return None, None
+    exp_rva = struct.unpack_from("<I", pe, 0x78)[0]     # DataDirectory[0] = exports
+    if not exp_rva:
+        return None, None
+    d = mem.read(base + exp_rva, 0x28)
+    nm_rva = struct.unpack_from("<I", d, 0x0C)[0]
+    n_names = struct.unpack_from("<I", d, 0x18)[0]
+    func_rva = struct.unpack_from("<I", d, 0x1C)[0]
+    names_rva = struct.unpack_from("<I", d, 0x20)[0]
+    ord_rva = struct.unpack_from("<I", d, 0x24)[0]
+    mod = mem.read(base + nm_rva, 64).split(b"\0")[0].decode("latin1")
+    if not n_names or n_names > 20000:
+        return mod, {}
+    names = struct.unpack("<%dI" % n_names, mem.read(base + names_rva, 4 * n_names))
+    ords = struct.unpack("<%dH" % n_names, mem.read(base + ord_rva, 2 * n_names))
+    blob = mem.read(base + func_rva, 4 * (max(ords) + 1))
+    return mod, {mem.read(base + r, 96).split(b"\0")[0].decode("latin1"):
+                 base + struct.unpack_from("<I", blob, 4 * o)[0]
+                 for r, o in zip(names, ords)}
+
+
+def resolve_export(mem, module: str, fn: str) -> int:
+    """Address of ``module!fn`` in the live process, found by scanning for PE images."""
+    with open(f"/proc/{mem.pid}/maps") as f:
+        bases = sorted({int(q[0].split("-")[0], 16) for q in (ln.split() for ln in f)
+                        if q[1].startswith("r") and int(q[0].split("-")[0], 16) < 2 ** 32})
+    for b in bases:
+        try:
+            mod, exp = pe_exports(mem, b)
+        except Exception:
+            continue
+        if mod and module.lower() in mod.lower() and exp and fn in exp:
+            return exp[fn]
+    raise PatchError(f"{module}!{fn} not found in the running process")
+
+
 def _b(hexstr: str) -> bytes:
     return bytes(int(x, 16) for x in hexstr.split())
 
@@ -146,6 +197,15 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # each hit. The prologue alone is far from unique (190 methods share it), so the
     # pattern runs on through the argument loads, the mono type-init check and the two
     # zeroed locals to the `mov eax,[Main.tile]`; that is unique.
+    # Player.Update's call to GrabItems -- the per-frame site the extractor hooks. The
+    # pattern covers the `if (!dead)` check that guards the call (movzx eax,byte
+    # [eax+dead]; test; jne) plus the argument setup, so it is anchored to the real call
+    # rather than to an incidental byte sequence: the arg-setup tail alone matches 154
+    # places. The field displacement is wildcarded. The five bytes at +21 carry no
+    # relative address, which is what makes them displaceable -- the call itself could not
+    # be, its rel32 differs every session.
+    "grabitems_call": _pat("0F B6 80 ?? ?? ?? ?? 85 C0 75 14 8B 45 08 8B 4D 0C "
+                           "89 4C 24 04 89 04 24 8B C0"),
     "pick_tile": _pat("?? ?? ?? ?? ?? 56 83 EC 7C 8B 7D 08 8B 5D 0C B8 ?? ?? ?? ?? "
                       "F7 00 01 00 00 00 74 08 8D 6D 00 E8 ?? ?? ?? ?? "
                       "C7 45 E4 00 00 00 00 C7 45 E0 00 00 00 00 8B 05 ?? ?? ?? ??"),
@@ -446,76 +506,56 @@ def _teleport_body(player_base: int, call_target: int) -> bytes:
             + b"\x89\x4c\x24\x04")              # mov [esp+04],ecx   / displaced instructions
 
 
-# The extractor's slot, at the tail of its own stub: a flag the unprivileged side sets
-# when it wants a tile mined, then that tile's x and y. One tile at a time on purpose — a
-# cave is *borrowed* padding (see _find_cave), so its size is the risk, and a queue big
-# enough for a vein would be a far bigger borrow than a 12-byte slot.
-ORE_SLOT_BYTES = 12
-
-# Passed as PickTile's `cap` argument by our own nested call, and by nothing else, so the
-# stub can recognise its own re-entry by reading the incoming argument instead of writing
-# a flag. Large and positive: PickTile only compares `cap` against -1 and otherwise uses
-# it as `damage = Min(damage, cap * damage/pickPower)`, which at this magnitude leaves the
-# damage untouched — exactly what -1 does. A *negative* sentinel would clamp the damage
-# negative and no tile would ever break.
-ORE_SENTINEL = 0x5A5A5A5A
+# The extractor's queue, in our own arena rather than at the tail of a borrowed cave:
+# a count, then that many (x, y) pairs. 32 per swing matches what VeinMiner caps at, and
+# is the number that turns "one block per swing" into "the vein just goes" -- a typical
+# vein is 10-30 tiles. Draining a 400-tile vein in a single call would run 400 PickTiles
+# in one frame, each spawning dust, drops and light updates, and would visibly hitch.
+ORE_MAX_BATCH = 32
+ORE_QUEUE_OFF = 0x400            # queue sits well clear of the ~100-byte stub
+ORE_QUEUE_BYTES = 4 + ORE_MAX_BATCH * 8
 
 
 def _ore_extract_body(patcher, inj) -> bytes:
-    """Mine one armed tile per ``PickTile`` call, from inside ``PickTile`` itself.
+    """Mine a batch of queued tiles **every frame**, from Player.Update.
 
-    The unprivileged side does the thinking — read the tile map, flood-fill the vein,
-    decide what may be taken — and writes a single coordinate here. This stub does one
-    dumb thing with it: call ``Player.PickTile(this, x, y, 100, sentinel)``, which is the
-    same call the game makes when you swing a pickaxe, so drops, framing, lighting and the
-    ``CanKillTile`` check all happen exactly as they normally would.
+    The unprivileged side does the thinking -- read the tile map, flood-fill the vein,
+    decide what may be taken -- and writes a queue here. This stub walks it and calls
+    ``Player.PickTile(this, x, y, 100, -1)`` for each, the same call the game makes when
+    you swing, so drops, framing, lighting and the ``CanKillTile`` check all happen
+    exactly as they normally would.
 
-    **Why hook PickTile rather than a per-frame method.** The call has to happen on the
-    game thread, and PickTile already runs there — while you are mining, which is the only
-    time this cheat should be doing anything. Nothing happens when you put the pickaxe
-    away, and no new hot path is patched.
+    **Why Player.Update and not PickTile.** Hooking PickTile itself only ran the stub when
+    the player swung, and the queue is armed *after* a swing has broken a tile -- so a
+    vein sat armed until the player happened to swing again. Breaking one block and
+    stopping did nothing at all. Hooking the per-frame call to GrabItems (guarded only by
+    ``if (!dead)``) means an armed queue drains on the next frame, which is what "break one
+    block and the vein goes" actually requires. It also removes re-entrancy completely:
+    PickTile is no longer hooked, so calling it cannot come back through here, and the cap
+    argument is plain -1 like the game's own callers pass.
 
-    **The stub never writes to its own cave, and that is the whole design.** A cave is
-    borrowed padding inside somebody else's mapping, and those mappings are *read-execute*
-    — the one this lands in is a code section of ``CUESDK_2015.dll``, the Corsair SDK that
-    ships with the game. Installing a stub works anyway because ``/proc/pid/mem`` bypasses
-    page protection, but the CPU running that stub does not: an earlier version kept an
-    ``in flight`` state in the slot and died on its first swing with
+    **It lives in our own arena, not in a cave.** Earlier versions borrowed padding and hit
+    every limit of it: a stub too big for a gap, a stub that wrote to its cave and faulted
+    (that cave was a code section of CUESDK_2015.dll -- read-execute), and a queue that
+    fits in no gap at all. See ``Patcher.arena``.
 
-        page fault on write access to 0x7795424b in wow64 32-bit code (0x77954216)
+    **The count is consumed before the work.** Reading it into edi and zeroing it
+    immediately means a batch is mined once rather than re-mined on every frame at 60fps,
+    and the queue cannot be drained twice if anything ever does re-enter.
 
-    where 0x77954216 was the ``inc`` and 0x7795424b was the slot. Every other injection in
-    this project only reads and executes in its cave, which is why this was the only one
-    that ever hit it. Reads are fine; writes are not. So the slot is written *only* from
-    the unprivileged side, and the stub reads it.
+    **The loop counter is a register.** ``edi`` counts down and ``esi`` walks the queue;
+    both are callee-saved, so PickTile hands them back. The count is clamped to
+    :data:`ORE_MAX_BATCH` in the stub as well as by the caller, because a corrupted count
+    would not crash -- it would mine coordinates nobody asked for, which damages a world.
 
-    **Re-entrancy is caught on the stack, not in memory.** Calling PickTile from inside
-    PickTile re-enters this stub, and the guard has to hold for the whole nested call —
-    which used to mean a flag, which meant a write. Instead the nested call passes
-    :data:`ORE_SENTINEL` as PickTile's ``cap`` argument, and the stub's first act is to
-    compare the incoming ``cap`` (still on the stack at ``[esp+0x34]``, below the pushad)
-    against it. Our own call falls straight through to the displaced bytes, so depth is
-    one by construction. This needs no audit of what the game's own callers pass: the test
-    is "is this *my* sentinel", not "is this one of theirs".
-
-    Because nothing is consumed, an armed tile is re-mined on every swing until the caller
-    disarms it. That is idempotent — a broken tile fails ``CanKillTile`` and the call is a
-    no-op — and it lets the caller wait on the tile actually being gone, which is the real
-    success condition, rather than on the stub having dequeued something.
-
-    **Stack alignment.** Mono's x86 JIT builds 16-byte-aligned frames assuming esp is
-    12 (mod 16) at entry — PickTile's own prologue is proof: 4 pushes + ``sub esp,0x7C``
-    is 140 bytes, which lands the frame on 16 only from that start. The pushad and the
-    args do not preserve that, so esp is realigned before the pushes and restored from ebx
-    afterwards.
-
-    The stub finds its own slot with ``call/pop``: the cave address is not known when the
-    body is built (the cave is chosen from the body's length), so a baked absolute address
-    is not available.
+    **Stack alignment.** Mono's x86 JIT builds 16-byte frames assuming esp is 12 (mod 16)
+    at entry; PickTile's own prologue proves it (4 pushes + ``sub esp,0x7C`` = 140 bytes).
+    ``ebp`` holds the aligned base and each iteration restores esp from it, so every call
+    in the batch gets the alignment mono expects however PickTile cleans up.
     """
     from terrariabonker.locate import find_localplayer_anchor
 
-    pick_tile = patcher._resolve(inj.anchor)          # the anchor sits at the entry
+    pick_tile = patcher._resolve("pick_tile")     # the call target, not the hook site
     tail = find_localplayer_anchor(patcher.mem)
     if tail is None:
         raise PatchError("could not locate Main.player / Main.myPlayer")
@@ -523,50 +563,40 @@ def _ore_extract_body(patcher, inj) -> bytes:
     my_player = patcher.mem.read_u32(tail - 4)
     if not (player_arr and my_player):
         raise PatchError("Main.player / Main.myPlayer are not readable")
+    queue = patcher.arena() + ORE_QUEUE_OFF
 
-    # Built in two passes: the data lives after the code, so the displacement from the
-    # call/pop anchor is only known once the code's length is.
-    def emit(delta: int) -> bytes:
-        assert 0 <= delta + 8 < 128, "slot no longer reachable with a disp8"
-        # The work, so each guard's jump distance is measured rather than counted by hand.
-        work = (b"\x8b\xdc"                          # mov ebx,esp
-                + b"\x83\xe4\xf0"                    # and esp,-16  \ mono wants esp==12
-                + b"\x83\xec\x0c"                    # sub esp,12   / (mod 16) at entry
-                + b"\xa1" + _u32(player_arr)          # mov eax,[Main.player]
-                + b"\x8b\x0d" + _u32(my_player)       # mov ecx,[Main.myPlayer]
-                + b"\x8b\x44\x88\x10"                # mov eax,[eax+ecx*4+0x10]
-                + b"\x68" + _u32(ORE_SENTINEL)        # push sentinel  (cap == re-entry mark)
-                + b"\x6a\x64"                         # push 100       (pickPower)
-                + b"\xff\x76" + bytes([delta + 8])    # push [esi+delta+8]   (y)
-                + b"\xff\x76" + bytes([delta + 4])    # push [esi+delta+4]   (x)
-                + b"\x50"                              # push eax       (this)
-                + b"\xb8" + _u32(pick_tile)           # mov eax,PickTile
-                + b"\xff\xd0"                         # call eax
-                + b"\x8b\xe3")                        # mov esp,ebx (either convention)
-        assert len(work) < 128, "guard jump no longer fits in a short branch"
-        armed = (b"\x83\x7e" + bytes([delta]) + b"\x00"   # cmp dword [esi+delta],0
-                 + b"\x74" + bytes([len(work)]))            # je skip  (nothing armed)
-        # cap still sits above the pushad: 0x14 into the frame, +0x20 for pushad.
-        mine = (b"\x81\x7c\x24\x34" + _u32(ORE_SENTINEL)  # cmp dword [esp+0x34],sentinel
-                + b"\x74" + bytes([len(armed) + len(work)]))  # je skip  (our own call)
-        return (b"\x60"                                     # pushad
-                + b"\xe8\x00\x00\x00\x00"                  # call $+5  (push next addr)
-                + b"\x5e"                                    # pop esi   (esi = here)
-                + mine
-                + armed
-                + work
-                + b"\x61"                                    # popad  <- skip lands here
-                + b"\xeb" + bytes([ORE_SLOT_BYTES])          # jmp over the slot
-                + b"\x00" * ORE_SLOT_BYTES                   # armed, x, y
-                + inj.overwrite)                             # the displaced prologue
-
-    probe = emit(0)
-    # delta is measured from the pop's *next* instruction, which is where esi points.
-    esi_at = 6                                             # pushad(1) + call(5)
-    slot_at = len(probe) - ORE_SLOT_BYTES - len(inj.overwrite)
-    body = emit(slot_at - esi_at)
-    assert len(body) == len(probe), "two-pass emit changed length"
-    return body
+    body = (b"\x8b\xe5"                              # mov esp,ebp   <- each iteration
+            + b"\xa1" + _u32(player_arr)             # mov eax,[Main.player]
+            + b"\x8b\x0d" + _u32(my_player)          # mov ecx,[Main.myPlayer]
+            + b"\x8b\x44\x88\x10"                    # mov eax,[eax+ecx*4+0x10]
+            + b"\x6a\xff"                            # push -1        (cap, as the game does)
+            + b"\x6a\x64"                            # push 100       (pickPower)
+            + b"\xff\x76\x04"                        # push [esi+4]   (y)
+            + b"\xff\x36"                            # push [esi]     (x)
+            + b"\x50"                                 # push eax       (this)
+            + b"\xb8" + _u32(pick_tile)              # mov eax,PickTile
+            + b"\xff\xd0"                            # call eax
+            + b"\x83\xc6\x08"                        # add esi,8      (next pair)
+            + b"\x4f")                                # dec edi
+    loop = body + b"\x75" + bytes([(256 - (len(body) + 2)) & 0xFF])     # jnz loop
+    tail_code = loop + b"\x8b\xe3"                    # mov esp,ebx (restore either conv)
+    setup = (b"\x83\xff" + bytes([ORE_MAX_BATCH])    # cmp edi,MAX
+             + b"\x76\x05"                           # jbe +5
+             + b"\xbf" + _u32(ORE_MAX_BATCH)         # mov edi,MAX   (clamp a bad count)
+             + b"\xbe" + _u32(queue + 4)             # mov esi,&pairs
+             + b"\x8b\xdc"                           # mov ebx,esp
+             + b"\x83\xe4\xf0"                       # and esp,-16   \ mono wants esp==12
+             + b"\x83\xec\x0c"                       # sub esp,12    / (mod 16) at entry
+             + b"\x8b\xec")                          # mov ebp,esp   (aligned base)
+    empty = (b"\x8b\x3d" + _u32(queue)              # mov edi,[count]
+             + b"\x85\xff"                           # test edi,edi
+             + b"\x74" + bytes([7 + len(setup) + len(tail_code)])   # je skip (nothing queued)
+             + b"\x83\x25" + _u32(queue) + b"\x00")  # and [count],0  (consume it)
+    assert len(setup) + len(tail_code) + 7 < 128, "skip jump no longer fits a short branch"
+    return (b"\x60"                                   # pushad
+            + empty + setup + tail_code
+            + b"\x61"                                 # popad  <- skip lands here
+            + inj.overwrite)                           # the displaced arg stores
 
 
 def _clamp_vanity_slot(_value: int = 0) -> bytes:
@@ -748,6 +778,10 @@ class Injection:
     # protection. Setting this makes _find_cave demand a writable page instead of letting
     # the mismatch surface as an access violation mid-game. See _ore_extract_body.
     writes_cave: bool = False
+    # True if the stub belongs in memory we allocate rather than borrowed padding. Set it
+    # when the stub is too big for a gap, needs to write, or carries a buffer -- see
+    # Patcher.arena. The 5-byte site jump still reaches it (rel32 spans +-2GB).
+    arena: bool = False
 
 
 INJECTIONS: dict[str, Injection] = {
@@ -817,9 +851,9 @@ INJECTIONS: dict[str, Injection] = {
     # reads the tile map, floods the vein and decides what may be taken, then writes one
     # coordinate into the stub's own slot. See _ore_extract_body.
     "ore_extract": Injection(
-        "ore_extract", "Ore extractor (vein mining)", "pick_tile",
-        0x0, _b("55 8B EC 53 57"), None,
-        build_body=_ore_extract_body, rerun_overwrite=False,
+        "ore_extract", "Ore extractor (vein mining)", "grabitems_call",
+        0x15, _b("89 04 24 8B C0"), None,
+        build_body=_ore_extract_body, rerun_overwrite=False, arena=True,
         note="Mines the rest of an ore vein while you mine it. Whitelisted ores only."),
     "teleport": Injection(
         "teleport", "Map-ping teleport (TriggerPing)", "trigger_ping",
@@ -915,6 +949,7 @@ class Patcher:
         self._enabled: set[str] = set()
         self._inj: dict[str, dict] = {}       # injection name -> {inject, cave, stub_len}
         self._values: dict[str, float] = {}   # cheat name -> last applied value
+        self._arena: int | None = None        # base of memory we allocated (see arena())
         self._load_state()
 
     # --- state persistence -------------------------------------------------
@@ -947,6 +982,7 @@ class Patcher:
                 self._inj = {k: _norm_inj(v) for k, v in s.get("inj", {}).items()}
                 self._values = {k: v for k, v in s.get("values", {}).items()
                                 if k in _VALUE_SPECS}
+                self._arena = s.get("arena")
         except (OSError, ValueError):
             pass
 
@@ -956,8 +992,143 @@ class Patcher:
         with open(tmp, "w") as f:
             json.dump({"pid": self.mem.pid, "sites": self._sites,
                        "enabled": sorted(self._enabled), "inj": self._inj,
-                       "values": self._values}, f)
+                       "values": self._values, "arena": self._arena}, f)
         os.replace(tmp, _STATE)
+
+    # --- our own memory ----------------------------------------------------
+    ARENA_SIZE = 0x4000                 # 16KB: room for a stub and a real queue
+    # Stamped at the arena's tail so we can find it again. An arena outlives the process
+    # that asked for it -- VirtualAlloc'd memory belongs to the game, not to us -- so
+    # losing the state file must not cost the player another swing to re-bootstrap.
+    ARENA_MAGIC = b"TBARENA1"
+    ARENA_MAGIC_OFF = 0x4000 - 16
+
+    def _free_base(self, need: int) -> int:
+        """A free 64KB-aligned address (VirtualAlloc's reservation granularity).
+
+        Chosen per session, never hardcoded: the map differs every launch and the obvious
+        round numbers sit inside mono's big RWX arenas -- 0x30000000 turned out to be
+        33MB into one.
+        """
+        rs = []
+        with open(f"/proc/{self.mem.pid}/maps") as f:
+            for ln in f:
+                a, b = (int(v, 16) for v in ln.split()[0].split("-"))
+                if a < 2 ** 32:
+                    rs.append((a, b))
+        rs.sort()
+        merged: list[list[int]] = []
+        for a, b in rs:
+            if merged and a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        for (_, end), (nxt, _) in zip(merged, merged[1:]):
+            base = (end + 0xFFFF) & ~0xFFFF
+            if end >= 0x10000000 and nxt - base >= max(need, 0x100000):
+                return base
+        raise PatchError("no free 64KB-aligned hole for an arena")
+
+    def _mapped(self, addr: int) -> str | None:
+        with open(f"/proc/{self.mem.pid}/maps") as f:
+            for ln in f:
+                a, b = (int(v, 16) for v in ln.split()[0].split("-"))
+                if a <= addr < b:
+                    return ln.strip()
+        return None
+
+    def arena(self, on_wait=None, timeout: float = 300.0) -> int:
+        """Memory of our own inside the game: RWX, ours alone, ``ARENA_SIZE`` bytes.
+
+        Code caves are *borrowed* padding inside somebody else's read-execute mapping, and
+        this project has now hit every limit of that: a stub too big for a gap, a stub that
+        needed to write (which faulted, because the cave was a code section of
+        CUESDK_2015.dll), and a queue that will not fit in any gap at all. This is the
+        graduation ``_find_cave`` has always pointed at.
+
+        We cannot allocate into another process directly, so the game allocates for itself:
+        a ~36-byte springboard in a cave calls ``kernel32!VirtualAlloc`` at a **fixed**
+        base. Fixed, because a stub in a read-execute cave has nowhere to report a return
+        value *to* -- so instead of reading the result we choose the address and look for
+        it in /proc/pid/maps.
+
+        The springboard is hooked at ``PickTile``, so it runs on the player's next swing.
+        That is the same thing the extractor needs anyway, and it unhooks itself the moment
+        the region appears. ``on_wait`` is called once when we start waiting, so a caller
+        can say "swing once" rather than appearing to hang.
+        """
+        import time
+
+        if self._arena and self._arena_ok(self._arena):
+            return self._arena
+        found = self._find_arena()               # ours from earlier in this process?
+        if found is not None:
+            self._arena = found
+            self._save_state()
+            return found
+
+        va = resolve_export(self.mem, "kernel32", "VirtualAlloc")
+        base = self._free_base(self.ARENA_SIZE)
+        inj = INJECTIONS["ore_extract"]
+        site = self._resolve(inj.anchor)
+        body = (b"\x60"                                  # pushad
+                + b"\x6a\x40"                            # push PAGE_EXECUTE_READWRITE
+                + b"\x68" + _u32(0x3000)                 # push MEM_COMMIT|MEM_RESERVE
+                + b"\x68" + _u32(self.ARENA_SIZE)        # push size
+                + b"\x68" + _u32(base)                   # push lpAddress (fixed)
+                + b"\xb8" + _u32(va)                     # mov eax,VirtualAlloc
+                + b"\xff\xd0"                            # call eax (stdcall: callee cleans)
+                + b"\x61"                                 # popad
+                + inj.overwrite)
+        stub_len = len(body) + 5
+        cave = self._find_cave(stub_len)
+        self.mem.write(cave, body + b"\xe9" + self._rel32(cave + len(body), site + 5))
+        self.mem.write(site, b"\xe9" + self._rel32(site + 5, cave))
+        if on_wait:
+            on_wait()
+        try:
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if self._mapped(base):
+                    break
+                time.sleep(0.05)
+        finally:
+            self.mem.write(site, inj.overwrite)      # unhook first, always
+            self.mem.write(cave, b"\xcc" * stub_len)
+        row = self._mapped(base)
+        if not row:
+            raise PatchError("VirtualAlloc did not run — the game needs one pickaxe swing "
+                             "to initialise the extractor")
+        if "w" not in row.split()[1] or "x" not in row.split()[1]:
+            raise PatchError(f"arena is not RWX: {row}")
+        self.mem.write(base + self.ARENA_MAGIC_OFF, self.ARENA_MAGIC)
+        self._arena = base
+        self._save_state()
+        return base
+
+    def _arena_ok(self, base: int) -> bool:
+        """Is `base` still a mapped arena of ours? Checks the stamp, not just the map --
+        a plain address could be anything by the time we look again."""
+        row = self._mapped(base)
+        if not row:
+            return False
+        try:
+            return self.mem.read(base + self.ARENA_MAGIC_OFF,
+                                 len(self.ARENA_MAGIC)) == self.ARENA_MAGIC
+        except Exception:
+            return False
+
+    def _find_arena(self) -> int | None:
+        """An arena this process was already given, found by its stamp."""
+        with open(f"/proc/{self.mem.pid}/maps") as f:
+            for ln in f:
+                q = ln.split()
+                a, b = (int(v, 16) for v in q[0].split("-"))
+                if b - a != self.ARENA_SIZE or "w" not in q[1] or "x" not in q[1]:
+                    continue
+                if self._arena_ok(a):
+                    return a
+        return None
 
     def _record_value(self, name: str, value: float | int | None) -> None:
         """Remember the value last applied for a cheat so the UI can restore it."""
@@ -1157,8 +1328,9 @@ class Patcher:
             injects = [b + inj.inject_off for b in bases]
             caves = []
             for _ in injects:
-                caves.append(self._find_cave(stub_len, caves,
-                                             writable=inj.writes_cave))
+                caves.append(self.arena() if inj.arena
+                             else self._find_cave(stub_len, caves,
+                                                  writable=inj.writes_cave))
         sites = []
         for inject, cave in zip(injects, caves):
             back = inject + len(inj.overwrite)          # lands on the byte after ours
@@ -1170,49 +1342,48 @@ class Patcher:
         self._inj[inj.name] = {"sites": sites, "stub_len": stub_len}
         self._save_state()
 
-    def ore_slot(self) -> int | None:
-        """Address of the extractor's slot, or None when the cheat is off.
+    def ore_queue(self) -> int | None:
+        """Address of the extractor's queue, or None when it has no arena yet.
 
-        The slot sits at the tail of the stub, before the displaced prologue and the jump
-        back: ``stub_len`` counts the body plus that 5-byte jump, and the body ends with
-        the slot, the 5 displaced bytes. Derived rather than remembered so it cannot drift
-        away from what ``_ore_extract_body`` actually emits — a test pins the two together.
+        The queue is at a fixed offset in our own arena rather than at the tail of a
+        borrowed cave, so it is simply an address -- no derivation from stub length, and
+        no risk of drifting away from what the stub reads.
         """
-        rec = self._inj.get("ore_extract") or {}
-        sites = rec.get("sites") or []
-        if not sites or not rec.get("stub_len"):
-            return None
-        overwrite = len(INJECTIONS["ore_extract"].overwrite)
-        return sites[0]["cave"] + rec["stub_len"] - 5 - overwrite - ORE_SLOT_BYTES
+        return None if not self._arena else self._arena + ORE_QUEUE_OFF
 
     def ore_armed(self) -> bool:
-        """Is a tile currently armed for the stub to mine?
+        """Is anything queued for the stub to mine?
 
-        Only this side ever writes the slot -- the stub cannot, because a cave lives in a
-        read-execute mapping (see ``_ore_extract_body``). So this reports what *we* last
-        set, not what the game has done: whether the tile actually got mined is answered
-        by looking at the tile.
+        Only this side writes the queue, so this reports what *we* last set. Whether those
+        tiles actually got mined is answered by looking at the tiles.
         """
-        slot = self.ore_slot()
-        return bool(slot and self.mem.read_i32(slot))
+        q = self.ore_queue()
+        return bool(q and self.mem.read_i32(q))
 
-    def ore_arm(self, x: int, y: int) -> bool:
-        """Arm one tile. The flag is written **last**, so the game can never see a
-        coordinate that is only half written."""
-        slot = self.ore_slot()
-        if slot is None:
-            return False
-        self.mem.write(slot + 4, struct.pack("<ii", int(x), int(y)))
-        self.mem.write(slot, struct.pack("<i", 1))
-        return True
+    def ore_arm(self, tiles) -> int:
+        """Queue up to :data:`ORE_MAX_BATCH` tiles. Returns how many were taken.
+
+        The count is written **last**, so the game can never see a count that covers
+        coordinates which are only half written -- the stub would mine whatever garbage
+        happened to be there, and mining the wrong tile cannot be undone.
+        """
+        q = self.ore_queue()
+        if q is None:
+            return 0
+        batch = list(tiles)[:ORE_MAX_BATCH]
+        if not batch:
+            return 0
+        self.mem.write(q + 4, b"".join(struct.pack("<ii", int(x), int(y))
+                                       for x, y in batch))
+        self.mem.write(q, struct.pack("<i", len(batch)))
+        return len(batch)
 
     def ore_disarm(self) -> bool:
-        """Stop the stub mining. Called once a tile is gone, and in the cleanup path --
-        an armed slot would otherwise keep re-mining the same coordinate on every swing."""
-        slot = self.ore_slot()
-        if slot is None:
+        """Stop the stub mining. A queue left armed is re-mined on every swing."""
+        q = self.ore_queue()
+        if q is None:
             return False
-        self.mem.write(slot, struct.pack("<i", 0))
+        self.mem.write(q, struct.pack("<i", 0))
         return True
 
     def _disable_injection(self, inj: Injection) -> None:
@@ -1227,6 +1398,8 @@ class Patcher:
             self.mem.write(s["inject"], inj.overwrite)  # restore original bytes
             if s.get("cave"):
                 self.mem.write(s["cave"], b"\xcc" * stub_len)   # scrub the stub
+        if inj.arena and self.ore_queue():
+            self.ore_disarm()          # an armed queue would outlive the stub
         self._apply_edits(inj.edits, on=False)
         self._inj.pop(inj.name, None)
         self._save_state()

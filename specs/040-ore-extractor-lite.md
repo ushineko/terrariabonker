@@ -1,7 +1,8 @@
 # Spec 040: Ore extractor lite — auto-mine contiguous ores
 
-**Status**: IN PROGRESS — both halves work in-game from the CLI (a vein mined 11/11 in
-64s with the game healthy). No GUI surface yet; see "Where the write half stands".
+**Status**: IN PROGRESS — works in-game: break one ore by hand and the connected vein
+goes at once, at range, including falling silt/slush piles. Only the GUI surface is
+left; see "The write half: what broke, and what fixed it".
 The write half (the per-frame stub) is not started
 
 > **Note**: No issue tracker ticket (personal utility).
@@ -158,8 +159,15 @@ code can mine a tile properly.
 
 ## The write half: what broke, and what fixed it
 
-**Working.** Verified in-game: a single armed tile mined on the first swing, then an
-11-tile tin vein taken 11/11 in 64 seconds with the process healthy throughout.
+**Working.** Verified in-game: break one ore block by hand and the connected vein goes
+at once -- 45 tiles in two batches at 20ms each, at extended reach ("a vein all the way
+across the screen"), and falling silt piles taken whole.
+
+Getting there took four wrong diagnoses and three separate performance cliffs, and the
+shape of the mistake was the same each time: a hypothesis that fit the evidence was
+treated as a cause before any test could separate it from its rivals. What settled each
+one was a measurement -- wine's SEH trace for the crash, a component timing for the
+"delay", a read count for the detection race. None of them took more than one command.
 
 Getting there cost three wrong diagnoses, and the shape of the mistake was the same each
 time — a hypothesis that fit the evidence was declared a root cause before any test could
@@ -233,7 +241,37 @@ that does need one, so this fails at install rather than on the first swing.
   touching the game: `[Main.player][Main.myPlayer]` is `0x3A54A090`, the same object
   `live_block()` resolves, same vtable.
 
-**Left to do:** no GUI surface — the extractor is CLI-only (`tb vein`, `tb extract`).
+**What the design ended up being**, after the parts that did not work:
+
+- **The stub lives in memory we allocate**, not in borrowed padding. `Patcher.arena` makes
+  the game call `kernel32!VirtualAlloc` for us at a fixed base (fixed, because a stub in a
+  read-execute cave has nowhere to report a return value to) and stamps the result so it
+  can be found again without a second bootstrap. That removed every size and writability
+  constraint at once.
+- **The hook is on `Player.Update`'s per-frame call to `GrabItems`**, not on `PickTile`.
+  Hooked at `PickTile` the stub only ran when the player swung, but the queue is armed
+  *after* a swing has broken a tile -- so a vein sat armed until they happened to swing
+  again, and breaking one block and stopping did nothing at all. Per-frame also removes
+  re-entrancy completely, since `PickTile` is no longer hooked.
+- **A queue of 32 tiles per frame**, matching what VeinMiner caps at. The counter is a
+  register, and the count is clamped in the stub as well as by the caller: a corrupted
+  count would not crash, it would mine coordinates nobody asked for.
+- **The vein is re-found between batches, not remembered.** Silt and slush fall when what
+  is under them goes, so a deposit bigger than one batch has moved by the second. The
+  search does not classify tiles -- the game's own `Main.tileSand` holds only
+  {53, 112, 116, 234} and yet silt and slush fall by some other mechanism -- it just looks
+  down the column on a fixed read budget, which is right for whatever falls.
+
+**Three performance cliffs, all found by measuring rather than reasoning:**
+
+| symptom | actual cause | fix |
+|---|---|---|
+| "takes a few tiles" | the watcher rescanned 32k tiles per round (0.29s) | re-check only known ore (0.012s), 18x |
+| "still a significant delay" | `tilemap()` called `main_static_base()` -- a full scan -- on every trigger | cache the base: 1510ms -> 0.1ms |
+| the watcher silently stopped | watch radius 45 while `tool_reach` is 75 -- mining at range fell outside the window | window derives from live reach |
+
+**Left to do:** no GUI surface — the extractor is CLI-only (`tb vein`, `tb extract`,
+`tb extract --watch`).
 
 **The bisect that got there,** kept because the ordering is the reusable part:
 

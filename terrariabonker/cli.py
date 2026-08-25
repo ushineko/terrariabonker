@@ -280,9 +280,33 @@ def cmd_vein(args) -> int:
     return 0
 
 
+def _extract_line(got) -> str:
+    at = got["at"]
+    med = got.get("median_wait")
+    return (f"[extract] {got['mined']} of {got['queued']} tiles mined at "
+            f"({at[0]}, {at[1]})"
+            + (f", median {med:.2f}s/tile" if med is not None else "")
+            + (f" — {got['reason']}" if got["reason"] else ""))
+
+
 def cmd_extract(args) -> int:
     """Mine the vein at a tile. THIS WRITES TO THE WORLD."""
     svc = _svc(guard=True, force=args.force)
+    if args.watch:
+        print("[extract] watching — break one ore by hand and the rest of its vein "
+              "goes with it. Ctrl-C to stop.")
+        try:
+            got = svc.watch_veins(gems=args.gems, limit=args.limit,
+                                  timeout=args.timeout, rounds=args.rounds,
+                                  on_event=lambda e: print(_extract_line(e), flush=True))
+        except KeyboardInterrupt:
+            print("\n[extract] stopped")
+            return 0
+        if args.json:
+            print(json.dumps(got))
+        else:
+            print(f"[extract] {got['mined']} tiles over {len(got['events'])} vein(s)")
+        return 0
     if args.x is None or args.y is None:
         x, y = svc.player_tile()
     else:
@@ -292,8 +316,7 @@ def cmd_extract(args) -> int:
     if args.json:
         print(json.dumps(got))
         return 0
-    print(f"[extract] {got['mined']} of {got['queued']} tiles mined at ({x}, {y})"
-          + (f" — {got['reason']}" if got["reason"] else ""))
+    print(_extract_line(got))
     return 0
 
 
@@ -606,6 +629,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="seconds to wait for each tile before giving up")
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.add_argument("--watch", action="store_true",
+                   help="keep watching: break one ore by hand and its vein goes with it")
+    p.add_argument("--rounds", type=int,
+                   help="with --watch, stop after this many polls (default: forever)")
     p.set_defaults(func=cmd_extract)
 
     p = sub.add_parser("build-check",

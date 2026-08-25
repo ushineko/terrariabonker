@@ -7,6 +7,7 @@ Main.maxTilesX/maxTilesY is the world's real extent. Reading those the other way
 walks a search past the world edge into tiles left over from the previous world.
 """
 
+import inspect
 import struct
 
 from conftest import FakeMem
@@ -170,6 +171,9 @@ def test_silt_and_slush_are_swept_by_default_and_gems_are_not():
 
 # --- the stub -----------------------------------------------------------------
 
+ARENA = 0x68000000
+
+
 def _ore_stub():
     """Build the extractor stub against stand-ins for the addresses it bakes in."""
     from terrariabonker import patcher as P
@@ -180,6 +184,9 @@ def _ore_stub():
 
         def _resolve(self, key):
             return 0x2178CD48
+
+        def arena(self, *a, **k):
+            return ARENA
 
         class mem:
             @staticmethod
@@ -195,170 +202,192 @@ def _ore_stub():
         L.find_localplayer_anchor = real
 
 
-def _writes_to_esi(code: bytes) -> list[int]:
-    """Offsets of instructions in `code` that WRITE through esi+disp.
+def _mem_writes_via(code: bytes, rm_reg: int) -> list[int]:
+    """Offsets of instructions writing through [reg] or [reg+disp8].
 
-    Only the forms this stub could plausibly emit are decoded; the point is not a general
-    disassembler but a tripwire on the one mistake that matters. mod=01 rm=110 is
-    [esi+disp8], so modrm & 0xC7 == 0x46 with the reg field carrying the opcode extension.
+    Not a general disassembler -- a tripwire on one class of mistake. mod=00 and mod=01
+    with r/m == rm_reg are [reg] and [reg+disp8]; the reg field carries the opcode
+    extension for the group opcodes.
     """
-    hits = []
-    i = 0
+    hits, i = [], 0
     while i < len(code) - 2:
         op, modrm = code[i], code[i + 1]
-        esi_disp8 = (modrm & 0xC7) == 0x46
-        reg = (modrm >> 3) & 7
-        if esi_disp8:
+        mod, reg, rm = modrm >> 6, (modrm >> 3) & 7, modrm & 7
+        if rm == rm_reg and mod in (0, 1):
             if op in (0xC7, 0x89, 0x88, 0x01, 0x29, 0x31, 0x21, 0x09, 0x11, 0x19):
-                hits.append(i)                       # mov/add/sub/xor/and/or to memory
-            elif op == 0xFF and reg in (0, 1):
-                hits.append(i)                       # inc/dec dword [esi+d]
-            elif op == 0x83 and reg != 7:
-                hits.append(i)                       # arithmetic; reg==7 is cmp (a read)
+                hits.append(i)
+            elif op == 0xFF and reg in (0, 1):          # inc/dec dword [reg]
+                hits.append(i)
+            elif op == 0x83 and reg != 7:               # arithmetic; reg==7 is cmp
+                hits.append(i)
         i += 1
     return hits
 
 
-def test_the_stub_never_writes_to_its_own_cave():
-    """The crash this guards, in full: a code cave is borrowed padding inside somebody
-    else's mapping, and those are read-execute — this one lands in a code section of
-    CUESDK_2015.dll, the Corsair SDK shipped with the game. Installing a stub works
-    regardless because /proc/pid/mem ignores page protection; the CPU running it does not.
+def test_the_stub_never_writes_through_its_queue_pointer():
+    """esi walks the queue, and the stub must only ever read through it.
 
-    An earlier version kept an "in flight" state in its slot and died on the first swing:
-
-        page fault on write access to 0x7795424b in wow64 32-bit code (0x77954216)
-
-    0x77954216 was `inc dword [esi+0x3c]`, 0x7795424b was the slot. Reads are fine.
+    The arena is RWX so a write would no longer *fault* -- the earlier crash was a stub
+    writing into a read-execute cave in CUESDK_2015.dll. It would do something worse:
+    silently corrupt the coordinate list, and mining the wrong tile cannot be undone.
     """
     body = _ore_stub()
-    assert _writes_to_esi(body) == [], \
-        "the stub writes into its own cave — it will fault on a read-execute page"
-    # and the reads it does make are still there
-    assert b"\x83\x7e" in body, "the armed check is gone"
-    assert body.count(b"\xff\x76") == 2, "the x/y reads are gone"
+    assert _mem_writes_via(body, 6) == [], "the stub writes through esi — it would " \
+        "corrupt its own queue"
+    assert body.count(b"\xff\x76\x04") == 1, "the y read is gone"
+    assert body.count(b"\xff\x36") == 1, "the x read is gone"
 
 
-def test_an_injection_that_writes_its_cave_must_ask_for_a_writable_one():
-    """`writes_cave` is the escape hatch for a stub that genuinely needs to write: it makes
-    _find_cave demand a writable page rather than letting the mismatch surface as an
-    access violation mid-game. The extractor does not need it — its guard lives on the
-    stack — but the plumbing has to actually filter, or the flag is decoration."""
-    from unittest.mock import mock_open, patch
-    from terrariabonker import patcher as P
-
-    maps = ("77950000-77980000 r-xp 00000000 00:00 0    /game/CUESDK_2015.dll\n"
-            "0418a000-0418c000 rwxp 00000000 00:00 0 \n"
-            "0b000000-0b010000 rw-p 00000000 00:00 0 \n")
-
-    pat = P.Patcher.__new__(P.Patcher)
-
-    class mem:
-        pid = 1234
-    pat.mem = mem()
-
-    with patch("builtins.open", mock_open(read_data=maps)):
-        any_exec = pat._exec_regions()
-        writable = pat._exec_regions(writable=True)
-
-    assert (0x77950000, 0x77980000) in any_exec, "the r-x cave region should be offered"
-    assert (0x77950000, 0x77980000) not in writable, \
-        "a read-execute region was offered to a stub that writes to its cave"
-    assert writable == [(0x0418A000, 0x0418C000)], "only the rwx region is writable"
-    assert P.INJECTIONS["ore_extract"].writes_cave is False
-
-
-def test_the_guard_is_the_sentinel_the_stub_itself_passes():
-    """PickTile re-enters this stub, and the guard has to hold for the whole nested call.
-    A flag would mean a write, which the cave cannot take — so the nested call marks itself
-    by passing ORE_SENTINEL as PickTile's `cap`, and the stub compares the incoming `cap`
-    on the stack before doing anything. Depth is one by construction.
-
-    The two values must be the same one: pass a different sentinel than you check for and
-    the stub recurses into itself on every swing."""
+def test_a_corrupt_count_cannot_mine_more_than_the_batch():
+    """The count lives in the game's memory, so it is not trustworthy input. A bad count
+    would not crash -- it would walk off the end of the queue and mine whatever integers
+    followed, which damages a world irreversibly. The stub clamps as well as the caller."""
     from terrariabonker import patcher as P
 
     body = _ore_stub()
-    sent = struct.pack("<I", P.ORE_SENTINEL)
-    guard = body.index(b"\x81\x7c\x24\x34")        # cmp dword [esp+0x34],imm32
-    assert body[guard + 4:guard + 8] == sent, "the guard checks a different value"
-    pushed = body.index(b"\x68" + sent)               # push imm32  (cap)
-    call = body.index(b"\xff\xd0")
-    assert guard < pushed < call, "the sentinel is not passed to the call it guards"
-    # the guard must come before the armed check, so our own call is the cheapest exit
-    assert guard < body.index(b"\x83\x7e"), "the re-entry check is not first"
+    cmp_at = body.index(b"\x83\xff")                    # cmp edi,imm8
+    assert body[cmp_at + 2] == P.ORE_MAX_BATCH, "clamped against the wrong bound"
+    assert body[cmp_at + 3:cmp_at + 5] == b"\x76\x05", "no jbe past the clamp"
+    assert body[cmp_at + 5:cmp_at + 6] == b"\xbf", "the clamp does not set edi"
+    assert struct.unpack_from("<I", body, cmp_at + 6)[0] == P.ORE_MAX_BATCH
 
 
-def test_the_sentinel_is_large_and_positive():
-    """PickTile treats any cap other than -1 as `damage = Min(damage, cap*damage/pickPower)`.
-    A large positive cap leaves damage untouched, exactly as -1 does. A negative one would
-    clamp the damage negative and no tile would ever break."""
-    from terrariabonker import patcher as P
+def test_the_batch_loop_walks_one_pair_per_tile():
+    """Each iteration consumes one (x, y) pair and one count. Advancing by anything but 8
+    would read coordinates straddling two tiles."""
+    body = _ore_stub()
+    call = body.index(b"\xff\xd0")                      # call eax
+    assert body[call + 2:call + 5] == b"\x83\xc6\x08", "esi does not advance 8 per tile"
+    assert body[call + 5] == 0x4F, "edi (the counter) is not decremented"
+    assert body[call + 6] == 0x75, "the loop does not branch back"
+    back = body[call + 7]
+    assert back > 0x80, "the loop branch goes forward, not back"
 
-    assert 0 < P.ORE_SENTINEL < 2 ** 31, "a negative cap would clamp mining damage"
-    assert P.ORE_SENTINEL != -1 & 0xFFFFFFFF
-    damage, power = 30, 100
-    assert min(damage, int(P.ORE_SENTINEL * (damage / power))) == damage
 
+def test_the_hook_runs_every_frame_not_only_when_the_player_swings():
+    """The bug this guards is a sequencing one, and it made the feature look broken.
 
-def test_the_slot_address_matches_what_the_stub_emits():
-    """`ore_slot` derives the address from stub_len rather than remembering it, so this
-    pins the derivation to the layout `_ore_extract_body` actually emits."""
+    Hooked at PickTile, the stub only ran when the player swung -- but the queue is armed
+    *after* a swing has broken a tile, so a vein sat armed until they happened to swing
+    again. Breaking one block and stopping did nothing at all. The hook belongs on
+    Player.Update's per-frame call to GrabItems, so an armed queue drains on the next
+    frame.
+
+    The displaced bytes matter too: the call itself cannot be displaced, because its rel32
+    differs every session. The five bytes before it carry no relative address.
+    """
     from terrariabonker import patcher as P
 
     inj = P.INJECTIONS["ore_extract"]
-    body = _ore_stub()
-    stub_len = len(body) + 5
-    derived = stub_len - 5 - len(inj.overwrite) - P.ORE_SLOT_BYTES
-    armed = body.index(b"\x83\x7e")                  # cmp dword [esi+delta],0
-    delta = body[armed + 2]
-    assert 6 + delta == derived, "the slot the stub reads is not where ore_slot says"
-    assert body[derived:derived + P.ORE_SLOT_BYTES] == b"\x00" * P.ORE_SLOT_BYTES
-    assert body[-len(inj.overwrite):] == inj.overwrite, "displaced prologue not reproduced"
+    assert inj.anchor == "grabitems_call", "the extractor is hooked per-swing again"
+    assert inj.overwrite == b"\x89\x04\x24\x8b\xc0", "displaced bytes changed"
+    assert all(m for m in P.ANCHORS[inj.anchor].pattern.mask[-5:]), \
+        "the displaced bytes must be fixed, not wildcarded"
+    # and PickTile is now only a call target, never a hook site
+    assert "pick_tile" in P.ANCHORS
+    src = inspect.getsource(P._ore_extract_body)
+    assert '_resolve("pick_tile")' in src, "the call target is no longer resolved directly"
+    assert "SENTINEL" not in src, \
+        "a re-entrancy sentinel is dead weight once PickTile is not the hook site"
 
 
-def test_the_stub_hands_pick_tile_a_mono_aligned_stack():
-    """Mono's x86 JIT builds 16-byte-aligned frames assuming esp is 12 (mod 16) on entry
-    (PickTile's own prologue: 4 pushes + `sub esp,0x7C` == 140 bytes, which only lands on
-    16 from that start). pushad plus the five args do not preserve that."""
+def test_the_call_passes_the_caps_the_game_passes():
+    """PickTile(this, x, y, pickPower, cap). A cap other than -1 is not ignored: it
+    becomes `damage = Min(damage, cap * damage/pickPower)`, so a small one silently
+    scales mining damage down and tiles simply never break -- no crash, no error, the
+    feature just quietly does nothing. -1 is the sentinel meaning "no cap", and it is
+    what both of the game's own call sites pass."""
     body = _ore_stub()
-    align = body.index(b"\x83\xe4\xf0")              # and esp,-16
-    pad = body.index(b"\x83\xec")                     # sub esp,imm8
-    call = body.index(b"\xff\xd0")
-    assert align < pad < call, "the stack is not realigned before the call"
+    call = body.index(b"\xff\xd0")                      # call eax
+    # args are pushed right-to-left just before it: cap, pickPower, y, x, this
+    pushes = body[:call]
+    cap = pushes.rindex(b"\x6a")                        # last push imm8 pair
+    assert body[cap:cap + 2] == b"\x6a\x64", "pickPower is no longer 100"
+    assert body[cap - 2:cap] == b"\x6a\xff", \
+        "cap is not -1 — any other value scales mining damage and nothing breaks"
+
+
+def test_the_count_is_consumed_before_the_batch_is_mined():
+    """The stub now runs 60 times a second, not once per swing. A count left standing
+    would re-mine the same batch every frame -- 32 PickTile calls per frame forever, on
+    tiles that are already gone. Reading it and zeroing it immediately makes a batch
+    happen once."""
+    body = _ore_stub()
+    read = body.index(b"\x8b\x3d")                      # mov edi,[count]
+    clear = body.index(b"\x83\x25")                     # and dword [count],0
+    call = body.index(b"\xff\xd0")                      # call eax
+    assert read < clear < call, "the count is not consumed before the work"
+    assert struct.unpack_from("<I", body, read + 2)[0] == \
+        struct.unpack_from("<I", body, clear + 2)[0], \
+        "the count read and the count cleared are different addresses"
+    assert body[clear + 6] == 0, "the count is not cleared to zero"
+
+
+def test_every_call_in_the_batch_gets_a_mono_aligned_stack():
+    """Mono builds 16-byte frames assuming esp is 12 (mod 16) on entry (PickTile's own
+    prologue: 4 pushes + `sub esp,0x7C` = 140 bytes). One alignment before the loop is not
+    enough -- PickTile may clean up its own arguments, so esp is restored from an aligned
+    base at the top of every iteration."""
+    body = _ore_stub()
+    align = body.index(b"\x83\xe4\xf0")                 # and esp,-16
+    pad = body.index(b"\x83\xec")                        # sub esp,imm8
+    base = body.index(b"\x8b\xec")                       # mov ebp,esp  (aligned base)
+    loop = body.index(b"\x8b\xe5")                       # mov esp,ebp  (each iteration)
+    assert align < pad < base < loop, "the loop does not restore an aligned esp"
     assert (-body[pad + 2] - 5 * 4 - 4) % 16 == 12, \
         "the padding does not leave PickTile the entry alignment mono assumes"
 
 
-def test_arming_writes_the_coordinate_before_the_flag():
-    """Only the unprivileged side writes the slot, so a half-written coordinate is a real
-    hazard: the game could read x from the new tile and y from the old one. The flag goes
-    last, and disarming is what stops an armed tile being re-mined on every swing."""
+def test_the_queue_lives_in_the_arena_not_in_a_cave():
+    """The whole point of the arena: the queue is at a known address in memory we own, so
+    it needs no derivation from stub length and cannot collide with borrowed padding."""
     from terrariabonker import patcher as P
 
-    class FakeSlot:
-        def __init__(self, state=0):
-            self.state = state
-            self.writes = []
+    body = _ore_stub()
+    q = ARENA + P.ORE_QUEUE_OFF
+    assert struct.pack("<I", q) in body, "the stub does not read the arena queue"
+    assert struct.pack("<I", q + 4) in body, "the stub does not point esi at the pairs"
+    assert P.ORE_QUEUE_OFF >= len(body), "the queue overlaps the stub"
+    assert P.ORE_QUEUE_OFF + P.ORE_QUEUE_BYTES <= P.Patcher.ARENA_SIZE, \
+        "the queue runs past the end of the arena"
+    assert P.INJECTIONS["ore_extract"].arena is True
+
+
+def test_arming_writes_the_pairs_before_the_count():
+    """A count covering half-written coordinates makes the stub mine garbage, and mining
+    the wrong tile cannot be undone. The count goes last, and never exceeds the batch."""
+    from terrariabonker import patcher as P
+
+    class FakeMem:
+        def __init__(self, count=0):
+            self.count, self.writes = count, []
 
         def read_i32(self, a):
-            return self.state
+            return self.count
 
         def write(self, a, b):
             self.writes.append((a, b))
 
     p = P.Patcher.__new__(P.Patcher)
-    p.mem = FakeSlot()
-    p.ore_slot = lambda: 0x4000
-    assert p.ore_arm(7, 9) is True
-    assert [a for a, _ in p.mem.writes] == [0x4004, 0x4000], \
-        "the flag must be written after the coordinate, never before"
-    assert p.mem.writes[0][1] == struct.pack("<ii", 7, 9)
+    p.mem = FakeMem()
+    p._arena = ARENA
+    q = ARENA + P.ORE_QUEUE_OFF
+    assert p.ore_queue() == q
 
-    p.mem = FakeSlot(state=1)
+    assert p.ore_arm([(7, 9), (8, 9)]) == 2
+    assert [a for a, _ in p.mem.writes] == [q + 4, q], \
+        "the count must be written after the pairs, never before"
+    assert p.mem.writes[0][1] == struct.pack("<iiii", 7, 9, 8, 9)
+    assert p.mem.writes[1][1] == struct.pack("<i", 2)
+
+    p.mem = FakeMem()
+    over = [(i, i) for i in range(P.ORE_MAX_BATCH + 10)]
+    assert p.ore_arm(over) == P.ORE_MAX_BATCH, "the caller-side cap is not applied"
+
+    p.mem = FakeMem(count=3)
     assert p.ore_armed() is True
     p.ore_disarm()
-    assert p.mem.writes == [(0x4000, struct.pack("<i", 0))]
+    assert p.mem.writes == [(q, struct.pack("<i", 0))]
 
 
 def test_a_dirt_block_is_not_air():
@@ -402,3 +431,205 @@ def test_the_active_offset_check_rejects_padding():
         assert got["deep_active_pct"] == 0.0
     finally:
         T._TILE_HEADER_OFF = real
+
+
+def test_arena_state_round_trips_without_breaking_the_patcher(tmp_path, monkeypatch):
+    """The arena is not an injection record and must not be stored as one.
+
+    Putting it in `_inj` made `_norm_inj` throw KeyError('inject') on the next load --
+    and that is not a cosmetic bug: every Patcher construction raises, so the CLI and the
+    GUI both stop working until the state file is hand-repaired.
+    """
+    from terrariabonker import patcher as P
+
+    state = tmp_path / "patches.json"
+    monkeypatch.setattr(P, "_STATE", str(state))
+
+    class mem:
+        pid = 4242
+
+    p = P.Patcher.__new__(P.Patcher)
+    p.mem = mem()
+    p._sites, p._enabled, p._inj, p._values = {}, set(), {}, {}
+    p._arena = 0x68000000
+    p._inj["ore_extract"] = {"sites": [{"inject": 1, "cave": 2}], "stub_len": 3}
+    p._save_state()
+
+    again = P.Patcher(mem())            # must not raise
+    assert again._arena == 0x68000000, "the arena did not survive a state round-trip"
+    assert "__arena__" not in again._inj, "the arena is masquerading as an injection"
+    assert again._inj["ore_extract"]["sites"][0]["inject"] == 1
+
+
+def test_the_watch_window_covers_how_far_the_player_can_actually_mine():
+    """The bug this guards: the watcher looked 45 tiles around the player while the
+    tool-reach cheat let them break tiles 75 away. Mining at range then broke a tile the
+    watcher was not looking at, so nothing triggered and the feature silently stopped
+    working the moment the player moved and mined further out. The window has to follow
+    the reach, not a number that looks reasonable."""
+    import inspect
+    from terrariabonker.service import Service
+
+    src = inspect.getsource(Service.watch_veins)
+    assert 'radius: int | None = None' in src, "radius is hardcoded again"
+    assert 'get("tool_reach")' in src, "the window no longer follows the live reach"
+
+    ns = {}
+    body = [ln for ln in src.splitlines() if "radius = int(reach)" in ln]
+    assert body, "no reach-derived radius"
+    for reach in (75, 120):
+        exec("reach = %d\n%s" % (reach, body[0].strip()), ns)
+        assert ns["radius"] > reach, \
+            f"a reach of {reach} needs a window wider than {reach}, got {ns['radius']}"
+
+
+def test_the_watcher_rechecks_known_ore_instead_of_rescanning_everything():
+    """Detection latency is the whole feature: rescan the window every round (32k tiles,
+    ~0.29s) and a fast miner breaks several blocks before the first is even noticed, so
+    the vein goes "after a few" instead of on the first tile. Re-checking only the tiles
+    already known to be ore is ~1200 reads, ~0.012s.
+
+    This counts the reads per round rather than trusting the source, because the mistake
+    is easy to reintroduce: a rescan inside the loop looks harmless and costs 18x.
+    """
+    from terrariabonker.service import Service
+
+    W, H, ORE = 200, 200, 7
+    calls = {"n": 0}
+
+    class FakeTiles:
+        max_x, max_y = W, H
+
+        def solid_type_at(self, x, y):
+            calls["n"] += 1
+            # a small vein far from anything, so nothing ever triggers
+            return ORE if (x, y) in {(50, 50), (50, 51)} else None
+
+    class FakePatcher:
+        def is_enabled(self, n):
+            return True
+
+        def values(self):
+            return {"tool_reach": 75}
+
+        def ore_disarm(self):
+            return True
+
+    svc = Service.__new__(Service)
+    svc.patcher = lambda: FakePatcher()
+    svc.tilemap = lambda: FakeTiles()
+    svc.player_tile = lambda: (100, 100)
+
+    import terrariabonker.tiles as T
+    real = T.whitelist
+    T.whitelist = lambda gems=False: {ORE}
+    try:
+        svc.watch_veins(rounds=1)
+        first = calls["n"]
+        calls["n"] = 0
+        svc.watch_veins(rounds=6)
+        six = calls["n"]
+    finally:
+        T.whitelist = real
+
+    window = (2 * 90) ** 2
+    assert first >= window * 0.9, "the first round should scan the window once"
+    # rounds 2-6 must not rescan: they only re-check the 2 tracked ore tiles
+    per_round = (six - window) / 5.0
+    assert per_round < 100, \
+        f"each round costs {per_round:.0f} reads — the window is being rescanned"
+
+
+def test_tilemap_does_not_rescan_for_the_static_base_every_call():
+    """`main_static_base` is a full memory scan (~1.5s); building the TileMap from it is
+    six reads. The vein watcher calls tilemap() on every trigger, so paying the scan each
+    time put a 1.5s delay in front of mining that itself takes 20ms — the feature looked
+    broken when only this was slow. The statics do not move while the process lives."""
+    from terrariabonker import service as S
+
+    calls = {"n": 0}
+
+    def fake_base(mem):
+        calls["n"] += 1
+        return 0x10000000
+
+    class FakeTileMap:
+        def __init__(self, mem, base):
+            pass
+
+    import terrariabonker.locate as L
+    import terrariabonker.tiles as TT
+    real_base, real_tm = L.main_static_base, TT.TileMap
+    L.main_static_base, TT.TileMap = fake_base, FakeTileMap
+    try:
+        svc = S.Service.__new__(S.Service)
+        svc.mem = object()
+        svc._main_base = None
+        for _ in range(5):
+            svc.tilemap()
+        assert calls["n"] == 1, f"the static base was rescanned {calls['n']} times"
+        svc.invalidate()
+        svc.tilemap()
+        assert calls["n"] == 2, "invalidate() must force a rescan"
+    finally:
+        L.main_static_base, TT.TileMap = real_base, real_tm
+
+
+def test_a_falling_deposit_is_followed_down_instead_of_lost():
+    """Silt, slush and sand drop when the tile under them is mined. A deposit bigger than
+    one batch has therefore *moved* by the time the second batch is armed, and mining the
+    coordinates from the first flood hits empty air while the blocks sit lower down.
+
+    This models that: a 40-tile silt column where every mined tile makes the survivors
+    fall one row. Re-flooding between batches must finish it; trusting the first flood
+    leaves most of it standing.
+    """
+    from terrariabonker import service as S
+    from terrariabonker.patcher import ORE_MAX_BATCH
+
+    SILT = 123
+    live = {(50, y) for y in range(100, 140)}          # 40 tiles, one column
+
+    class FakeTiles:
+        max_x, max_y = 200, 400
+
+        def solid_type_at(self, x, y):
+            return SILT if (x, y) in live else None
+
+    class FakePatcher:
+        def is_enabled(self, n):
+            return True
+
+        def ore_arm(self, batch):
+            batch = list(batch)[:ORE_MAX_BATCH]
+            for q in batch:
+                live.discard(q)
+            # everything still standing falls one row per tile removed below it
+            fallen = set()
+            for (x, y) in sorted(live, key=lambda q: -q[1]):
+                ny = y
+                while ny + 1 < 400 and (x, ny + 1) not in live and (x, ny + 1) not in fallen:
+                    ny += 1
+                fallen.add((x, ny))
+            live.clear()
+            live.update(fallen)
+            return len(batch)
+
+        def ore_disarm(self):
+            return True
+
+    svc = S.Service.__new__(S.Service)
+    svc.patcher = lambda: FakePatcher()
+    svc.tilemap = lambda: FakeTiles()
+
+    import terrariabonker.tiles as T
+    real = T.whitelist
+    T.whitelist = lambda gems=False: {SILT}
+    try:
+        got = svc.extract_vein(50, 139, timeout=0.5)
+    finally:
+        T.whitelist = real
+
+    assert not live, f"{len(live)} tiles left standing — the deposit was lost as it fell"
+    assert got["batches"] >= 2, "premise: a 40-tile deposit needs more than one batch"
+    assert got["reason"] == "", got["reason"]
