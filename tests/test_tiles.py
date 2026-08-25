@@ -468,10 +468,10 @@ def test_the_watch_window_covers_how_far_the_player_can_actually_mine():
     working the moment the player moved and mined further out. The window has to follow
     the reach, not a number that looks reasonable."""
     import inspect
-    from terrariabonker.service import Service
+    from terrariabonker.service import _VeinWatch
 
-    src = inspect.getsource(Service.watch_veins)
-    assert 'radius: int | None = None' in src, "radius is hardcoded again"
+    src = inspect.getsource(_VeinWatch.__init__)
+    assert 'radius=None' in src, "radius is hardcoded again"
     assert 'get("tool_reach")' in src, "the window no longer follows the live reach"
 
     ns = {}
@@ -633,3 +633,96 @@ def test_a_falling_deposit_is_followed_down_instead_of_lost():
     assert not live, f"{len(live)} tiles left standing — the deposit was lost as it fell"
     assert got["batches"] >= 2, "premise: a 40-tile deposit needs more than one batch"
     assert got["reason"] == "", got["reason"]
+
+
+def _extract_world(vein, far, ground=(), ore=7, steal=0):
+    """A Service over a synthetic world for extract_vein.
+
+    `steal` models the player mining some of the vein themselves, which is what leaves
+    the extractor short of its budget and sends it looking for more.
+    """
+    from terrariabonker import service as S
+    from terrariabonker.patcher import ORE_MAX_BATCH
+
+    STONE = 1
+    live = set(vein) | set(far)
+    state = {"first": True}
+
+    class FakeTiles:
+        max_x, max_y = 400, 400
+
+        def solid_type_at(self, x, y):
+            if (x, y) in live:
+                return ore
+            return STONE if (x, y) in set(ground) else None
+
+    class FakePatcher:
+        def is_enabled(self, n):
+            return True
+
+        def ore_arm(self, batch):
+            batch = list(batch)[:ORE_MAX_BATCH]
+            for q in batch:
+                live.discard(q)
+            if state["first"] and steal:
+                state["first"] = False
+                for q in sorted(live & set(vein))[:steal]:
+                    live.discard(q)           # the player got these
+            return len(batch)
+
+        def ore_disarm(self):
+            return True
+
+    svc = S.Service.__new__(S.Service)
+    svc.patcher = lambda: FakePatcher()
+    svc.tilemap = lambda: FakeTiles()
+    return svc, live
+
+
+def test_a_vein_does_not_dig_through_the_ground_beneath_it():
+    """Reported from the game: with the reach cheat on, mining a vein also took unrelated
+    patches of the same ore far below — "ore suddenly flying at me from below, long after
+    I stopped mining", each pass finding another deposit under the last.
+
+    The cause was the search that follows a falling silt pile: it ran down the column to
+    the world floor. A falling pile rests *on* the ground it lands on, so the search must
+    stop at the first solid tile that is not ours — anything under that is someone else's
+    deposit.
+    """
+    ORE = 7
+    vein = {(50, 100 + i) for i in range(40)}
+    ground = {(50, 200)}                      # what a falling pile would rest on
+    far = {(50, 300), (51, 300), (52, 300)}   # a separate deposit, below the ground
+    # the player takes 5 themselves, so the extractor is short of its budget and looks on
+    svc, live = _extract_world(vein, far, ground, ore=ORE, steal=5)
+
+    real = T.whitelist
+    T.whitelist = lambda gems=False: {ORE}
+    try:
+        svc.extract_vein(50, 100, timeout=0.5)
+    finally:
+        T.whitelist = real
+
+    assert not (live & vein), "the vein the player broke was not finished"
+    assert live == far, f"it dug through the ground: took {far - live}"
+
+
+def test_a_vein_never_yields_more_tiles_than_it_held():
+    """Backstop for when there is no ground in the way — a pile can fall through a gap
+    and land next to a different deposit. A vein cannot grow, so whatever the re-scan
+    turns up, never take more tiles than the vein held to begin with."""
+    ORE = 7
+    vein = {(50, 100), (50, 101), (50, 102)}
+    far = {(50, 150), (50, 151), (50, 152)}   # same column, nothing solid between
+    svc, live = _extract_world(vein, far, ore=ORE)
+
+    real = T.whitelist
+    T.whitelist = lambda gems=False: {ORE}
+    try:
+        got = svc.extract_vein(50, 100, timeout=0.5)
+    finally:
+        T.whitelist = real
+
+    assert not (live & vein), "the vein was not finished"
+    assert live == far, f"it kept going into a second deposit: took {far - live}"
+    assert got["mined"] == len(vein), got

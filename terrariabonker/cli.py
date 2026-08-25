@@ -160,7 +160,7 @@ SERVE_OPS = frozenset({
     "status", "version", "inventory", "inv", "set-hp", "set-max-hp", "set-mana",
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
     "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
-    "accept-build", "vein", "extract",
+    "accept-build", "vein", "extract", "extract-tick", "extract-stop",
 })
 
 
@@ -317,6 +317,31 @@ def cmd_extract(args) -> int:
         print(json.dumps(got))
         return 0
     print(_extract_line(got))
+    return 0
+
+
+def cmd_extract_tick(args) -> int:
+    """One slice of vein watching, for a caller that cannot block (the GUI).
+
+    The blocking `extract --watch` owns its loop; the GUI drives this from a timer so the
+    Qt event loop keeps running. State lives in the long-lived `serve` worker, which is
+    what makes it cheap: the ore map persists between ticks instead of being rebuilt.
+    """
+    svc = _svc(guard=True, force=args.force)
+    got = svc.watch_tick(gems=args.gems, limit=args.limit, timeout=args.timeout,
+                         budget=args.budget)
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    for e in got["events"]:
+        print(_extract_line(e))
+    return 0
+
+
+def cmd_extract_stop(args) -> int:
+    """Drop the watcher and disarm; the cheat was switched off."""
+    svc = _svc(guard=True, force=args.force)
+    print(json.dumps(svc.watch_stop()) if args.json else "[extract] watcher stopped")
     return 0
 
 
@@ -634,6 +659,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rounds", type=int,
                    help="with --watch, stop after this many polls (default: forever)")
     p.set_defaults(func=cmd_extract)
+
+    p = sub.add_parser("extract-tick",
+                       help="one slice of vein watching (GUI; WRITES to the world)")
+    p.add_argument("--gems", action="store_true", help="include gems")
+    p.add_argument("--limit", type=int, help="stop after this many tiles")
+    p.add_argument("--timeout", type=float, default=8.0,
+                   help="seconds to wait for a batch to break")
+    p.add_argument("--budget", type=float, default=0.08,
+                   help="seconds to spend watching in this call")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_extract_tick)
+
+    p = sub.add_parser("extract-stop", help="drop the vein watcher and disarm")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_extract_stop)
 
     p = sub.add_parser("build-check",
                        help="report the running build and whether the cheats resolve on it")

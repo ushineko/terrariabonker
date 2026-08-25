@@ -92,6 +92,7 @@ class Service:
         self._anchor = None                  # cached Main.get_LocalPlayer anchor
         self._compat = None                  # build never changes while the process lives
         self._main_base = None               # cached Main static block (see tilemap())
+        self._watch = None                   # live _VeinWatch, driven by watch_tick()
 
     def invalidate(self) -> None:
         """Drop cached locate results; the next call rescans from scratch."""
@@ -207,9 +208,14 @@ class Service:
         return Inventory(self.mem, self.live_block().life_addr)
 
     def _all_inventories(self) -> list[Inventory]:
-        """Every player copy's inventory. Writes go to all so the live copy is
-        always hit (copies are identical; snapshots ignore the writes) - which
-        copy is 'live' can't be told apart while the game is paused."""
+        """Every player copy's inventory. **For writing.**
+
+        Writes go to all of them so the live copy is always hit; the inert copies ignore
+        what lands on them. Do NOT read from these to decide anything -- the copies are
+        not identical, a snapshot holds whatever the slot contained when it was taken,
+        and ``invs[0]`` is not necessarily the live one. Read from
+        :meth:`_live_inventory`, which is what ``inventory()`` reports to the caller.
+        """
         return [Inventory(self.mem, b.life_addr) for b in self.players()]
 
     def _own_item_addrs(self) -> set:
@@ -231,10 +237,16 @@ class Service:
         return out
 
     def _item_vtable(self) -> int | None:
-        """The shared mono vtable of Item objects, read from any real item."""
-        for s in self._all_inventories()[0].slots():
-            if not s.empty:
-                return self.mem.read_u32(s.item_addr)
+        """The shared mono vtable of Item objects, read from any real item.
+
+        The vtable is the same in every copy, but an inert one can be empty where the
+        live one is not, so read the live copy and fall back to the others rather than
+        returning None because copy 0 happened to hold nothing.
+        """
+        for inv in [self._live_inventory()] + self._all_inventories():
+            for s in inv.slots():
+                if not s.empty:
+                    return self.mem.read_u32(s.item_addr)
         return None
 
     def _template_block(self, item_type: int) -> bytes | None:
@@ -331,7 +343,14 @@ class Service:
                  tile_boost=None, defense=None, prefix=None,
                  expect_type: int | None = None) -> None:
         invs = self._all_inventories()
-        cur = invs[0].read_slot(slot)
+        # Read the LIVE copy, not invs[0]. Writes go to every copy because the inert ones
+        # ignore them, but a *read* has to come from the same copy the caller was looking
+        # at: `inventory()` reports the live one, so comparing against another copy
+        # compares against something the user never saw. The copies are not identical --
+        # a snapshot holds whatever was in the slot when it was taken, which is how
+        # editing the last hotbar slot came to be refused for holding a Green Torch while
+        # both the game and the grid showed a regular one.
+        cur = self._live_inventory().read_slot(slot)
         # Stale-snapshot guard: the caller states what it believed the slot held. If the
         # game moved items since that snapshot, writing would template the caller's stale
         # item over whatever is really there, destroying it. Refuse instead.
@@ -373,7 +392,12 @@ class Service:
     def give_item(self, item_type: int, stack: int = 1) -> int:
         """Put a fully-statted item in the first empty main-inventory slot."""
         invs = self._all_inventories()
-        by_slot = {s.index: s for s in invs[0].slots()}
+        # Which slot is free must be read from the LIVE copy: an inert snapshot shows
+        # whatever was there when it was taken, so trusting it can pick a slot that is
+        # empty in the snapshot and occupied in the game — and the give would then land
+        # on top of a real item and destroy it. (Same class of bug as the stale guard in
+        # set_item; that one refused a legitimate edit, this one loses an item.)
+        by_slot = {s.index: s for s in self._live_inventory().slots()}
         empty = next((i for i in GIVE_RANGE
                       if i in by_slot and by_slot[i].empty), None)
         if empty is None:
@@ -714,32 +738,48 @@ class Service:
                     "waits": [], "median_wait": None, "reason": "not a whitelisted tile"}
         tid = tm.solid_type_at(x, y)
 
-        # where to look for the rest of it later: the vein's own extent, and then straight
-        # down for as far as the read budget allows -- a narrow deposit is followed to the
-        # world floor, a wide one is bounded so a re-scan cannot cost seconds
-        xs = [q[0] for q in first]
-        ys = [q[1] for q in first]
-        x0, x1 = max(0, min(xs) - 2), min(tm.max_x - 1, max(xs) + 2)
-        y0 = max(0, min(ys) - 2)
-        rows = max(8, self.FALL_SEARCH_READS // max(1, x1 - x0 + 1))
-        y1 = min(tm.max_y - 1, y0 + rows)
+        # Where the rest of it can be later. Gravity is vertical, so a falling tile stays
+        # in its OWN column and can only move down -- searching a box instead finds
+        # unrelated deposits of the same ore below the vein and mines those too, which is
+        # ore the player never asked for. Per column: from the vein's topmost tile there,
+        # downwards, on a shared read budget.
+        top: dict[int, int] = {}
+        for qx, qy in first:
+            top[qx] = min(top.get(qx, qy), qy)
+        rows = max(8, self.FALL_SEARCH_READS // max(1, len(top)))
 
         def still_standing():
-            """A live tile of this id anywhere the vein could have ended up."""
-            for yy in range(y0, y1 + 1):
-                for xx in range(x0, x1 + 1):
-                    if tm.solid_type_at(xx, yy) == tid:
+            """A live tile of this vein, wherever in its own columns it has settled.
+
+            Walks down each column the vein occupied and **stops at the first solid tile
+            that is not ours**: a falling pile rests on top of the ground it lands on, so
+            anything under that ground is a different deposit. Without this the search
+            runs to the world floor and happily mines an unrelated patch of the same ore
+            a long way below -- which is what "it mines non-contiguous sections across
+            the screen" turned out to be.
+            """
+            for xx, y_from in top.items():
+                for yy in range(max(0, y_from), min(tm.max_y, y_from + rows)):
+                    t = tm.solid_type_at(xx, yy)
+                    if t == tid:
                         return (xx, yy)
+                    if t is not None:
+                        break                 # ground: the pile cannot be below this
             return None
 
         mined, batches, stalled = 0, 0, ""
         waits = []
+        # A vein cannot grow. Whatever the re-scan turns up, never take more tiles than
+        # the vein we were asked for held -- that is the backstop against following one
+        # deposit into another.
+        budget = min(cap, len(first))
         try:
-            while mined < cap:
+            while mined < budget:
                 seed = still_standing()
                 if seed is None:
                     break                       # the whole deposit is gone
-                batch = T.flood(tm, seed[0], seed[1], {tid}, cap - mined)[:ORE_MAX_BATCH]
+                batch = T.flood(tm, seed[0], seed[1], {tid},
+                                budget - mined)[:ORE_MAX_BATCH]
                 if not batch:
                     break
                 if not p.ore_arm(batch):
@@ -768,6 +808,17 @@ class Service:
                 "median_wait": round(sorted(waits)[len(waits) // 2], 3) if waits else None,
                 "reason": stalled}
 
+    def vein_watch(self, *, gems: bool = False, limit: int | None = None,
+                   radius: int | None = None, timeout: float = 8.0):
+        """A stateful vein watcher. Call :meth:`_VeinWatch.round` repeatedly.
+
+        Kept separate from any loop because the GUI cannot block: it drives this from a
+        timer a few rounds at a time, while the CLI spins it in a loop. Both share the
+        detection state, which has to persist between rounds -- rebuilding the ore map
+        every call is the 0.29s cost that made the extractor miss the first tile.
+        """
+        return _VeinWatch(self, gems=gems, limit=limit, radius=radius, timeout=timeout)
+
     def watch_veins(self, *, gems: bool = False, limit: int | None = None,
                     radius: int | None = None, timeout: float = 8.0,
                     rounds: int | None = None, on_event=None) -> dict:
@@ -775,97 +826,55 @@ class Service:
 
         This is the shape people expect from a vein miner (and what the tModLoader mod
         does): you break one ore by hand and the connected run goes with it, rather than
-        naming a coordinate up front.
-
-        Detection is by observation, because the stub cannot report anything -- it may not
-        write to its own cave. Each round re-reads a window around the player and looks for
-        a whitelisted tile that was there and now is not. That tile is gone, so the vein is
-        found by flooding from whichever **neighbour still standing** carries the same id:
-        breaking copper takes the copper it touched, not the iron behind it.
-
-        ``radius`` must cover how far the player can actually mine, not how far looks
-        reasonable: with the tool-reach cheat on, they break tiles up to 75 away, and a
-        window smaller than that silently stops triggering the moment they mine at range.
-        It defaults to the live reach plus a margin for exactly that reason.
-
-        ``timeout`` is deliberately short. It is the wait for one batch to break, and the
-        loop is blocked for the whole of it -- a tile that will not break (the player
-        wandered off mid-swing) must cost seconds, not half a minute, or one stuck tile
-        stops the watcher noticing anything else.
-
-        Detection has to be quick or it misses the first tile. Rescanning the whole
-        window costs ~0.29s (32k tiles) and with fast-mining the player breaks several
-        blocks inside that, so the vein only goes after a few. Instead the window is
-        scanned once to learn where the ore *is*, and each round re-checks only those
-        tiles -- ~1200 of them, ~0.012s -- which is 18x quicker. The full scan is redone
-        when the player moves away from where it was taken, on a slow heartbeat, and after
-        a vein is mined.
-
-        Runs until ``rounds`` is exhausted (forever when None). ``on_event`` is called with
-        each result dict as it happens, for a caller that wants to stream progress.
+        naming a coordinate up front. Blocking; the GUI uses :meth:`watch_tick` instead.
         """
         import time
 
-        from terrariabonker import tiles as T
-
-        p = self.patcher()
-        if not p.is_enabled("ore_extract"):
-            raise ServiceError("the ore extractor cheat is not enabled")
-        want = T.whitelist(gems)
-        if radius is None:
-            reach = (p.values() or {}).get("tool_reach")
-            radius = int(reach) + 15 if reach else 90
-        steps = ((1, 0), (-1, 0), (0, 1), (0, -1),
-                 (1, 1), (1, -1), (-1, 1), (-1, -1))
-        RESCAN_EVERY = 3.0        # heartbeat: catches ore revealed by someone else digging
-        RESCAN_MOVE = 12          # tiles the player may drift before the window is stale
-
-        def scan(px, py):
-            return {(x, y): t
-                    for y in range(max(0, py - radius), min(tm.max_y, py + radius))
-                    for x in range(max(0, px - radius), min(tm.max_x, px + radius))
-                    if (t := tm.solid_type_at(x, y)) in want}
-
-        tm = self.tilemap()
-        tracked: dict[tuple[int, int], int] = {}
-        at = None
-        last_full = 0.0
+        w = self.vein_watch(gems=gems, limit=limit, radius=radius, timeout=timeout)
         taken, events, n = 0, [], 0
         try:
             while rounds is None or n < rounds:
                 n += 1
-                px, py = self.player_tile()
-                now = time.time()
-                if (at is None or now - last_full > RESCAN_EVERY
-                        or max(abs(px - at[0]), abs(py - at[1])) > RESCAN_MOVE):
-                    tracked = scan(px, py)
-                    at, last_full = (px, py), now
-                # the fast path: only tiles we already know are ore
-                broke = [(xy, t) for xy, t in tracked.items()
-                         if tm.solid_type_at(*xy) is None]
-                for xy, _ in broke:
-                    tracked.pop(xy, None)
-                for (bx, by), tid in broke:
-                    # the tile is gone, so the vein is whatever neighbour of the same id
-                    # is still standing: breaking copper takes copper, not the iron behind
-                    start = next((q for q in ((bx + dx, by + dy) for dx, dy in steps)
-                                  if tm.solid_type_at(*q) == tid), None)
-                    if start is None:
-                        continue                  # a lone tile: nothing connected
-                    got = self.extract_vein(start[0], start[1], gems=gems, limit=limit,
-                                            timeout=timeout)
-                    got["triggered_by"] = [bx, by]
-                    taken += got["mined"]
-                    events.append(got)
+                for e in w.round():
+                    taken += e["mined"]
+                    events.append(e)
                     if on_event:
-                        on_event(got)
-                if broke:
-                    px, py = self.player_tile()
-                    tracked, at, last_full = scan(px, py), (px, py), time.time()
+                        on_event(e)
                 time.sleep(0.01)
         finally:
-            p.ore_disarm()
+            w.close()
         return {"rounds": n, "mined": taken, "events": events}
+
+    def watch_tick(self, *, gems: bool = False, limit: int | None = None,
+                   timeout: float = 8.0, budget: float = 0.08) -> dict:
+        """Run the vein watcher for up to ``budget`` seconds and return what it took.
+
+        The GUI drives this from a timer. It runs several rounds per call rather than one
+        because a round costs ~0.02s while a round trip to the privileged worker costs
+        rather more -- so batching them keeps detection tight without a timer firing at
+        50Hz across a process boundary.
+        """
+        import time
+
+        if self._watch is None:
+            self._watch = self.vein_watch(gems=gems, limit=limit, timeout=timeout)
+        end = time.time() + budget
+        events, n = [], 0
+        while time.time() < end:
+            n += 1
+            events.extend(self._watch.round())
+            if events:
+                break                       # hand results back promptly
+            time.sleep(0.005)
+        return {"rounds": n, "events": events,
+                "mined": sum(e["mined"] for e in events)}
+
+    def watch_stop(self) -> dict:
+        """Drop the watcher and disarm. Called when the cheat is switched off."""
+        w, self._watch = self._watch, None
+        if w is not None:
+            w.close()
+        return {"stopped": w is not None}
 
     def build_check(self) -> dict:
         """Is this build one we know, and do the cheats still resolve on it? (spec 036)
@@ -970,3 +979,90 @@ class Service:
 
 __all__ = ["Service", "ServiceError", "Snapshot", "PlayerState", "ItemSlot",
            "INVENTORY_SLOTS", "GIVE_RANGE"]
+
+
+class _VeinWatch:
+    """Watches for the player breaking a whitelisted tile and takes the rest of its vein.
+
+    Detection has to be quick or it misses the first tile: rescanning the window every
+    round costs ~0.29s (32k tiles) and with fast-mining the player breaks several blocks
+    inside that, so the vein only goes "after a few". Instead the window is scanned once
+    to learn where the ore *is*, and each round re-checks only those tiles -- ~1200 of
+    them, ~0.012s. The full scan is redone when the player moves away from where it was
+    taken, on a slow heartbeat, and after a vein is mined.
+
+    The window must cover how far the player can actually mine, not a number that looks
+    reasonable: with the tool-reach cheat on they break tiles 75 away, and a smaller
+    window silently stops triggering the moment they mine at range.
+    """
+
+    RESCAN_EVERY = 3.0        # heartbeat: catches ore revealed by someone else digging
+    RESCAN_MOVE = 12          # tiles the player may drift before the window is stale
+    STEPS = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1))
+
+    def __init__(self, svc, *, gems=False, limit=None, radius=None, timeout=8.0):
+        from terrariabonker import tiles as T
+
+        self.svc = svc
+        self.gems, self.limit, self.timeout = gems, limit, timeout
+        self.p = svc.patcher()
+        if not self.p.is_enabled("ore_extract"):
+            raise ServiceError("the ore extractor cheat is not enabled")
+        self.want = T.whitelist(gems)
+        if radius is None:
+            reach = (self.p.values() or {}).get("tool_reach")
+            radius = int(reach) + 15 if reach else 90
+        self.radius = radius
+        self.tm = svc.tilemap()
+        self.tracked: dict[tuple[int, int], int] = {}
+        self.at = None
+        self.last_full = 0.0
+
+    def _scan(self, px, py):
+        tm, want, r = self.tm, self.want, self.radius
+        return {(x, y): t
+                for y in range(max(0, py - r), min(tm.max_y, py + r))
+                for x in range(max(0, px - r), min(tm.max_x, px + r))
+                if (t := tm.solid_type_at(x, y)) in want}
+
+    def round(self) -> list[dict]:
+        """One detection round. Returns a result dict per vein taken (usually none)."""
+        import time
+
+        from terrariabonker import tiles as T          # noqa: F401  (whitelist already read)
+
+        tm = self.tm
+        px, py = self.svc.player_tile()
+        now = time.time()
+        if (self.at is None or now - self.last_full > self.RESCAN_EVERY
+                or max(abs(px - self.at[0]), abs(py - self.at[1])) > self.RESCAN_MOVE):
+            self.tracked = self._scan(px, py)
+            self.at, self.last_full = (px, py), now
+        # the fast path: only tiles we already know are ore
+        broke = [(xy, t) for xy, t in self.tracked.items()
+                 if tm.solid_type_at(*xy) is None]
+        for xy, _ in broke:
+            self.tracked.pop(xy, None)
+        out = []
+        for (bx, by), tid in broke:
+            # the tile is gone, so the vein is whatever neighbour of the same id is still
+            # standing: breaking copper takes copper, not the iron behind it
+            start = next((q for q in ((bx + dx, by + dy) for dx, dy in self.STEPS)
+                          if tm.solid_type_at(*q) == tid), None)
+            if start is None:
+                continue                              # a lone tile: nothing connected
+            got = self.svc.extract_vein(start[0], start[1], gems=self.gems,
+                                        limit=self.limit, timeout=self.timeout)
+            got["triggered_by"] = [bx, by]
+            out.append(got)
+        if broke:
+            px, py = self.svc.player_tile()
+            self.tracked = self._scan(px, py)
+            self.at, self.last_full = (px, py), time.time()
+        return out
+
+    def close(self):
+        try:
+            self.p.ore_disarm()
+        except Exception:
+            pass

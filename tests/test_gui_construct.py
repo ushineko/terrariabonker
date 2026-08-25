@@ -149,3 +149,46 @@ def test_auto_restore_retries_a_refusal_instead_of_giving_up(app, monkeypatch):
         assert "auto-restore FAILED" in w.log.toPlainText()
     finally:
         w.close()
+
+
+def test_the_vein_watcher_follows_the_extractor_checkbox(app, monkeypatch):
+    """The ore extractor is the one cheat that is not just a patch. Enabling it puts a
+    stub in the game, but something has to notice the player breaking an ore and hand the
+    rest of the vein over — and that loop cannot run on the Qt thread. It is driven from a
+    timer, so the timer has to follow the cheat.
+
+    Switching it off must also tell the worker to drop its watcher, not merely stop the
+    timer: a queue left armed is re-mined every frame.
+    """
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
+    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
+    w = mw.MainWindow()
+    try:
+        sent = []
+        w.helper.available = True
+        w.helper.request = lambda argv, cb: (sent.append(argv), True)[1]
+
+        assert not w._vein_timer.isActive(), "the watcher must not run unasked"
+        w._set_vein_watch(True)
+        assert w._vein_timer.isActive(), "the cheat is on but nothing is watching"
+        assert w._vein_timer.interval() <= 250, "too slow to catch the first tile"
+
+        w._set_vein_watch(False)
+        assert not w._vein_timer.isActive()
+        assert any(a[0] == "extract-stop" for a in sent), \
+            "switching off must disarm the queue, not just stop the timer"
+
+        # a tick asks the worker for one slice, and only one at a time
+        sent.clear()
+        w._set_vein_watch(True)
+        w._tick_veins()
+        assert sent and sent[0][0] == "extract-tick"
+        sent.clear()
+        w._tick_veins()                       # the first is still in flight
+        assert not sent, "overlapping ticks would pile up on the worker"
+    finally:
+        w.close()

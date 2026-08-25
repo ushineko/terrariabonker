@@ -17,11 +17,18 @@ DIRT = 2
 SWORD = 3507
 
 
-def _svc(items):
-    """A Service over a synthetic image, with locating stubbed out."""
+def _svc(items, live=None):
+    """A Service over a synthetic image, with locating stubbed out.
+
+    ``live`` is the copy the *game* is using -- what `inventory()` reports and what the
+    guard must check. It defaults to the same block, but the two are separable because
+    the copies are not identical: an inert snapshot holds whatever its slots contained
+    when it was taken.
+    """
     m = _mem(items)
     svc = Service(m)
     svc._all_inventories = lambda: [Inventory(m, LIFE)]
+    svc._live_inventory = lambda: Inventory(m, LIFE if live is None else live)
     return svc, m
 
 
@@ -97,3 +104,79 @@ def test_argv_builder_carries_expect_type():
 def test_argv_builder_omits_expect_type_when_not_given():
     from terrariabonker.gui import client
     assert "--expect-type" not in client.set_item_argv(5, DIRT, stack=1)
+
+
+def test_the_guard_checks_the_copy_the_player_can_actually_see():
+    """Reported from the game: editing the last hotbar slot was refused for holding a
+    Green Torch while both Terraria and the grid showed a regular Torch.
+
+    The guard was reading ``_all_inventories()[0]`` -- an arbitrary copy, and not
+    necessarily the live one. Writes go to every copy because the inert ones ignore them,
+    but a *read* has to come from the copy the caller was looking at: `inventory()`
+    reports the live one, so checking any other compares against something the user never
+    saw. The copies are demonstrably not identical.
+    """
+    from test_inventory import _mem as mkmem
+
+    TORCH, GREEN_TORCH = 8, 974
+    m = mkmem([(TORCH, 1, 0)])
+    svc = Service(m)
+
+    # An inert copy that still believes the slot holds a green torch. It accepts writes
+    # and drops them, which is exactly what a snapshot does in the game.
+    class StaleInv:
+        def read_slot(self, i):
+            class S:
+                type = GREEN_TORCH
+            return S()
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    live = Inventory(m, LIFE)
+    svc._all_inventories = lambda: [StaleInv(), live]     # stale copy first, as it was
+    svc._live_inventory = lambda: live
+
+    # the caller saw a Torch (because inventory() reports the live copy) and edits it
+    svc.set_item(0, TORCH, stack=42, expect_type=TORCH)
+    assert Inventory(m, LIFE).read_slot(0).stack == 42, \
+        "the edit was refused against a copy the player never saw"
+
+
+def test_give_picks_a_free_slot_from_the_copy_the_game_is_using():
+    """The same bug as the stale guard, but this one loses an item instead of refusing.
+
+    `give_item` picks the first empty slot. Read that from an inert snapshot and it can
+    choose a slot that is empty in the snapshot and occupied in the game -- the give then
+    lands on a real item and destroys it.
+    """
+    from terrariabonker.service import GIVE_RANGE
+    from test_inventory import _mem as mkmem
+
+    DIRT_, SWORD_ = 2, 3507
+    first = sorted(GIVE_RANGE)[0]
+
+    # the game HAS a sword in the first give slot; the slots after it are free
+    m = mkmem([(SWORD_, 1, 0)] + [(0, 0, 0)] * 5)
+    svc = Service(m)
+    live = Inventory(m, LIFE)
+
+    class StaleInv:
+        """A snapshot from before the sword was picked up: it thinks the slot is free."""
+
+        def slots(self):
+            class S:
+                index = first
+                empty = True
+            return [S()]
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    svc._all_inventories = lambda: [StaleInv(), live]
+    svc._live_inventory = lambda: live
+    svc._template_block = lambda t: None
+
+    got = svc.give_item(DIRT_, 1)
+    assert got != first, "gave into a slot the game is using — the sword was destroyed"
+    assert Inventory(m, LIFE).read_slot(first).type == SWORD_, "the real item was lost"

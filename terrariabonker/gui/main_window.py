@@ -12,6 +12,7 @@ keep alive, no GC landmines, and the child is a real OS process we can signal.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -200,6 +201,15 @@ class MainWindow(QWidget):
         self._inv_timer = QTimer(self)
         self._inv_timer.timeout.connect(self._sync_inventory)
         self._inv_timer.start(1000)
+        # The ore extractor is the one cheat that is not just a patch: enabling it puts a
+        # stub in the game, but something has to watch for the player breaking an ore and
+        # hand the rest of the vein over. That loop cannot run here (it would block the
+        # event loop), so it is driven a slice at a time from this timer and its state
+        # lives in the warm worker. Started/stopped by _render_patches, which is the
+        # authority on whether the cheat is actually on.
+        self._vein_timer = QTimer(self)
+        self._vein_timer.timeout.connect(self._tick_veins)
+        self._vein_inflight = False
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
         self._check_sudo()
@@ -586,6 +596,47 @@ class MainWindow(QWidget):
                 else:
                     w.setValue(int(v))
         self._patch_filling = False
+        cb = self._patch_cbs.get("ore_extract")
+        self._set_vein_watch(bool(cb is not None and cb.isChecked() and cb.isEnabled()))
+
+    def _tick_veins(self):
+        """One slice of vein watching. Skipped while a request is already out, so a slow
+        round cannot pile overlapping ticks onto the worker."""
+        if not self.helper.available or self._vein_inflight:
+            return
+        self._vein_inflight = True
+
+        def done(raw: str):
+            self._vein_inflight = False
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    got = json.loads(line)
+                except ValueError:
+                    continue
+                for e in got.get("events", []):
+                    at = e.get("at", ["?", "?"])
+                    self.log.appendPlainText(
+                        f"[extract] {e.get('mined', 0)} tiles at ({at[0]}, {at[1]})"
+                        + (f" — {e['reason']}" if e.get("reason") else ""))
+
+        if not self.helper.request(["extract-tick", "--json"], done):
+            self._vein_inflight = False
+
+    def _set_vein_watch(self, on: bool):
+        """Follow the cheat: watch while it is on, and disarm when it goes off.
+
+        A queue left armed would be re-mined every frame, so switching the cheat off has
+        to tell the worker to drop its watcher rather than just stopping the timer.
+        """
+        if on and not self._vein_timer.isActive():
+            self._vein_timer.start(100)
+        elif not on and self._vein_timer.isActive():
+            self._vein_timer.stop()
+            self._vein_inflight = False
+            self.helper.request(["extract-stop", "--json"], lambda _out: None)
 
     def _spin(self, lo, hi, val):
         s = QSpinBox()
