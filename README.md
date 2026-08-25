@@ -365,6 +365,16 @@ somebody watched each cheat work in-game on that exact build, and lives in the l
 `patcher.py`. Only the second is what "supported" means here, which is why the panel marks
 a cheat unproven rather than quietly implying it has been tested.
 
+**When a cheat does break on a new build**, the offsets for it are re-derived and added
+*alongside* the old ones — the previous build keeps working. Support accumulates into a map
+of build → what is known to work there, rather than being replaced each release. Old builds
+get dropped only deliberately, when the tables are more trouble than they are worth.
+
+Mechanically, an anchor carries its byte pattern plus any per-build *variants*: re-derived
+bytes for a release where the code moved. Every known pattern is tried, so an unrecognised
+build resolves if any of them still matches — a ledger, not a gate. No variants exist yet;
+so far each release has left the patterns matching.
+
 | Situation | Behaviour |
 | :--- | :--- |
 | Known build (`1.4.5.8`, buildid `24893155`) | proceeds |

@@ -137,10 +137,39 @@ class Anchor:
     ``unique`` marks the rare anchor where patching a structural twin would be harmful;
     everything else patches every copy it finds (mono can JIT one method into more than
     one arena, which is what broke reach/mining/max_minions).
+
+    **Support accumulates.** When the game moves the code a cheat patches, the re-derived
+    bytes go in as a ``variants`` entry beside the existing pattern, never over it, so the
+    older build keeps working — replacing would silently break it while ``verified`` still
+    claimed it. Builds seen so far have shared these bytes (1.4.5.7 -> 1.4.5.8 left every
+    pattern matching), so there are no variants yet; the mechanism exists so that adding
+    one is the obvious move rather than a refactor.
     """
     pattern: Pattern
     verified: frozenset[str] = frozenset()
     unique: bool = False
+    # Builds where the game's code moved and this cheat needed *different* bytes:
+    # ``((build_key, Pattern), ...)``. Support accumulates rather than being replaced --
+    # adding a variant never removes the pattern an older build matches, so re-deriving a
+    # cheat for a new release keeps the previous release working.
+    variants: tuple[tuple[str, Pattern], ...] = ()
+
+    def candidates(self, build: str | None = None) -> tuple[Pattern, ...]:
+        """Patterns to try, best first.
+
+        The running build's own variant leads when there is one, but every other pattern
+        is still tried afterwards: an unverified build usually matches a pattern derived
+        for a different one, and gating on the build id would disable cheats that work.
+        Same reason ``verified`` is a ledger and not a gate.
+        """
+        by_build = dict(self.variants)
+        out: list[Pattern] = []
+        if build is not None and build in by_build:
+            out.append(by_build[build])
+        if self.pattern not in out:
+            out.append(self.pattern)
+        out.extend(p for _, p in self.variants if p not in out)
+        return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -1162,21 +1191,30 @@ class Patcher:
                 out.append((int(a, 16), int(b, 16)))
         return out
 
-    def _scan(self, anchor_key: str) -> list[int]:
+    def _scan(self, anchor_key: str, build: str | None = None) -> list[int]:
         """Every address matching the anchor. Scans on the pattern's longest fixed run,
-        then verifies the full (possibly wildcarded) pattern."""
-        pat = ANCHORS[anchor_key].pattern
-        seed_off, seed = pat.seed()
-        hits = []
-        for start, end in self._exec_regions():
-            buf = self.mem.read(start, end - start)
-            i = buf.find(seed)
-            while i != -1:
-                pos = i - seed_off
-                if pat.matches(buf, pos):
-                    hits.append(start + pos)
-                i = buf.find(seed, i + 1)
-        return hits
+        then verifies the full (possibly wildcarded) pattern.
+
+        An anchor may carry per-build variants; each is tried in turn and the first that
+        matches wins. Trying them all is deliberate — see ``Anchor.candidates``.
+        """
+        regions = None
+        for pat in ANCHORS[anchor_key].candidates(build):
+            seed_off, seed = pat.seed()
+            if regions is None:
+                regions = [(start, self.mem.read(start, end - start))
+                           for start, end in self._exec_regions()]
+            hits = []
+            for start, buf in regions:
+                i = buf.find(seed)
+                while i != -1:
+                    pos = i - seed_off
+                    if pat.matches(buf, pos):
+                        hits.append(start + pos)
+                    i = buf.find(seed, i + 1)
+            if hits:
+                return hits
+        return []
 
     def resolution(self, anchor_key: str, build: str | None = None) -> Resolution:
         """Resolve an anchor into a Resolution, with a reason that states what was
@@ -1188,7 +1226,7 @@ class Patcher:
         """
         anchor = ANCHORS[anchor_key]
         verified = build is not None and build in anchor.verified
-        sites = self._sites.get(anchor_key) or self._scan(anchor_key)
+        sites = self._sites.get(anchor_key) or self._scan(anchor_key, build)
         if not sites:
             return Resolution((), False,
                               f"anchor {anchor_key!r} matched nothing — the method may not "

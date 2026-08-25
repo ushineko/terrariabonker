@@ -394,3 +394,62 @@ def test_every_anchor_is_classified_so_a_new_one_cannot_slip_through():
         "naming the builds they were actually confirmed on, and list them here.")
     stale = known - set(P._RAW_ANCHORS)
     assert not stale, f"{sorted(stale)} no longer exist — update these sets"
+
+
+def test_a_cheat_re_derived_for_a_new_build_keeps_the_old_one_working():
+    """Support accumulates: re-deriving a cheat for a new release must not drop the
+    previous one.
+
+    When the game moves the code a cheat patches, the new bytes go in as a *variant*
+    alongside the old pattern rather than replacing it. Replacing would silently break the
+    older build while `verified` still claimed it — the ledger would be lying, which is the
+    one thing it exists not to do.
+    """
+    from terrariabonker.patcher import Anchor, _pat
+
+    old_bytes = _pat("11 22 33 44")
+    new_bytes = _pat("55 66 77 88")
+    a = Anchor(old_bytes, verified=frozenset({"1.4.5.8+1"}),
+               variants=(("1.4.6+2", new_bytes),))
+
+    # on the build the variant was derived for, its own pattern leads
+    assert a.candidates("1.4.6+2")[0] is new_bytes
+    # but the old pattern is still tried, so the older build keeps working
+    assert old_bytes in a.candidates("1.4.6+2")
+    # on the original build, the original leads and the variant is still available
+    assert a.candidates("1.4.5.8+1")[0] is old_bytes
+    assert new_bytes in a.candidates("1.4.5.8+1")
+    # on a build nobody has seen, every pattern is tried — a ledger, not a gate
+    assert set(a.candidates("2.0.0+9")) == {old_bytes, new_bytes}
+    assert set(a.candidates(None)) == {old_bytes, new_bytes}
+
+
+def test_the_scan_falls_through_variants_until_one_matches(monkeypatch):
+    """A build with no variant of its own still resolves if any known pattern matches —
+    that is what keeps an unverified release usable instead of dead."""
+    from terrariabonker import patcher as P
+
+    old_bytes, new_bytes = P._pat("11 22 33 44"), P._pat("55 66 77 88")
+    monkeypatch.setitem(
+        P.ANCHORS, "fake",
+        P.Anchor(old_bytes, verified=frozenset(), variants=(("1.4.6+2", new_bytes),)))
+
+    CODE = 0x40000000
+    blob = b"\x00\x00" + bytes.fromhex("55667788") + b"\x00\x00"
+
+    class mem:
+        pid = 1
+
+        @staticmethod
+        def read(a, n):
+            return blob if a == CODE else b""
+
+    p = P.Patcher.__new__(P.Patcher)
+    p.mem = mem()
+    p._sites = {}
+    p._exec_regions = lambda writable=False: [(CODE, CODE + len(blob))]
+
+    # only the variant's bytes are present, and the build has no variant registered
+    assert p._scan("fake", "9.9.9+0") == [CODE + 2], "fell through to no pattern at all"
+    assert p._scan("fake", "1.4.6+2") == [CODE + 2]
+    assert p._scan("fake", None) == [CODE + 2]
