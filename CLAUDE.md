@@ -20,6 +20,9 @@ conventions are enforced on a PR.
   `terrariabonker/__init__.py` and the About dialog/titlebar; the maintainer confirms
   the number. Bump source + README in the same commit, then tag `vX.Y.Z` (annotated).
 - **Keep the FearLess "TerrariaReGrind" attribution** for any ported cheat.
+- **The README is for players, not reverse engineers.** No internals, no discarded
+  approaches, no framework names as features — see `AGENTS.md` "Writing style". Depth
+  belongs in `specs/` and `docs/`.
 - **Tests must pass headless** (`pytest` against the synthetic memory image — no game,
   no root). Run `flake8` on changed files.
 - **Security review is mandatory** on every code change (no hardcoded secrets, no

@@ -98,6 +98,42 @@ CLIs (`pactl --format=json`) next; human-readable CLI output only as a documente
 - Factual and plain. No superlatives or marketing ("blazingly fast", "seamless", "powerful").
 - Neutral voice; avoid first-person in durable docs.
 - State assumptions and uncertainties; don't hide them behind confident phrasing.
+- Don't assert what you haven't checked. A plausible mechanism written as fact gets cited
+  as justification later, and is then hard to question.
+
+### The README specifically
+
+Written for someone who plays Terraria and knows nothing about reverse engineering. Keep
+it crisp; the depth belongs in `specs/`, `docs/discovery.md`, `ce/` and the code, which
+already carry it.
+
+- **Describe cheats by effect, not mechanism.** "Pull items in from off-screen", not the
+  method it hooks.
+- **No internals.** No method or field names, struct offsets, code caves, AOBs, JIT, mono,
+  stubs, anchors, or byte patterns.
+- **No discarded or alternate approaches.** "We tried X and it didn't work" is spec
+  material. The README says what the thing does now.
+- **No implementation names as features.** "A GUI control panel", not "a PyQt6 control
+  panel". Frameworks appear only where you must install them.
+- **No defensive framing.** Not "no Cheat Engine required"; just say what it uses.
+  Generalise tool names where the specific one doesn't matter.
+- **Don't justify instructions** unless the reader would act differently knowing the
+  reason. "Run it under Proton" needs no essay on JIT codegen.
+
+Keep what changes what the user does: requirements, safety warnings, anything
+irreversible, and behaviour that will surprise them (an edit that doesn't survive a
+reload, a cheat that permanently alters their world).
+
+### Screenshots
+
+`tools/screenshot.sh` captures the panel; `--with-dialog` when a dialog is open. Four
+images in `assets/`, one per tab, refreshed when the panel visibly changes.
+
+- The alt text describes **what is actually in the image**. It is the only description a
+  screen-reader user gets, and a stale one is worse than none — check it still matches
+  before committing a new capture.
+- Switch tabs by hand between runs; the script raises the panel itself, so there is no
+  need to leave it focused.
 
 ## Commits, versioning, releases
 
@@ -116,5 +152,15 @@ CLIs (`pactl --format=json`) next; human-readable CLI output only as a documente
   needs **passwordless sudo** for its memory actions (it can't answer a prompt in a
   subprocess); without it the GUI degrades with a warning and the recipe browser/icons still
   work. See the README "Requirements".
-- Before running a background/GUI instance for debugging, kill stale ones (`pkill -f
-  terrariabonker`) so logs are clean.
+- Before running a background/GUI instance for debugging, kill stale ones so logs are
+  clean — but **not** with `pkill -f terrariabonker`: `-f` matches the whole command line,
+  including the shell that is running the pkill, so it kills the session issuing it. Match
+  the exact argv instead:
+
+  ```bash
+  for p in $(pgrep -x python3); do
+      tr '\0' ' ' < /proc/$p/cmdline | grep -q 'terrariabonker.py gui' && kill "$p"
+  done
+  ```
+
+  The same trap applies to `pgrep -f` when hunting for the game or a worker.
