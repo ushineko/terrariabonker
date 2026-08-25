@@ -126,8 +126,7 @@ hooks belongs to the ReGrind authors.
 
 ## Requirements
 
-- Terraria launched as the **Windows build under Proton**, not the native Linux build.
-  Force Proton in Steam under Properties → Compatibility.
+- Terraria running under **Proton**. Force it in Steam under Properties → Compatibility.
 - Python 3.10+ (the system one, `/usr/bin/python3`, not conda).
 - `numpy`, `PyQt6`, `Pillow` — on Arch/CachyOS `python-numpy python-pyqt6 python-pillow`,
   otherwise `pip install -r requirements.txt`.
