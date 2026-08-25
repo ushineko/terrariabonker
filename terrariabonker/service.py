@@ -876,6 +876,50 @@ class Service:
             w.close()
         return {"stopped": w is not None}
 
+    def frames_advancing(self, window: float = 0.08) -> bool:
+        """Is the game actually simulating, or merely open?
+
+        Terraria pauses in single-player when its window loses focus, and a paused game
+        runs no frames. Sampled from Main's statics rather than the player, because a
+        player standing still changes nothing — which cost a wrong diagnosis once.
+        """
+        import time
+
+        from terrariabonker.locate import main_static_base
+
+        try:
+            base = self._main_base or main_static_base(self.mem)
+            if base is None:
+                return False
+            a = self.mem.read(base, 0x400)
+            time.sleep(window)
+            return a != self.mem.read(base, 0x400)
+        except Exception:
+            return False
+
+    def ensure_arena(self) -> bool:
+        """Allocate our memory now, while the game happens to be running.
+
+        Every cheat's stub lives in the arena, and allocating it means asking the game to
+        call VirtualAlloc — which needs frames. But enabling a cheat from the panel means
+        clicking the panel, which unfocuses the game, which pauses it. So the allocation
+        must not wait until the user asks for a cheat: it is done opportunistically while
+        the game is live, and by the time they toggle anything it is already there.
+
+        Never raises and never blocks on a paused game: if frames are not advancing there
+        is nothing to do yet, and the next poll will try again.
+        """
+        p = self.patcher()
+        if p._arena and p._arena_ok(p._arena):
+            return True
+        if not self.frames_advancing():
+            return False
+        try:
+            p.arena(timeout=3.0)
+            return True
+        except Exception:
+            return False
+
     def build_check(self) -> dict:
         """Is this build one we know, and do the cheats still resolve on it? (spec 036)
 

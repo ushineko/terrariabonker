@@ -435,6 +435,11 @@ def cmd_patch(args) -> int:
     p = svc.patcher()
     try:
         if args.action == "status":
+            # The panel polls this every couple of seconds, which is the one moment we can
+            # count on the game being focused and running. Allocate then, so toggling a
+            # cheat later — which requires clicking away from the game, pausing it — does
+            # not have to.
+            svc.ensure_arena()
             build = svc.build_key()
             detail = p.details(build)
             st = {name: d["on"] for name, d in detail.items()}

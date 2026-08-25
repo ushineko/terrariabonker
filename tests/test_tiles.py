@@ -739,3 +739,58 @@ def test_a_vein_never_yields_more_tiles_than_it_held():
     assert not (live & vein), "the vein was not finished"
     assert live == far, f"it kept going into a second deposit: took {far - live}"
     assert got["mined"] == len(vein), got
+
+
+def test_the_arena_is_warmed_while_the_game_runs_not_when_a_cheat_is_toggled():
+    """Every stub lives in the arena, and allocating it needs the game running frames.
+    But enabling a cheat from the panel means clicking the panel, which unfocuses Terraria,
+    which pauses it — so if allocation waited for the toggle it would fail exactly when it
+    is needed. It is done from the status poll instead, while the game is still focused.
+
+    Must never raise and never block on a paused game: the next poll tries again.
+    """
+    from terrariabonker import service as S
+
+    calls = {"arena": 0}
+
+    class FakePatcher:
+        _arena = None
+
+        def _arena_ok(self, base):
+            return False
+
+        def arena(self, *a, **k):
+            calls["arena"] += 1
+            return 0x68000000
+
+    svc = S.Service.__new__(S.Service)
+    svc.patcher = lambda: FakePatcher()
+
+    svc.frames_advancing = lambda *a, **k: False
+    assert svc.ensure_arena() is False, "tried to allocate against a paused game"
+    assert calls["arena"] == 0, "blocked on a game that runs no frames"
+
+    svc.frames_advancing = lambda *a, **k: True
+    assert svc.ensure_arena() is True
+    assert calls["arena"] == 1
+
+    # an allocation that fails is not an error the caller has to handle
+    class Exploding(FakePatcher):
+        def arena(self, *a, **k):
+            raise RuntimeError("boom")
+
+    svc.patcher = lambda: Exploding()
+    assert svc.ensure_arena() is False
+
+    # already allocated: no work at all
+    class Warm(FakePatcher):
+        _arena = 0x68000000
+
+        def _arena_ok(self, base):
+            return True
+
+        def arena(self, *a, **k):
+            raise AssertionError("re-allocated an arena that already exists")
+
+    svc.patcher = lambda: Warm()
+    assert svc.ensure_arena() is True
