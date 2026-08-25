@@ -51,6 +51,14 @@ ITEM_HEAD_SLOT = 0xD8
 ITEM_BODY_SLOT = 0xDC
 ITEM_LEG_SLOT = 0xE0
 
+# Set by alt-click; the game uses it to protect a slot from quick-stack and from being
+# sold. Derived live rather than by differencing templates, because a template is never
+# favorited: three snapshots of the same six potions, favoriting and unfavoriting between
+# them, and this is the byte that tracked the player's alt-clicks and nothing else. The
+# rival reading was a "new item" glow flag, which looks identical at rest and is ruled out
+# by the flag turning back ON when a favorited item is clicked.
+ITEM_FAVORITED = 0x70   # byte bool
+
 ITEM_ACCESSORY = 0x7D
 ITEM_MELEE = 0x15D
 ITEM_MAGIC = 0x15E
