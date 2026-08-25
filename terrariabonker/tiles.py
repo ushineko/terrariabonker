@@ -57,11 +57,16 @@ EXTRACTABLES: dict[int, str] = {123: "Silt", 224: "Slush", 404: "DesertFossil"}
 # Gems are neither, and are opt-in: some players are deliberately leaving them in place.
 GEMS: dict[int, str] = {63: "Sapphire", 64: "Ruby", 65: "Emerald", 66: "Topaz",
                         67: "Amethyst", 68: "Diamond"}
+# Obsidian is worth taking and floods like an ore, but it is not one and it is kept out of
+# ORES so that name stays literally true. Nothing generates it: it appears wherever water
+# has run into lava, so a "vein" of it is whatever shape the two fluids left behind — and
+# the lava that made it is usually still next to it. Swept by default all the same.
+WORLD_FORMED: dict[int, str] = {56: "Obsidian"}
 
 
 def whitelist(gems: bool = False) -> set[int]:
     """The tile ids a vein miner may take."""
-    out = set(ORES) | set(EXTRACTABLES)
+    out = set(ORES) | set(EXTRACTABLES) | set(WORLD_FORMED)
     return out | set(GEMS) if gems else out
 
 

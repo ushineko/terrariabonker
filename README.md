@@ -86,8 +86,9 @@ Break one ore block by hand and the rest of that vein goes with it, at whatever 
 reach cheat gives you. It follows the ore you actually broke, so copper touching iron does
 not take both, and it will not wander into a separate deposit nearby.
 
-Silt, slush and desert fossils are swept by default. Gems are opt-in: `--gems` on the CLI,
-or the **Ores only / Ores + gems** choice beside the panel toggle. Run it with
+Silt, slush, desert fossils and obsidian are swept by default — obsidian forms where water
+runs into lava, so expect the lava that made it to still be there. Gems are opt-in: `--gems`
+on the CLI, or the **Ores only / Ores + gems** choice beside the panel toggle. Run it with
 `terrariabonker extract --watch`, or tick **Ore extractor (vein mining)** in the panel.
 
 **This one is not reversible.** Every other cheat is a memory change you undo by switching

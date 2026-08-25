@@ -676,7 +676,8 @@ class Service:
                         limit=limit or T.DEFAULT_LIMIT, diagonal=diagonal)
         return {
             "at": [x, y], "type": t,
-            "name": T.ORES.get(t) or T.EXTRACTABLES.get(t) or T.GEMS.get(t) or "",
+            "name": (T.ORES.get(t) or T.EXTRACTABLES.get(t)
+                     or T.WORLD_FORMED.get(t) or T.GEMS.get(t) or ""),
             "whitelisted": t in whitelist if t is not None else False,
             "tiles": [list(p) for p in found], "count": len(found),
             "capped": len(found) >= (limit or T.DEFAULT_LIMIT),

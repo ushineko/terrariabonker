@@ -146,7 +146,7 @@ def test_every_whitelisted_id_matches_the_games_own_tile_name():
     names = _tile_names()
     assert len(names) > 700, "tiles.json looks empty — regenerate it"
     for group, label in ((T.ORES, "ore"), (T.EXTRACTABLES, "extractable"),
-                         (T.GEMS, "gem")):
+                         (T.WORLD_FORMED, "world-formed"), (T.GEMS, "gem")):
         for tid, mine in group.items():
             real = names.get(tid)
             assert real is not None, f"{label} id {tid} is not a TileID at all"
@@ -163,10 +163,41 @@ def test_the_hardmode_and_endgame_ores_are_all_present():
         assert tid in T.ORES, f"{want} (id {tid}) missing from the ore whitelist"
 
 
+def test_obsidian_is_swept_by_default_but_is_not_called_an_ore():
+    """It has no ore tile of its own — it is made where water meets lava — so it was
+    missed by a list built from what ores exist. It is still what a vein miner is for."""
+    names = _tile_names()
+    tid = next(i for i, n in names.items() if n == "Obsidian")
+    assert tid in T.whitelist(gems=False)
+    assert tid not in T.ORES and tid not in T.GEMS
+
+
 def test_silt_and_slush_are_swept_by_default_and_gems_are_not():
     assert T.whitelist(gems=False) >= {123, 224}
     assert not (T.whitelist(gems=False) & set(T.GEMS))
     assert T.whitelist(gems=True) > T.whitelist(gems=False)
+
+
+def test_a_vein_report_names_the_tile_even_when_it_is_not_an_ore():
+    """The report names a tile by looking it up in each group in turn, so a tile in a
+    group nobody remembered to add reads back with a blank name rather than an error."""
+    from terrariabonker import service as S
+
+    obsidian = next(i for i, n in _tile_names().items() if n == "Obsidian")
+
+    class FakeTiles:
+        max_x, max_y = 400, 400
+
+        def type_at(self, x, y):
+            return obsidian if (x, y) == (5, 5) else None
+
+        solid_type_at = type_at
+
+    svc = S.Service.__new__(S.Service)
+    svc.tilemap = lambda: FakeTiles()
+    got = svc.vein_at(5, 5)
+    assert got["name"] == "Obsidian"
+    assert got["whitelisted"] and got["count"] == 1
 
 
 # --- the stub -----------------------------------------------------------------
