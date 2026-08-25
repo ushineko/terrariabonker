@@ -1,12 +1,8 @@
 # terrariabonker
 
-A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8**
-(Steam appid 105600), the Windows build running under Proton (wine-mono).
-**1.4.5.7 also works** — the AOBs were originally derived there and every cheat but
-two was confirmed on it; the ore extractor and multiple-pylons were derived later on
-1.4.5.8 and claim nothing about 1.4.5.7, which the panel shows as unproven rather
-than hiding (see [Version safety](#version-safety)). It
-finds the player in memory with no hardcoded address, then reads, edits and
+A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8 and
+1.4.5.7** (Steam appid 105600), the Windows build running under Proton (wine-mono).
+It finds the player in memory with no hardcoded address, then reads, edits and
 freezes player state and inventory items by reading and writing
 `/proc/<pid>/mem`. A PyQt6 control panel drives the same operations as the CLI.
 
@@ -104,31 +100,24 @@ holds no state; stopping it ends every effect.*
 
 Break one ore block by hand and the rest of that vein goes with it, whitelist-driven, at
 whatever range your reach cheat gives you. Silt, slush and desert fossils are swept by
-default; gems are opt-in. Available as `terrariabonker extract --watch` or the trainer
-panel's **Ore extractor (vein mining)** toggle.
+default; gems are opt-in. Run it as `terrariabonker extract --watch`, or tick **Ore
+extractor (vein mining)** in the panel.
 
-Unlike every other cheat here there is no existing behaviour to widen — vein mining is new
-behaviour, needing a flood fill and a whitelist the game never does in one place. So the
-work is split: **Python decides** (read the tile map, flood-fill the contiguous run of the
-*same* ore, so copper touching iron does not take both) and **the game mines**, through its
-own `Player.PickTile`, so drops, framing, lighting and the protected-tile check behave
-exactly as when you swing.
+Unlike the other cheats there is no existing behaviour to widen — vein mining needs a flood
+fill and a whitelist the game never does in one place. So **Python decides** (flood-fill the
+contiguous run of the *same* ore, so copper touching iron does not take both) and **the game
+mines**, through its own `Player.PickTile`, so drops, framing, lighting and the
+protected-tile check behave exactly as when you swing.
 
-Two details are load-bearing. The stub hooks `Player.Update`'s per-frame call to
-`GrabItems`, not `PickTile` — hooked on `PickTile` it only ran while you were swinging, so
-breaking one block and stopping did nothing. And it lives in memory the program allocates
-(it makes the game call `VirtualAlloc` for itself) rather than in borrowed code padding: a
-stub that writes to a borrowed cave faults, because those pages are read-execute.
-
-It takes 32 tiles per frame — the cap VeinMiner uses — so a big vein does not stall a
-frame, and a vein cannot grow into a neighbouring deposit: the search that follows a
-falling silt pile stops at the ground the pile rests on, and a vein never yields more tiles
-than it held. Derivation, and the four wrong diagnoses it took to get there:
-`specs/040-ore-extractor-lite.md`.
+The stub hooks `Player.Update`'s per-frame call to `GrabItems`, not `PickTile` — hooked on
+`PickTile` it only ran while you were swinging, so breaking one block and stopping did
+nothing. It takes 32 tiles per frame (the cap VeinMiner uses) so a big vein does not stall a
+frame, and it cannot grow into a neighbouring deposit: the search that follows a falling
+silt pile stops at the ground the pile rests on. Derivation:
+[`specs/040-ore-extractor-lite.md`](specs/040-ore-extractor-lite.md).
 
 **This one is not reversible.** Every other cheat here is a memory change you undo by
-switching it off; a mined tile is a permanent change to your world. Try it somewhere you do
-not mind losing first.
+switching it off; a mined tile is a permanent change to your world.
 
 ### Working vanity accessories
 
@@ -358,55 +347,36 @@ the **Refresh** button and the reload after an edit.
 
 ## Version safety
 
-The offsets are specific to one game build, so what matters is which build is **executing**
-— not which one is installed. Those differ more often than you would think.
+Developed and tested on **1.4.5.8**, and on **1.4.5.7** before it — with two exceptions:
+the ore extractor and multiple-pylons were derived later, on 1.4.5.8 only, and claim
+nothing about 1.4.5.7. Offsets are specific to a build, so the tool tracks which build is
+running and what has been proven on it:
 
-The version is read from the **version constant in `Terraria.exe`**, and only when the
-process's mapping still refers to that same file (checked by inode). A mapped file and the
-path it came from can diverge — replacing a file leaves an existing mapping on the old
-inode — and if that happens the file on disk describes a build the process is not
-executing. The inode check is a cheap guard against believing it; we have not actually
-caught Steam doing this to a running game, so treat it as a precaution rather than a war
-story.
+- **a build it knows** — proceeds;
+- **a build it does not** — still runs, but says so first. It offers to check every cheat
+  against the new build without patching anything, then you carry on with whatever still
+  matches (the rest disabled and greyed, reason on hover) or exit;
+- **once the cheats are confirmed working there** — the build joins the supported set and
+  it stops asking.
 
-What *was* observed, on 2026-08-23, is the reason the exe is consulted at all: the version
-then came from the memory frequency vote described below, which returned a stale `1.4.5.7`
-while Steam's manifest already reported buildid `24893155`. The result was a key naming a
-build that never existed. It is still in the ledger, with a note not to trust it, because
-verifications really were recorded under it.
-
-If the exe cannot be trusted (replaced, or not locatable), it falls back to scanning memory
-for version-shaped strings and taking the most common. **That fallback is known to be
-unreliable** and is a last resort, not a second opinion: the process holds several
-version-shaped strings that are not the game's, and on 1.4.5.8 the heap carries four stale
-`"Version":"v1.4.5.7"` JSON copies against a single copy of the real one — so the vote
-returns the wrong answer in exactly the case that triggers it. It is kept because a doubtful
-version is more useful than none, and because nothing downstream acts on a version silently:
-a mismatch warns, and an unrecognised build raises the dialog below.
+Those last two are deliberately different claims. *Accepted* means the byte patterns still
+match, and lives in `~/.config/terrariabonker/accepted-builds.json`. *Verified* means
+somebody watched each cheat work in-game on that exact build, and lives in the ledger in
+`patcher.py`. Only the second is what "supported" means here, which is why the panel marks
+a cheat unproven rather than quietly implying it has been tested.
 
 | Situation | Behaviour |
 | :--- | :--- |
-| Exact match (`1.4.5.8`, buildid `24893155`) | proceeds |
-| Hotfix only or buildid drift | warns, proceeds |
+| Known build (`1.4.5.8`, buildid `24893155`) | proceeds |
+| Hotfix or buildid drift | warns, proceeds |
 | Version not readable yet (just launched) | reports unknown, retries |
 | Major/minor/patch differs (`1.4.6`, `1.5.x`) | refuses without `--force` |
 
-**When the game updates**, the panel says so instead of quietly half-working. An
-unrecognised build raises a dialog naming what is running and what is known, and offers to
-check every cheat against it without patching anything:
-
-- all of them still match — one click records the build and you are not asked again;
-- some do not — they are listed by name with the reason, and you choose between carrying on
-  without them (disabled and greyed, reason on hover) or exiting.
-
-A build you accept is recorded in `~/.config/terrariabonker/accepted-builds.json` and is
-deliberately *not* the same claim as a build the project has verified: accepting means the
-byte patterns still match, while the ledger in `patcher.py` means somebody watched each
-cheat work in-game on that exact build. `terrariabonker build-check` runs the same check
-from the command line.
-
-The locator also fails safe: a shifted layout matches nothing rather than writing
-to a wrong address. After an update, see [docs/discovery.md](docs/discovery.md).
+`terrariabonker build-check` runs the same check from the command line. The version itself
+is read from the exe's own version constant rather than by scanning memory, which is
+unreliable — see `detect_version` for why. The locator also fails safe: a shifted layout
+matches nothing rather than writing to a wrong address. After an update, see
+[docs/discovery.md](docs/discovery.md).
 
 ## How it works
 
