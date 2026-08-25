@@ -403,3 +403,41 @@ def test_pylons_is_a_build_section_cheat():
 
     build = dict(SECTIONS)["Build"]
     assert "pylons" in build
+
+
+def test_the_arena_bootstrap_hooks_the_injection_point_not_the_anchor():
+    """The bug this guards cost a morning and looked like a game update.
+
+    `arena()` borrows the extractor's site for its springboard. It resolved the anchor but
+    never added `inject_off`, which was harmless while that injection hooked an anchor at
+    offset 0 — and became a jump written 0x15 bytes early the moment the injection moved
+    to an anchor whose match starts before the site. It landed in the middle of
+    `Player.Update`'s dead-check, a method that runs every frame, so the game died
+    instantly on every launch that auto-restored the cheat.
+    """
+    import inspect
+    from terrariabonker import patcher as P
+
+    src = inspect.getsource(P.Patcher.arena)
+    assert "inj.inject_off" in src, \
+        "arena() resolves the anchor without adding inject_off — it will hook the wrong byte"
+
+
+def test_a_jump_is_never_written_over_bytes_we_would_not_put_back(game):
+    """A 5-byte jump goes over live code and the original is replayed from `overwrite`.
+    If the address is wrong, both halves are wrong: the jump lands mid-instruction and the
+    restore leaves `overwrite` where it never belonged. The site is checked first, which
+    costs one read and makes a wrong address a refusal instead of corruption."""
+    import pytest
+    from terrariabonker import patcher as P
+
+    m, p = game
+    with pytest.raises(P.PatchError) as e:
+        p._check_site(CODE + 0x40, b"\xde\xad\xbe\xef\x00", "test")
+    msg = str(e.value)
+    assert "refusing to patch" in msg
+    assert "de ad be ef" in msg, "the message must show what it expected"
+
+    # and it passes when the bytes are what we would restore
+    m.write(CODE + 0x40, b"\xde\xad\xbe\xef\x00")
+    p._check_site(CODE + 0x40, b"\xde\xad\xbe\xef\x00", "test")

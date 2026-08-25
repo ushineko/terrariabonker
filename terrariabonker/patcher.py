@@ -1085,7 +1085,7 @@ class Patcher:
                     return ln.strip()
         return None
 
-    def arena(self, on_wait=None, timeout: float = 300.0) -> int:
+    def arena(self, on_wait=None, timeout: float = 20.0) -> int:
         """Memory of our own inside the game: RWX, ours alone, ``ARENA_SIZE`` bytes.
 
         Code caves are *borrowed* padding inside somebody else's read-execute mapping, and
@@ -1100,10 +1100,12 @@ class Patcher:
         value *to* -- so instead of reading the result we choose the address and look for
         it in /proc/pid/maps.
 
-        The springboard is hooked at ``PickTile``, so it runs on the player's next swing.
-        That is the same thing the extractor needs anyway, and it unhooks itself the moment
-        the region appears. ``on_wait`` is called once when we start waiting, so a caller
-        can say "swing once" rather than appearing to hang.
+        The springboard is hooked on the extractor's own site, which is a per-frame call in
+        ``Player.Update``, so it fires within a frame and unhooks itself the moment the
+        region appears. It does need the game to be *running*: Terraria pauses in
+        single-player when its window loses focus, and a paused game runs no frames.
+        ``on_wait`` is called once when we start waiting, so a caller can say so rather
+        than appearing to hang.
         """
         import time
 
@@ -1118,7 +1120,11 @@ class Patcher:
         va = resolve_export(self.mem, "kernel32", "VirtualAlloc")
         base = self._free_base(self.ARENA_SIZE)
         inj = INJECTIONS["ore_extract"]
-        site = self._resolve(inj.anchor)
+        # + inject_off, like every other caller. Without it the springboard lands on the
+        # anchor's first byte instead of the injection point -- for an anchor whose match
+        # starts 0x15 before the site, that is a jump written into the middle of another
+        # instruction, and the restore afterwards leaves the displaced bytes there.
+        site = self._resolve(inj.anchor) + inj.inject_off
         body = (b"\x60"                                  # pushad
                 + b"\x6a\x40"                            # push PAGE_EXECUTE_READWRITE
                 + b"\x68" + _u32(0x3000)                 # push MEM_COMMIT|MEM_RESERVE
@@ -1130,6 +1136,7 @@ class Patcher:
                 + inj.overwrite)
         stub_len = len(body) + 5
         cave = self._find_cave(stub_len)
+        self._check_site(site, inj.overwrite, "arena bootstrap")
         self.mem.write(cave, body + b"\xe9" + self._rel32(cave + len(body), site + 5))
         self.mem.write(site, b"\xe9" + self._rel32(site + 5, cave))
         if on_wait:
@@ -1145,8 +1152,11 @@ class Patcher:
             self.mem.write(cave, b"\xcc" * stub_len)
         row = self._mapped(base)
         if not row:
-            raise PatchError("VirtualAlloc did not run — the game needs one pickaxe swing "
-                             "to initialise the extractor")
+            raise PatchError(
+                "VirtualAlloc did not run. The springboard sits on a per-frame path, so "
+                "this means the game is not advancing frames — Terraria pauses in "
+                "single-player whenever its window loses focus. Focus the game and try "
+                "again.")
         if "w" not in row.split()[1] or "x" not in row.split()[1]:
             raise PatchError(f"arena is not RWX: {row}")
         self.mem.write(base + self.ARENA_MAGIC_OFF, self.ARENA_MAGIC)
@@ -1361,6 +1371,26 @@ class Patcher:
         player_base = blk.life_addr - STATLIFE_FROM_OBJ
         return _teleport_body(player_base, target)
 
+    def _check_site(self, site: int, expect: bytes, what: str) -> None:
+        """Refuse to write a jump over bytes that are not what we will put back.
+
+        A 5-byte jump is written over live code and the original is replayed from
+        ``overwrite``. If the address is wrong -- an off-by-offset, a stale record from a
+        previous process -- both halves are wrong: the jump lands mid-instruction and the
+        restore leaves ``overwrite`` somewhere it never belonged. That is not a crash we
+        can diagnose afterwards, because the evidence is the corruption itself.
+
+        Checking costs one read. It caught nothing for a year and then caught a jump
+        written 0x15 bytes early into ``Player.Update``'s dead-check, which killed the
+        game on the next frame.
+        """
+        found = self.mem.read(site, len(expect))
+        if found != expect:
+            raise PatchError(
+                f"{what}: bytes at 0x{site:08X} are {found.hex(' ')}, expected "
+                f"{expect.hex(' ')} — refusing to patch an address that is not the site "
+                "it was resolved for")
+
     def _enable_injection(self, inj: Injection, value: int) -> None:
         if inj.build_body is not None:                     # stub built from live state
             body = inj.build_body(self, inj)
@@ -1392,6 +1422,10 @@ class Patcher:
         for inject, cave in zip(injects, caves):
             back = inject + len(inj.overwrite)          # lands on the byte after ours
             stub = body + b"\xe9" + self._rel32(cave + stub_len, back)
+            # Only on a first enable: a re-apply is writing over its own jump, and the
+            # displaced bytes live in the stub by then, not at the site.
+            if not prev_sites:
+                self._check_site(inject, inj.overwrite, f"enable {inj.name}")
             self.mem.write(cave, stub)
             self.mem.write(inject, b"\xe9" + self._rel32(inject + 5, cave))
             sites.append({"inject": inject, "cave": cave})
