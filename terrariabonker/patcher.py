@@ -1198,7 +1198,17 @@ class Patcher:
     def _exec_regions(self, writable: bool = False):
         """Executable mappings, as (start, end). ``writable`` keeps only those the CPU may
         also write -- which is almost none of them: a cave is borrowed padding inside
-        somebody else's read-execute mapping. See ``Injection.writes_cave``."""
+        somebody else's read-execute mapping. See ``Injection.writes_cave``.
+
+        **Our own arena is excluded.** It is RWX, VirtualAlloc hands it back zero-filled,
+        and disabling a stub scrubs its cave to 0xCC -- so to a scan looking for cold runs
+        it is the most attractive cave in the process. It handed a slice of the extractor's
+        own stub to the next injection enabled, one wrote over the other, and the game died
+        executing the splice. Memory we placed something in is never padding.
+        """
+        skip = None
+        if self._arena:
+            skip = (self._arena, self._arena + self.ARENA_SIZE)
         out = []
         with open(f"/proc/{self.mem.pid}/maps") as f:
             for line in f:
@@ -1209,8 +1219,10 @@ class Patcher:
                     continue
                 if (p[5] if len(p) > 5 else "").startswith("/dev/"):
                     continue
-                a, b = p[0].split("-")
-                out.append((int(a, 16), int(b, 16)))
+                a, b = (int(v, 16) for v in p[0].split("-"))
+                if skip and a < skip[1] and skip[0] < b:
+                    continue
+                out.append((a, b))
         return out
 
     def _scan(self, anchor_key: str, build: str | None = None) -> list[int]:
@@ -1334,13 +1346,33 @@ class Patcher:
                 i = buf.find(needle)
                 while i != -1:
                     cave = start + i + 2       # small margin into the run
-                    # skip a run already handed out this pass (multi-site injections
-                    # allocate one cave per site and must not collide — each stub has a
-                    # distinct jmp-back target).
-                    if not any(cave < c + size and c < cave + size for c in claimed):
+                    # Skip anything already occupied. `claimed` covers this pass (a
+                    # multi-site injection takes one cave per site); `taken` covers stubs
+                    # installed by earlier enables, which `claimed` never saw. Handing out
+                    # occupied space writes one stub over another, and what runs afterwards
+                    # is the splice -- a corrupted register, then a crash somewhere else
+                    # entirely.
+                    busy = [(c, size) for c in claimed] + self._installed_caves()
+                    if not any(cave < c + n and c < cave + size for c, n in busy):
                         return cave
                     i = buf.find(needle, i + 1)
         raise PatchError("no code cave found for the injection stub")
+
+    def _installed_caves(self) -> list[tuple[int, int]]:
+        """``(address, length)`` of every stub currently installed, from our own record.
+
+        A cave is only free if nothing of ours is in it. `_find_cave` looks for cold bytes,
+        and a disabled stub's cave is scrubbed to 0xCC -- which is exactly what it hunts
+        for -- so without this an enable/disable cycle turns a used cave into bait.
+        """
+        out = []
+        for rec in self._inj.values():
+            n = rec.get("stub_len") or 0
+            for site in rec.get("sites") or ():
+                cave = site.get("cave")
+                if cave and n:
+                    out.append((cave, n))
+        return out
 
     @staticmethod
     def _rel32(src_after: int, target: int) -> bytes:

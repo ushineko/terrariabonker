@@ -441,3 +441,55 @@ def test_a_jump_is_never_written_over_bytes_we_would_not_put_back(game):
     # and it passes when the bytes are what we would restore
     m.write(CODE + 0x40, b"\xde\xad\xbe\xef\x00")
     p._check_site(CODE + 0x40, b"\xde\xad\xbe\xef\x00", "test")
+
+
+def test_a_cave_is_never_carved_out_of_our_own_arena():
+    """The crash this guards: `ore_extract`'s stub sat at the arena base and
+    `inventory_accs` was handed 0x68000002 — two bytes inside it. One overwrote the other
+    and the game executed the splice.
+
+    The arena is RWX, VirtualAlloc returns it zero-filled, and disabling a stub scrubs its
+    cave to 0xCC. To a scan hunting cold runs in executable memory it is the most
+    attractive cave in the process. Memory we placed something in is not padding.
+
+    Exercises the real `_exec_regions`; the shared fixture replaces it, which is how the
+    first version of this test passed with the guard removed.
+    """
+    from unittest.mock import mock_open, patch
+    from terrariabonker import patcher as P
+
+    ARENA = 0x68000000
+    maps = ("0418a000-0418c000 rwxp 00000000 00:00 0 \n"
+            "%08x-%08x rwxp 00000000 00:00 0 \n" % (ARENA, ARENA + P.Patcher.ARENA_SIZE))
+
+    pat = P.Patcher.__new__(P.Patcher)
+
+    class mem:
+        pid = 1234
+    pat.mem = mem()
+
+    pat._arena = None
+    with patch("builtins.open", mock_open(read_data=maps)):
+        without = pat._exec_regions()
+    pat._arena = ARENA
+    with patch("builtins.open", mock_open(read_data=maps)):
+        with_arena = pat._exec_regions()
+
+    assert (ARENA, ARENA + P.Patcher.ARENA_SIZE) in without, "premise: it is an exec region"
+    assert (ARENA, ARENA + P.Patcher.ARENA_SIZE) not in with_arena, \
+        "our own arena was offered as borrowable padding"
+    assert (0x0418A000, 0x0418C000) in with_arena, "unrelated regions must survive"
+
+
+def test_a_cave_is_never_handed_out_twice(game):
+    """`claimed` only covers the current call. A stub installed by an earlier enable is
+    invisible to it — and once that stub is disabled its cave is scrubbed to 0xCC, which is
+    precisely the pattern the scan prefers. So a used cave becomes bait."""
+    m, p = game
+    p._arena = None
+    p._inj = {}
+    first = p._find_cave(48)
+    p._inj["something"] = {"sites": [{"inject": CODE, "cave": first}], "stub_len": 48}
+    second = p._find_cave(48)
+    assert not (second < first + 48 and first < second + 48), \
+        f"0x{second:X} overlaps the stub already at 0x{first:X}"
