@@ -466,21 +466,34 @@ def test_the_watch_window_covers_how_far_the_player_can_actually_mine():
     tool-reach cheat let them break tiles 75 away. Mining at range then broke a tile the
     watcher was not looking at, so nothing triggered and the feature silently stopped
     working the moment the player moved and mined further out. The window has to follow
-    the reach, not a number that looks reasonable."""
-    import inspect
+    the live reach, not a number that looks reasonable."""
     from terrariabonker.service import _VeinWatch
 
-    src = inspect.getsource(_VeinWatch.__init__)
-    assert 'radius=None' in src, "radius is hardcoded again"
-    assert 'get("tool_reach")' in src, "the window no longer follows the live reach"
+    class FakeTiles:
+        max_x, max_y = 4200, 1200
 
-    ns = {}
-    body = [ln for ln in src.splitlines() if "radius = int(reach)" in ln]
-    assert body, "no reach-derived radius"
-    for reach in (75, 120):
-        exec("reach = %d\n%s" % (reach, body[0].strip()), ns)
-        assert ns["radius"] > reach, \
-            f"a reach of {reach} needs a window wider than {reach}, got {ns['radius']}"
+        def solid_type_at(self, x, y):
+            return None
+
+    def watcher_for(reach):
+        class FakePatcher:
+            def is_enabled(self, n):
+                return True
+
+            def values(self):
+                return {"tool_reach": reach} if reach is not None else {}
+
+        svc = type("S", (), {})()
+        svc.patcher = lambda: FakePatcher()
+        svc.tilemap = lambda: FakeTiles()
+        return _VeinWatch(svc)
+
+    for reach in (30, 75, 120):
+        w = watcher_for(reach)
+        assert w.radius > reach, \
+            f"a reach of {reach} needs a window wider than {reach}, got {w.radius}"
+    # and with the reach cheat off there is still a sane default
+    assert watcher_for(None).radius >= 75
 
 
 def test_the_watcher_rechecks_known_ore_instead_of_rescanning_everything():
