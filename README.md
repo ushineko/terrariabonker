@@ -429,6 +429,7 @@ terrariabonker/
 │   ├── data/prefixes.json      modifier-id name map (extracted from Terraria.exe)
 │   ├── data/recipes.json       recipe cache (extracted from the running game)
 ├── tools/extract_item_names/   dotnet tool that regenerates items.json from the exe
+├── tools/screenshot.sh        capture the panel for the README (KDE/Wayland)
 │   ├── cli.py                  argparse front end (incl. the `serve` worker)
 │   └── gui/
 │       ├── main_window.py      PyQt6 control panel
