@@ -127,6 +127,7 @@ hooks belongs to the ReGrind authors.
 ## Requirements
 
 - Terraria running under **Proton**. Force it in Steam under Properties → Compatibility.
+  The cheats are derived against Proton's **wine-mono** runtime and require it.
 - Python 3.10+ (the system one, `/usr/bin/python3`, not conda).
 - `numpy`, `PyQt6`, `Pillow` — on Arch/CachyOS `python-numpy python-pyqt6 python-pillow`,
   otherwise `pip install -r requirements.txt`.
