@@ -33,6 +33,11 @@ def game(tmp_path, monkeypatch):
     m.write(CODE + 0xC00, b"\xcc" * 0x100)
     p = Patcher(m)
     p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
+    # Stubs live in memory we allocate, so a synthetic game needs an arena too.
+    # Stubbed rather than bootstrapped: allocating means making the game call
+    # VirtualAlloc, which a fake process cannot do.
+    p._arena = BASE
+    p.arena = lambda *a, **k: BASE
     return m, p
 
 

@@ -36,6 +36,11 @@ def twin_game(tmp_path, monkeypatch):
         m.write(CODE + off, ANCHORS["reset_block"].pattern.raw)
     p = Patcher(m)
     p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
+    # Stubs live in memory we allocate, so a synthetic game needs an arena too.
+    # Stubbed rather than bootstrapped: allocating means making the game call
+    # VirtualAlloc, which a fake process cannot do.
+    p._arena = BASE
+    p.arena = lambda *a, **k: BASE
     return m, p
 
 
@@ -166,6 +171,11 @@ def test_missing_anchor_reason_states_what_was_observed(tmp_path, monkeypatch):
     m = FakeMem(BASE, 0x8000)
     p = Patcher(m)
     p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
+    # Stubs live in memory we allocate, so a synthetic game needs an arena too.
+    # Stubbed rather than bootstrapped: allocating means making the game call
+    # VirtualAlloc, which a fake process cannot do.
+    p._arena = BASE
+    p.arena = lambda *a, **k: BASE
     res = p.resolution("reset_block")
     assert not res.available
     assert "matched nothing" in res.reason

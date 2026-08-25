@@ -31,6 +31,11 @@ def game(tmp_path, monkeypatch):
     m.write(CODE + 0x400 + CHEATS["fast_place"].patch_off, CHEATS["fast_place"].orig)
     p = Patcher(m)
     p._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]   # planted region only
+    # Stubs live in memory we allocate, so a synthetic game needs an arena too.
+    # Stubbed rather than bootstrapped: allocating means making the game call
+    # VirtualAlloc, which a fake process cannot do.
+    p._arena = BASE
+    p.arena = lambda *a, **k: BASE
     return m, p
 
 
@@ -356,6 +361,11 @@ def test_resolve_raises_when_anchor_missing(tmp_path, monkeypatch):
     m = FakeMem(BASE, 0x2000)               # no anchors planted
     p = Patcher(m)
     p._exec_regions = lambda writable=False: [(BASE, BASE + 0x2000)]
+    # Stubs live in memory we allocate, so a synthetic game needs an arena too.
+    # Stubbed rather than bootstrapped: allocating means making the game call
+    # VirtualAlloc, which a fake process cannot do.
+    p._arena = BASE
+    p.arena = lambda *a, **k: BASE
     with pytest.raises(PatchError):
         p.enable("fast_place")
 
@@ -493,3 +503,38 @@ def test_a_cave_is_never_handed_out_twice(game):
     second = p._find_cave(48)
     assert not (second < first + 48 and first < second + 48), \
         f"0x{second:X} overlaps the stub already at 0x{first:X}"
+
+
+def test_arena_slots_are_deterministic_and_cannot_overlap():
+    """Placement by index rather than by search is the whole point.
+
+    Searching for space is what put `inventory_accs` two bytes inside `ore_extract`'s
+    stub: a scan for cold bytes cannot tell free space from a stub that was disabled and
+    scrubbed. An index has no such question to get wrong — and it gives the same address
+    every time, so enable/disable/re-enable lands on the same bytes.
+    """
+    from terrariabonker import patcher as P
+
+    p = P.Patcher.__new__(P.Patcher)
+    p.arena = lambda *a, **k: 0x68000000
+
+    # same answer every time, and different answers for different sites
+    assert p.slot_for("loot", 0) == p.slot_for("loot", 0)
+    assert p.slot_for("loot", 1) != p.slot_for("loot", 0)
+    assert p.slot_for("loot", 0) != p.slot_for("pickup", 0)
+
+    spans = sorted((p.slot_for(n, i), P.Patcher.ARENA_SLOT)
+                   for n in P.INJECTIONS for i in range(P.Patcher.ARENA_MAX_SITES))
+    for (a, n), (b, _) in zip(spans, spans[1:]):
+        assert a + n <= b, f"slots 0x{a:X} and 0x{b:X} overlap"
+
+    # nothing lands on the extractor's queue, or past the stamp
+    lo = 0x68000000 + P.Patcher.ARENA_STUBS_OFF
+    assert 0x68000000 + P.ORE_QUEUE_OFF + P.ORE_QUEUE_BYTES <= lo, "queue is inside a slot"
+    assert spans[-1][0] + spans[-1][1] <= 0x68000000 + P.Patcher.ARENA_MAGIC_OFF
+
+    import pytest
+    with pytest.raises(P.PatchError):
+        p.slot_for("loot", P.Patcher.ARENA_MAX_SITES)      # past the reservation
+    with pytest.raises(P.PatchError):
+        p.slot_for("not_an_injection", 0)

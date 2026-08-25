@@ -833,6 +833,7 @@ INJECTIONS: dict[str, Injection] = {
     "tool_reach": Injection(
         "tool_reach", "Tool + interaction reach (GetRanges)", "getranges",
         0xCA, _b("8D 65 F4 5E 5F"), _force_xy,
+        arena=True,
         note="Extends mining, tool use, chests, signs and crafting stations together."),
     # Player.GrabItems: a call returns the grab range in eax, then `mov [ebp-54],eax`
     # stores it. Inject `imul eax,N` before that store to scale the pickup radius.
@@ -840,18 +841,21 @@ INJECTIONS: dict[str, Injection] = {
     "pickup": Injection(
         "pickup", "Item pickup range (GrabItems)", "grabitems",
         0x0, _b("89 45 AC 8D 45 B0"), _imul_eax,
+        arena=True,
         note="Scales the item pickup radius."),
     # GetSpawnRate epilogue (esi=out spawnRate, edi=out maxSpawns still live). Overwrite
     # `lea esp,[ebp-0C]; pop esi; pop edi` like GetRanges; force the two outputs.
     "spawn_rate": Injection(
         "spawn_rate", "Spawn rate (GetSpawnRate)", "get_spawn_rate",
         0x1EAA, _b("8D 65 F4 5E 5F"), _force_spawn,
+        arena=True,
         note="Caps active enemies. 0 is peaceful."),
     # CommonDrop.TryDroppingItem +0x26: cap the chance denominator so drops have a
     # minimum chance (100% = guaranteed). Ported from the FearLess ReGrind table.
     "loot": Injection(
         "loot", "Drop chance floor (CommonDrop)", "trydrop",
         -7, _b("8B 4E 10 89 4C 24 04"), _cap_drop_denom,   # anchor at +0x2D -> site at +0x26
+        arena=True,
         note="Minimum drop chance for common drops. 100 is guaranteed.",
         rerun_overwrite=False, multi=True),
     # Make the seven VANITY accessory slots functional (spec 032). Vanilla already runs
@@ -863,6 +867,7 @@ INJECTIONS: dict[str, Injection] = {
     "vanity_accs": Injection(
         "vanity_accs", "Vanity accessories work (slots 13-19)", "equip_apply",
         7, _b("89 44 24 04 89 3C 24"), _clamp_vanity_slot,
+        arena=True,
         note="Vanity accessory slots grant full effects, doubling your usable "
              "accessories.",
         edits=(Edit("equip_apply", 27, b"\x0a", b"\x14"),        # ApplyEquipFunctional loop
@@ -872,6 +877,7 @@ INJECTIONS: dict[str, Injection] = {
     "smart_cursor": Injection(
         "smart_cursor", "Smart cursor search radius", "smart_cursor",
         69, _b("89 46 3C 85 DB"), _shrink_smart_cursor,
+        arena=True,
         note="Don't set this too high or the game will lag.",
         rerun_overwrite=False),
     # Accessories take effect from the INVENTORY (spec 033). UpdateEquips' first loop
@@ -880,6 +886,7 @@ INJECTIONS: dict[str, Injection] = {
     "inventory_accs": Injection(
         "inventory_accs", "Accessories work from inventory", "inventory_scan",
         22, _b("8B 00 8B 40 6C"), None,
+        arena=True,
         note="Accessories work from your inventory, without being equipped.",
         rerun_overwrite=False, build_body=_inventory_accs_body),
     # Map-ping teleport (ported from the FearLess ReGrind table). Hook Main.TriggerPing
@@ -899,6 +906,7 @@ INJECTIONS: dict[str, Injection] = {
     "teleport": Injection(
         "teleport", "Map-ping teleport (TriggerPing)", "trigger_ping",
         0x0, _b("8B 4D 08 89 4C 24 04"), None,
+        arena=True,
         note="Double-click the fullscreen map to warp there. Re-toggle after a world "
              "reload.",
         rerun_overwrite=False, call_anchor="player_teleport", call_target_off=0x32),
@@ -1044,12 +1052,26 @@ class Patcher:
         os.replace(tmp, _STATE)
 
     # --- our own memory ----------------------------------------------------
-    ARENA_SIZE = 0x4000                 # 16KB: room for a stub and a real queue
+    # 64KB, which is VirtualAlloc's reservation granularity, so a smaller request would
+    # reserve this much anyway. Laid out so every stub has an address decided by *which*
+    # injection it belongs to rather than by searching for space:
+    #
+    #   0x0000..0x0FFF   reserved. The extractor's queue lives at ORE_QUEUE_OFF.
+    #   0x1000..         one ARENA_SLOT per injection site, indexed, never searched for.
+    #   ARENA_SIZE-16    the stamp that lets a later run find this arena again.
+    #
+    # Searching is what went wrong: a scan for cold bytes cannot tell free space from a
+    # stub that has been disabled and scrubbed, so it handed one injection a slice of
+    # another. An index cannot collide.
+    ARENA_SIZE = 0x10000
+    ARENA_STUBS_OFF = 0x1000            # first stub slot
+    ARENA_SLOT = 256                    # per site; the largest stub today is 96 bytes
+    ARENA_MAX_SITES = 8                 # per injection (the loot hook has four twins)
     # Stamped at the arena's tail so we can find it again. An arena outlives the process
     # that asked for it -- VirtualAlloc'd memory belongs to the game, not to us -- so
     # losing the state file must not cost the player another swing to re-bootstrap.
     ARENA_MAGIC = b"TBARENA1"
-    ARENA_MAGIC_OFF = 0x4000 - 16
+    ARENA_MAGIC_OFF = 0x10000 - 16
 
     def _free_base(self, need: int) -> int:
         """A free 64KB-aligned address (VirtualAlloc's reservation granularity).
@@ -1163,6 +1185,24 @@ class Patcher:
         self._arena = base
         self._save_state()
         return base
+
+    def slot_for(self, name: str, site: int = 0) -> int:
+        """Where a given injection's stub lives in the arena.
+
+        Decided by name and site index, not by searching, so it is the same address every
+        time and two injections cannot be given overlapping space. Enabling, disabling and
+        re-enabling all land on the same bytes.
+        """
+        order = sorted(INJECTIONS)
+        if name not in order:
+            raise PatchError(f"no arena slot for unknown injection {name!r}")
+        if not 0 <= site < self.ARENA_MAX_SITES:
+            raise PatchError(f"{name}: site {site} is past ARENA_MAX_SITES")
+        index = order.index(name) * self.ARENA_MAX_SITES + site
+        off = self.ARENA_STUBS_OFF + index * self.ARENA_SLOT
+        if off + self.ARENA_SLOT > self.ARENA_MAGIC_OFF:
+            raise PatchError(f"{name}: arena slot {index} runs past the arena")
+        return self.arena() + off
 
     def _arena_ok(self, base: int) -> bool:
         """Is `base` still a mapped arena of ours? Checks the stamp, not just the map --
@@ -1446,10 +1486,16 @@ class Patcher:
             bases = self._resolve_all(inj.anchor) if inj.multi else [self._resolve(inj.anchor)]
             injects = [b + inj.inject_off for b in bases]
             caves = []
-            for _ in injects:
-                caves.append(self.arena() if inj.arena
-                             else self._find_cave(stub_len, caves,
-                                                  writable=inj.writes_cave))
+            for i in range(len(injects)):
+                if inj.arena:
+                    if stub_len > self.ARENA_SLOT:
+                        raise PatchError(
+                            f"{inj.name}: stub is {stub_len} bytes, larger than the "
+                            f"{self.ARENA_SLOT}-byte arena slot")
+                    caves.append(self.slot_for(inj.name, i))
+                else:
+                    caves.append(self._find_cave(stub_len, caves,
+                                                 writable=inj.writes_cave))
         sites = []
         for inject, cave in zip(injects, caves):
             back = inject + len(inj.overwrite)          # lands on the byte after ours
