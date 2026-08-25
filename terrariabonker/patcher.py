@@ -233,8 +233,9 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # places. The field displacement is wildcarded. The five bytes at +21 carry no
     # relative address, which is what makes them displaceable -- the call itself could not
     # be, its rel32 differs every session.
+    # trailing five wildcarded: the extractor overwrites them (see "grabitems" above)
     "grabitems_call": _pat("0F B6 80 ?? ?? ?? ?? 85 C0 75 14 8B 45 08 8B 4D 0C "
-                           "89 4C 24 04 89 04 24 8B C0"),
+                           "89 4C 24 04 ?? ?? ?? ?? ??"),
     "pick_tile": _pat("?? ?? ?? ?? ?? 56 83 EC 7C 8B 7D 08 8B 5D 0C B8 ?? ?? ?? ?? "
                       "F7 00 01 00 00 00 74 08 8D 6D 00 E8 ?? ?? ?? ?? "
                       "C7 45 E4 00 00 00 00 C7 45 E0 00 00 00 00 8B 05 ?? ?? ?? ??"),
@@ -253,6 +254,12 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # Player.GrabItems: the grab-range store `mov [ebp-54],eax; lea eax,[ebp-50]; …;
     # cmp [ebx],ebx` followed by the first get_Hitbox call (wildcarded). Starts at the
     # injection point (the store), so the injection offset is 0.
+    # KNOWN EXCEPTION to the wildcard-your-patch-site rule (see test_patcher.py). These
+    # six bytes are the ones the pickup injection overwrites, but they are also what makes
+    # this anchor unique: wildcarding them takes it from 1 live site to 124. Until the
+    # pattern is re-cut with enough trailing context to stand on its own, pickup keeps a
+    # literal patch site and its cold-cache status stays unreliable. That is the lesser
+    # bug -- 124 candidate sites is not a status problem, it is a corrupted game.
     "grabitems": _pat("89 45 AC 8D 45 B0 89 44 24 04 89 1C 24 39 1B E8 ?? ?? ?? ??"),
     # Spawner.GetSpawnRate prologue: loads esi=out spawnRate ([ebp+10]), edi=out
     # maxSpawns ([ebp+14]); then fldz/fstp and the first `mov [esi],[static]`. Same
@@ -280,7 +287,8 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # overwrite is the first 7 bytes (`mov ecx,[ebp+08]; mov [esp+04],ecx`), reproduced
     # in the stub. Placed here (not at the class-init `mov eax,<imm>` at +0x6) because
     # that instruction embeds an ASLR/JIT address and would not be a stable overwrite.
-    "trigger_ping": _pat("8B 4D 08 89 4C 24 04 8B 4D 0C 89 4C 24 08 89 04 24 39 00 "
+    # leading seven wildcarded: the teleport injection overwrites them
+    "trigger_ping": _pat("?? ?? ?? ?? ?? ?? ?? 8B 4D 0C 89 4C 24 08 89 04 24 39 00 "
                          "8D 6D 00 E8 ?? ?? ?? ??"),
     # Player.Teleport(Vector2 newPos, int Style, int extraInfo): the call target for the
     # map-ping hook. Anchored on the two constant field stores at Teleport+0x32
@@ -555,6 +563,13 @@ def _teleport_body(player_base: int, call_target: int) -> bytes:
 ORE_MAX_BATCH = 32
 ORE_QUEUE_OFF = 0x400            # queue sits well clear of the ~100-byte stub
 ORE_QUEUE_BYTES = 4 + ORE_MAX_BATCH * 8
+# The pick power handed to PickTile. It was 100, and 100 is not enough: a tile breaks on
+# accumulated damage, and the game credits a short list of tile types -- hellstone among
+# them -- at a reduced rate, so those took the hit and survived it. In game that looks
+# exactly like what was reported: the block poofs, stays put, and still needs mining one
+# swing at a time. 250 leaves room for that reduction and also clears the stiffest pick
+# requirement in the game (lihzahrd brick, 210), which 100 never met either.
+ORE_PICK_POWER = 250
 
 
 def _ore_extract_body(patcher, inj) -> bytes:
@@ -562,7 +577,8 @@ def _ore_extract_body(patcher, inj) -> bytes:
 
     The unprivileged side does the thinking -- read the tile map, flood-fill the vein,
     decide what may be taken -- and writes a queue here. This stub walks it and calls
-    ``Player.PickTile(this, x, y, 100, -1)`` for each, the same call the game makes when
+    ``Player.PickTile(this, x, y, ORE_PICK_POWER, -1)`` for each, the same call the game
+    makes when
     you swing, so drops, framing, lighting and the ``CanKillTile`` check all happen
     exactly as they normally would.
 
@@ -611,7 +627,7 @@ def _ore_extract_body(patcher, inj) -> bytes:
             + b"\x8b\x0d" + _u32(my_player)          # mov ecx,[Main.myPlayer]
             + b"\x8b\x44\x88\x10"                    # mov eax,[eax+ecx*4+0x10]
             + b"\x6a\xff"                            # push -1        (cap, as the game does)
-            + b"\x6a\x64"                            # push 100       (pickPower)
+            + b"\x68" + _u32(ORE_PICK_POWER)         # push power     (pickPower)
             + b"\xff\x76\x04"                        # push [esi+4]   (y)
             + b"\xff\x36"                            # push [esi]     (x)
             + b"\x50"                                 # push eax       (this)
@@ -619,6 +635,9 @@ def _ore_extract_body(patcher, inj) -> bytes:
             + b"\xff\xd0"                            # call eax
             + b"\x83\xc6\x08"                        # add esi,8      (next pair)
             + b"\x4f")                                # dec edi
+    if len(body) + 2 > 128:                           # jnz back is a rel8
+        raise PatchError(f"extractor loop body grew to {len(body)} bytes — too far to "
+                         "jump back in one byte")
     loop = body + b"\x75" + bytes([(256 - (len(body) + 2)) & 0xFF])     # jnz loop
     tail_code = loop + b"\x8b\xe3"                    # mov esp,ebx (restore either conv)
     setup = (b"\x83\xff" + bytes([ORE_MAX_BATCH])    # cmp edi,MAX
@@ -1581,14 +1600,25 @@ class Patcher:
                 self.mem.write(base + e.off, e.patched if on else e.orig)
 
     def _injection_enabled(self, inj: Injection) -> bool:
+        """Ground truth, the same as the cheat path: the byte at the site.
+
+        A cold cache is not evidence of anything. This used to return False when neither
+        the state file nor the site cache had an entry, so a fresh process reported every
+        injection off no matter what was installed in the game -- and the caches are cold
+        in exactly the case the answer matters, a CLI run against a game some other
+        process patched.
+        """
         rec = self._inj.get(inj.name)
         if rec and rec.get("sites"):
-            inject = rec["sites"][0]["inject"]
+            sites = [s["inject"] for s in rec["sites"]]
         elif self._sites.get(inj.anchor):
-            inject = self._sites[inj.anchor][0] + inj.inject_off
+            sites = [b + inj.inject_off for b in self._sites[inj.anchor]]
         else:
-            return False
-        return self.mem.read(inject, 1) == b"\xe9"
+            try:
+                sites = [b + inj.inject_off for b in self._resolve_sites(inj.anchor)]
+            except PatchError:
+                return False                  # not JIT-compiled yet: nothing to be on
+        return any(self.mem.read(s, 1) == b"\xe9" for s in sites)
 
     # --- apply / toggle ----------------------------------------------------
     def _players(self):

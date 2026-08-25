@@ -306,14 +306,20 @@ def test_the_hook_runs_every_frame_not_only_when_the_player_swings():
 
     The displaced bytes matter too: the call itself cannot be displaced, because its rel32
     differs every session. The five bytes before it carry no relative address.
+
+    They are wildcarded in the anchor rather than spelled out. Spelling them out reads as
+    the safer choice and is the opposite: the anchor then stops matching as soon as the
+    jump is written over them, so nothing can find the site again. What those bytes
+    actually are is checked against ``overwrite`` at write time by ``_check_site``, which
+    reads the site instead of trusting a pattern.
     """
     from terrariabonker import patcher as P
 
     inj = P.INJECTIONS["ore_extract"]
     assert inj.anchor == "grabitems_call", "the extractor is hooked per-swing again"
     assert inj.overwrite == b"\x89\x04\x24\x8b\xc0", "displaced bytes changed"
-    assert all(m for m in P.ANCHORS[inj.anchor].pattern.mask[-5:]), \
-        "the displaced bytes must be fixed, not wildcarded"
+    assert not any(P.ANCHORS[inj.anchor].pattern.mask[-5:]), \
+        "the displaced bytes must be wildcarded — see _check_site for what guards them"
     # and PickTile is now only a call target, never a hook site
     assert "pick_tile" in P.ANCHORS
     src = inspect.getsource(P._ore_extract_body)
@@ -328,14 +334,31 @@ def test_the_call_passes_the_caps_the_game_passes():
     scales mining damage down and tiles simply never break -- no crash, no error, the
     feature just quietly does nothing. -1 is the sentinel meaning "no cap", and it is
     what both of the game's own call sites pass."""
+    import struct
+    from terrariabonker import patcher as P
+
     body = _ore_stub()
     call = body.index(b"\xff\xd0")                      # call eax
     # args are pushed right-to-left just before it: cap, pickPower, y, x, this
     pushes = body[:call]
-    cap = pushes.rindex(b"\x6a")                        # last push imm8 pair
-    assert body[cap:cap + 2] == b"\x6a\x64", "pickPower is no longer 100"
-    assert body[cap - 2:cap] == b"\x6a\xff", \
+    at = pushes.rindex(b"\x68")                         # push imm32 — the pick power
+    assert struct.unpack("<I", body[at + 1:at + 5])[0] == P.ORE_PICK_POWER, \
+        "the pick power the stub pushes is not the one the constant says"
+    assert body[at - 2:at] == b"\x6a\xff", \
         "cap is not -1 — any other value scales mining damage and nothing breaks"
+
+
+def test_the_pick_power_survives_the_reduced_rate_some_tiles_are_credited_at():
+    """Reported from the game: hellstone poofed on every hit and stayed put, still
+    needing one swing at a time, while copper and obsidian went in one call. A tile
+    breaks on accumulated damage and damage scales with pick power, so the fix is
+    headroom -- enough that a tile credited at half rate still reaches a break."""
+    from terrariabonker import patcher as P
+
+    assert P.ORE_PICK_POWER // 2 >= 100, \
+        "a tile credited at half rate does not reach the damage a break takes"
+    assert P.ORE_PICK_POWER >= 210, \
+        "below the stiffest pick requirement in the game (lihzahrd brick)"
 
 
 def test_the_count_is_consumed_before_the_batch_is_mined():

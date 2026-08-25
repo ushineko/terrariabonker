@@ -67,6 +67,46 @@ def test_tool_reach_injection_roundtrip(game):
     assert not p.is_enabled("tool_reach")
 
 
+def test_no_anchor_spells_out_the_bytes_its_own_injection_overwrites():
+    """An anchor whose literal bytes include the patch site stops matching the moment the
+    cheat is applied. Everything that resolves from cold then reports the cheat off and
+    cannot find the site to take it back off again -- found on the live game, where the
+    extractor was installed and running while a fresh process insisted it was not."""
+    # pickup is a known exception: wildcarding its six bytes takes `grabitems` from one
+    # live site to 124, and a wrong site is a corrupted game where a wrong status is only
+    # a wrong status. Listed here so it stays a decision rather than an oversight.
+    known = {"pickup"}
+    for name, inj in sorted(P.INJECTIONS.items()):
+        mask = ANCHORS[inj.anchor].pattern.mask
+        lo, hi = inj.inject_off, inj.inject_off + len(inj.overwrite)
+        pinned = sum(mask[lo:hi])
+        if name in known:
+            assert pinned, f"{name!r} no longer needs its exception — drop it from `known`"
+            continue
+        assert pinned == 0, (
+            f"anchor {inj.anchor!r} pins {pinned} of the {hi - lo} bytes "
+            f"{name!r} overwrites — it will not match its own patched site")
+
+
+def test_a_fresh_process_sees_an_injection_another_process_installed(game):
+    """Reported from the game: the GUI showed the extractor on, a CLI probe said every
+    injection was off, and the game was in fact patched. A cold cache was being read as
+    "not installed" rather than as "no answer yet" -- and it is cold in exactly the case
+    the answer matters, a second process asking about a game it did not patch."""
+    m, p = game
+    m.write(CODE + 0x700, ANCHORS["getranges"].pattern.raw)
+    inj = P.INJECTIONS["tool_reach"]
+    m.write(CODE + 0x700 + inj.inject_off, inj.overwrite)
+    p.enable("tool_reach", value=40)
+
+    fresh = Patcher(m)
+    fresh._exec_regions = lambda writable=False: [(CODE, CODE + 0x1000)]
+    fresh._arena = BASE
+    fresh.arena = lambda *a, **k: BASE
+    fresh._inj, fresh._sites = {}, {}     # did not do the patching, so has no record of it
+    assert fresh.is_enabled("tool_reach") is True
+
+
 def test_pickup_injection_uses_imul_stub(game):
     m, p = game
     m.write(CODE + 0x900, ANCHORS["grabitems"].pattern.raw)      # plant the grab-range site

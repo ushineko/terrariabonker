@@ -213,6 +213,22 @@ def test_is_enabled_is_true_when_any_copy_is_patched(twin_game):
     assert p.is_enabled("reach") is True
 
 
+def test_an_injection_is_on_when_any_copy_carries_the_jump(twin_game):
+    """Same rule for injections, and it has to hold on a cold cache: the second copy is
+    the one a fresh process has no record of, and answering from the first alone reports
+    a patched game as clean."""
+    m, p = twin_game
+    inj = P.INJECTIONS["tool_reach"]
+    for off in (COPY_A, COPY_B):
+        m.write(CODE + off, ANCHORS["getranges"].pattern.raw)
+        m.write(CODE + off + inj.inject_off, inj.overwrite)
+    p._inj, p._sites = {}, {}
+    assert p.is_enabled("tool_reach") is False
+    m.write(CODE + COPY_B + inj.inject_off, b"\xe9")
+    p._inj, p._sites = {}, {}
+    assert p.is_enabled("tool_reach") is True
+
+
 def test_state_records_both_sites(twin_game):
     _, p = twin_game
     p.enable("reach")
