@@ -228,3 +228,18 @@ def test_the_rescan_button_clears_the_catalog_and_asks_for_a_fresh_read(app):
     seen[1][0]({"items": [], "npcs": [
         {"id": 2, "name": "m", "kind": "Boss", "npc": True, "stats": {"type": 2}}]})
     assert tab._model.rowCount() == 1
+
+
+def test_the_entry_count_follows_the_kind_filter(tab):
+    """Filtering to Boss while the label still read "6954 of 6954 entries" was visible in
+    a README screenshot: the count was wired to the search box but not to the dropdown."""
+    tab._fill(CATALOG)
+    total = tab._model.rowCount()
+    assert "%d of %d entries" % (total, total) in tab.status.text()
+
+    idx = next(i for i in range(tab.kind.count()) if tab.kind.itemText(i) == "Boss")
+    tab.kind.setCurrentIndex(idx)
+    shown = tab._proxy.rowCount()
+    assert shown < total, "the fixture no longer exercises a narrowing filter"
+    assert tab.status.text().startswith("%d of %d" % (shown, total))
+    assert "match" in tab.status.text()

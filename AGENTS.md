@@ -126,8 +126,9 @@ reload, a cheat that permanently alters their world).
 
 ### Screenshots
 
-`tools/screenshot.sh` captures the panel; `--with-dialog` when a dialog is open. Four
-images in `assets/`, one per tab, refreshed when the panel visibly changes.
+`tools/screenshot.sh` captures the panel; `--with-dialog` when a dialog is open. Five
+images in `assets/`, refreshed when the panel visibly changes. The Player tab is left out
+deliberately: it is two group boxes of buttons and shows nothing a reader needs.
 
 - The alt text describes **what is actually in the image**. It is the only description a
   screen-reader user gets, and a stale one is worse than none — check it still matches

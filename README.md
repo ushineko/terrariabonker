@@ -14,13 +14,15 @@ side in order to re-derive patch offsets after a game update. See
 *This edits your own single-player game in memory. It writes nothing to disk and
 holds no state.*
 
-![Trainer tab: godmode and infinite-mana freezes, HP/mana stat edits, tool reach, and the Build group of code patches with their per-patch values — mining speed, placement and tool reach, multiple pylons, smart-cursor radius, and the ore extractor set to sweep ores and gems](assets/screenshot-trainer.png)
+![Effects tab: the freezes for godmode and infinite mana, and passive potions switched on with a minimum stack size of 1, above a note that these need the trainer running while the Patches tab keeps working until the game restarts](assets/screenshot-effects.png)
 
-![Inventory tab: the item grid mirroring the in-game layout — hotbar, main inventory, coins and ammo — with sprite icons, rarity-tinted slot borders and stack counts](assets/screenshot-inventory.png)
+![Patches tab: the Build group of code patches, all ticked, with their per-patch values — mining speed, placement reach, multiple pylons, fast placement, tool and interaction reach, smart-cursor radius, and the ore extractor set to sweep ores and gems](assets/screenshot-patches.png)
 
-![Recipes tab: the craftable-item browser filtered over 3214 items, with a recipe dialog open on Frost Helmet listing its crafting station (Mythril Anvil) and both ingredients](assets/screenshot-recipes.png)
+![Inventory tab: the item grid mirroring the in-game layout — hotbar, main inventory and coins, with the ammo row below — showing sprite icons, rarity-tinted slot borders and stack counts](assets/screenshot-inventory.png)
 
-![Compendium tab: the item and NPC browser filtered to bosses and sortable by damage, defense, life and ID, with a Moon Lord dialog showing its stats, a wiki link, and a spawn control with an adjustable distance](assets/screenshot-compendium.png)
+![Recipes tab: the craftable-item browser showing a grid of item icons over all 3214 craftable items, with a filter box and a mode selector for what an item makes or what it is used in](assets/screenshot-recipes.png)
+
+![Compendium tab: the item and NPC browser filtered to bosses, listing Brain of Cthulhu, Deerclops, Duke Fishron, Empress of Light, Eye of Cthulhu, Golem, King Slime, Lunatic Cultist and Martian Saucer with their damage, defense, life and ID, sortable by any column](assets/screenshot-compendium.png)
 
 ## Table of Contents
 

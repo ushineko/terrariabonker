@@ -23,10 +23,18 @@ usage: tools/screenshot.sh [--with-dialog] <output.png>
                   grabbing the active window (which would be the dialog on its own)
 
 Refreshing the README set (switch tabs by hand between runs):
-  tools/screenshot.sh                assets/screenshot-trainer.png
+  tools/screenshot.sh                assets/screenshot-effects.png
+  tools/screenshot.sh                assets/screenshot-patches.png
   tools/screenshot.sh                assets/screenshot-inventory.png
-  tools/screenshot.sh --with-dialog  assets/screenshot-recipes.png
-  tools/screenshot.sh --with-dialog  assets/screenshot-compendium.png
+  tools/screenshot.sh                assets/screenshot-recipes.png
+  tools/screenshot.sh                assets/screenshot-compendium.png
+
+Clicking through six tabs against a timer is miserable, and the v0.34.0 set was
+captured by a throwaway script instead: build a MainWindow in-process (skipping the
+single-instance guard), walk tabs.setCurrentIndex, set any filter the shot wants, resize
+to the page, and shell out to this script between steps. Note that widgets populated
+from the catalog -- the Compendium's kind dropdown -- can only be set *after* the load
+settles, not at tab-switch time.
 USAGE
 }
 

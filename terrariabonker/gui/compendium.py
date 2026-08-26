@@ -180,7 +180,10 @@ class CompendiumTab(QWidget):
         # "All kinds" and truncated every real kind that turned up later.
         self.kind.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.kind.addItem(ALL_KINDS)
-        self.kind.currentTextChanged.connect(lambda k: self._proxy.set_kind(k))
+        # _count() as well as set_kind: filtering to Boss while the label still read
+        # "6954 of 6954 entries" was visible in a README screenshot.
+        self.kind.currentTextChanged.connect(
+            lambda k: (self._proxy.set_kind(k), self._count()))
         bar.addWidget(self.kind)
         self.search = QLineEdit(placeholderText="filter by name or ID…")
         self.search.textChanged.connect(lambda t: (self._proxy.set_query(t), self._count()))
