@@ -1,0 +1,116 @@
+"""Bobber location and the bite condition, against a planted memory image.
+
+The interesting cases are the ones that misled the live probes: the catch counter
+sharing a slot with the catch, and a bite that is over being indistinguishable from
+one that never happened unless ``ai[1]`` is consulted.
+"""
+
+import struct
+
+import pytest
+
+from conftest import FakeMem
+from terrariabonker import projectiles as P
+
+BASE = 0x10000000
+MAIN = BASE + 0x1000            # Main's static-data block
+ARR = BASE + 0x40000            # the Projectile[1001] array
+OBJ0 = BASE + 0x80000           # first projectile object
+STRIDE = 0x198
+VTABLE = 0xABCD0000
+
+
+def plant(mem, bobber_slots=(2,), ai=(0.0, 0.0, 0.0), local_ai=(0.0, 0.0, 0.0)):
+    """Plant Main.projectile, 1001 objects, and float[3] ai/localAI for each."""
+    mem.write(ARR + P.ARRAY_LEN_OFF, struct.pack("<i", P.ARRAY_LEN))
+    for slot in range(P.ARRAY_LEN):
+        obj = OBJ0 + slot * STRIDE
+        mem.write(ARR + P.ARRAY_DATA_OFF + slot * 4, struct.pack("<I", obj))
+        mem.write(obj, struct.pack("<I", VTABLE))
+        mem.write(obj + P.BOBBER_OFF, b"\x01" if slot in bobber_slots else b"\x00")
+        for off, vals in ((P.AI_OFF, ai), (P.LOCALAI_OFF, local_ai)):
+            arrp = obj + 0x100 + (0 if off == P.AI_OFF else 0x20)
+            mem.write(obj + off, struct.pack("<I", arrp))
+            mem.write(arrp + P.ARRAY_LEN_OFF, struct.pack("<i", 3))
+            mem.write(arrp + P.ARRAY_DATA_OFF, struct.pack("<3f", *vals))
+    mem.write(MAIN + P.MAIN_PROJECTILE_OFF, struct.pack("<I", ARR))
+
+
+@pytest.fixture
+def mem():
+    return FakeMem(BASE, 0x200000)
+
+
+def test_array_found_through_the_known_static(mem):
+    plant(mem)
+    assert P.projectile_array(mem, MAIN) == ARR
+
+
+def test_array_still_found_when_the_static_moves(mem):
+    """A game update that moves Main.projectile costs a scan, not the cheat."""
+    plant(mem)
+    mem.write(MAIN + P.MAIN_PROJECTILE_OFF, struct.pack("<I", 0))
+    mem.write(MAIN + 0x2000, struct.pack("<I", ARR))
+    assert P.projectile_array(mem, MAIN) == ARR
+
+
+def test_no_array_is_none_not_a_wrong_answer(mem):
+    assert P.projectile_array(mem, MAIN) is None
+
+
+def test_only_bobbers_are_returned(mem):
+    plant(mem, bobber_slots=(2, 7))
+    assert [b.slot for b in P.find_bobbers(mem, ARR)] == [2, 7]
+
+
+def test_a_bite_is_the_games_own_condition(mem):
+    plant(mem, ai=(0.0, -240.0, 0.0), local_ai=(0.0, 2290.0, 0.0))
+    bite = P.find_bite(mem, ARR)
+    assert bite is not None and bite.catch == 2290
+
+
+def test_a_negative_catch_is_an_npc(mem):
+    plant(mem, ai=(0.0, -240.0, 0.0), local_ai=(0.0, -586.0, 0.0))
+    assert P.find_bite(mem, ARR).catch == -586
+
+
+def test_the_counter_climbing_is_not_a_bite(mem):
+    """localAI[1] holds the counter between bites; without ai[1] < 0 it means nothing.
+
+    This is the trap the live probes fell into from the other side: the slot is busy
+    almost all the time, so reading it alone would report a fish every tick.
+    """
+    plant(mem, ai=(0.0, 0.0, 0.0), local_ai=(0.0, 651.0, 0.0))
+    assert P.find_bite(mem, ARR) is None
+    assert P.find_bobbers(mem, ARR)[0].counter == 651.0
+
+
+def test_an_expired_bite_is_not_a_bite(mem):
+    """The window closes by ai[1] reaching 0 and both fields being cleared."""
+    plant(mem, ai=(0.0, 0.0, 0.0), local_ai=(0.0, 0.0, 0.0))
+    assert P.find_bite(mem, ARR) is None
+
+
+def test_a_bobber_already_being_reeled_is_not_a_bite(mem):
+    """ai[0] == 1 means the pull path has claimed it; taking it twice is a double catch."""
+    plant(mem, ai=(1.0, -240.0, 0.0), local_ai=(0.0, 2290.0, 0.0))
+    assert P.find_bite(mem, ARR) is None
+
+
+def test_catch_is_zero_outside_the_bite_window(mem):
+    """Never name a fish from the counter -- 651 is progress, not a Rockfish."""
+    plant(mem, ai=(0.0, 0.0, 0.0), local_ai=(0.0, 651.0, 0.0))
+    assert P.find_bobbers(mem, ARR)[0].catch == 0
+
+
+def test_a_bite_reports_no_counter(mem):
+    plant(mem, ai=(0.0, -240.0, 0.0), local_ai=(0.0, 2290.0, 0.0))
+    assert P.find_bite(mem, ARR).counter == 0.0
+
+
+def test_an_unreadable_ai_reference_is_not_a_bobber(mem):
+    """A null float[3] reference reads as absent rather than as zeroed state."""
+    plant(mem)
+    obj = OBJ0 + 2 * STRIDE
+    mem.write(obj + P.LOCALAI_OFF, struct.pack("<I", 0))
+    assert P.find_bobbers(mem, ARR) == []

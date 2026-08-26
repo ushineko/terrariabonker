@@ -191,10 +191,12 @@ the premise has not been established.
 - **Whether the catch is worth influencing separately.** Fishing power decides quality;
   insta-fishing decides speed. If they turn out to be the same field in practice, the two
   toggles should be merged rather than shipped as a distinction that is not real.
-- **`Main.projectile`'s address.** Now pinned to Main statics `+0x9BC` and re-derived by
-  the structural search (a 1001-element object array whose elements share a vtable) on a
-  second session, but it still lives in a scratch probe. It needs promoting to a real
-  locator with the same treatment as the others before auto-catch depends on it.
+- ~~**`Main.projectile`'s address.**~~ Done. `terrariabonker/projectiles.py` reads it from
+  Main statics `+0x9BC`, validates what it finds (length 1001, elements sharing one
+  vtable) and falls back to the structural scan that found it originally, so a game update
+  that moves the field costs a slower lookup rather than a broken cheat. Read-only, tested
+  headless against a planted image, and confirmed live: 10 bites in 45 s, each with the
+  counter peaking at 643–660 first and a real catch behind it.
 
 ## Auto-catch — see spec 043
 
