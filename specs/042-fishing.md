@@ -199,6 +199,29 @@ and `+0x128` flipping. That fired 8 times in 40 seconds, which matches the bite 
 the same window from an independent measurement. It reads as the bite event, though it has
 not been confirmed against a bite the maintainer called out at the moment it happened.
 
+**The generic route was tried: drive the player's "use item" control.** The maintainer's
+suggestion, and the right instinct — it is not fishing-specific, so it would serve auto-fire
+and auto-place too. Recon so far:
+
+- A candidate for `controlUseItem` at **`statLife-0x00c6`**: usually 0, and held at 1 for a
+  4.1 s unbroken run while the mouse button was held down. Five other bytes that toggled in
+  a first pass never set at all in a second, so they were noise.
+- **Writing it did not cast a line.** With a rod selected and the player not clicking, the
+  byte was written at 100 Hz for three seconds and no bobber appeared.
+
+Two explanations, and the second is likelier:
+
+1. *A frame race.* The game sets the flag from input at the top of a frame and reads it
+   later in the same frame; a poller outside the game lands wherever it lands. This is why
+   an in-game stub is the reliable way to drive input flags, and an outside write is not.
+2. *A held flag is not a press.* A fishing rod is not auto-reuse, and Terraria requires a
+   fresh press for such items — `controlUseItem` together with `releaseUseItem` — so a byte
+   pinned at 1 reads as "still holding since last frame", which is deliberately ignored.
+
+Next attempt should find `releaseUseItem` (likely adjacent, the control flags sit together)
+and drive the pair as a press-and-release rather than a hold. If that also fails, the frame
+race is the answer and the honest conclusion is that this belongs in a stub, not a poller.
+
 **Triggering the reel-in is the real unknown**, and the routes are not equally good:
 
 - *Replicate what reeling in does.* Find what the game changes when the player clicks with
