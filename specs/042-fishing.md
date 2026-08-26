@@ -63,6 +63,43 @@ compendium's spawn button uses. The kit is a Golden Fishing Rod (2294) and a sta
 - **Insta-fishing**: find the live bobber in `Main.projectile` (`bobber` set, and active)
   and clear whatever holds its remaining wait. One write per bobber per round.
 
+## Live recon, 2026-08-25
+
+Confirmed at a pond on 1.4.5.8+24893155:
+
+- **The bobber is identifiable live.** `Main.projectile` was located structurally, and the
+  cast bobber came back as projectile **type 362** — exactly what the Fiberglass rod's
+  `shoot` field says it fires. Item → projectile → live object, end to end.
+- **`fishingPole` is writable and restores cleanly.** 30 → 255 → 30, each step verified by
+  reading back. This is the record-and-restore path working before anything was built on
+  it.
+- **Bait is consumed by decrementing the stack** (30 → 23 → 21 → 17 across the session), so
+  pinning the stack is the right mechanism. This was an assumption in Risks and is now a
+  measurement.
+- **A catch needs the player to reel in.** That bounds any "insta-fishing" claim: the rate
+  is limited by clicking, not only by the game's willingness to give a bite.
+
+Not established, and deliberately not claimed:
+
+- **Whether fishing power perceptibly changes the bite rate.** 4 catches in 60s at power
+  255, against no controlled baseline — and the manual reel-in confounds it. Settling this
+  needs an A/B of equal length with the same fishing cadence, at 30 and at 255.
+- **Which field holds the wait or bite state.** The cycle at `+0x078`/`+0x0B4`/`+0x100`/
+  `+0x128` repeats every 4–5 seconds whether or not a fish is interested, so it reads as
+  idle bobbing rather than a bite.
+
+### Two broken instruments, recorded because both nearly became findings
+
+A probe reported **zero catches in 90 seconds** while the player was in fact catching fish
+— the bait stack and seven new fish in the bag proved it afterwards. The gap-detector was
+wrong, not the game.
+
+Worse, a write of `fishingPole=255` silently missed: the rod's address had been cached from
+an earlier read and mono's GC had moved the object. The script printed `fishingPole was 0`
+where 30 was expected and carried on regardless. **Locate an item by identity on every
+access, never by a cached address** — the lesson spec 038 already exists for — and treat an
+unexpected pre-value as a reason to abort, not a value to record.
+
 ## Recon still needed
 
 - **The bobber's wait timer.** Which field counts down between cast and nibble is not
@@ -101,6 +138,6 @@ compendium's spawn button uses. The kit is a Golden Fishing Rod (2294) and a sta
 - **A byte field caps the tunable at 255.** Higher is not "more"; it wraps.
 - **Rollback**: no patching, so nothing to restore in the game's code. Given items and an
   edited rod are the exceptions, per the point above.
-- **Assumption**: bait is consumed by decrementing the stack. If it is consumed some other
-  way, pinning the stack will not be enough and the criterion must change rather than the
-  claim being quietly weakened.
+- ~~**Assumption**: bait is consumed by decrementing the stack.~~ Measured; see above.
+- **A catch is a manual act.** The player casts and reels in. Any wording that suggests
+  fish arrive on their own would oversell what this can do, in the README and in the UI.
