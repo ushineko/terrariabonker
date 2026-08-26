@@ -229,3 +229,40 @@ def test_the_stack_threshold_reaches_the_inventory():
     assert svc.potion_tick(min_stack=1)["carried"] == 2
     assert [e["buff"] for e in svc.potion_tick(min_stack=5)["added"]] == []
     assert svc.potion_tick(min_stack=5)["carried"] == 1
+
+
+# --- the CLI surface (spec 041) -----------------------------------------------
+
+def test_the_potions_command_exists_and_the_worker_may_run_it():
+    from terrariabonker.cli import SERVE_OPS, build_parser
+
+    args = build_parser().parse_args(["potions"])
+    assert args.func.__name__ == "cmd_potions"
+    assert (args.min_stack, args.interval, args.watch) == (1, 0.25, False)
+    assert "potions" in SERVE_OPS, "the GUI worker cannot run a command it may not run"
+
+
+def test_the_default_interval_can_actually_hold_the_default_buff_up():
+    """These two defaults are a pair: ship an interval slower than the buff time and the
+    feature flickers for everyone, out of the box."""
+    from terrariabonker.cli import build_parser
+
+    args = build_parser().parse_args(["potions"])
+    assert args.interval * 60 < B.DEFAULT_TICKS
+
+
+def test_a_full_buff_bar_is_reported_loudly_not_silently_dropped():
+    """A potion that grants nothing because the bar is full looks identical to a broken
+    cheat unless the line says so."""
+    from terrariabonker.cli import _potion_line
+
+    line = _potion_line({"added": [], "renewed": [], "kept": [],
+                         "full": [{"slot": 40, "buff": 5}]})
+    assert "NO FREE BUFF SLOT" in line and "5" in line
+
+
+def test_carrying_nothing_says_so_rather_than_printing_an_empty_line():
+    from terrariabonker.cli import _potion_line
+
+    assert "nothing favorited" in _potion_line(
+        {"added": [], "renewed": [], "kept": [], "full": []})

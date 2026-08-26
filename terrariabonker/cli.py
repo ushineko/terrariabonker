@@ -161,6 +161,7 @@ SERVE_OPS = frozenset({
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
     "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
     "accept-build", "vein", "extract", "extract-tick", "extract-stop",
+    "potions",
 })
 
 
@@ -287,6 +288,43 @@ def _extract_line(got) -> str:
             f"({at[0]}, {at[1]})"
             + (f", median {med:.2f}s/tile" if med is not None else "")
             + (f" — {got['reason']}" if got["reason"] else ""))
+
+
+def _potion_line(r: dict) -> str:
+    bits = []
+    for kind in ("added", "renewed", "kept"):
+        if r[kind]:
+            bits.append("%s %s" % (kind, ",".join(str(e["buff"]) for e in r[kind])))
+    if r["full"]:
+        bits.append("NO FREE BUFF SLOT for %s"
+                    % ",".join(str(e["buff"]) for e in r["full"]))
+    return "[potions] " + ("; ".join(bits) if bits else "nothing favorited")
+
+
+def cmd_potions(args) -> int:
+    """Keep favorited potions' buffs topped up while they sit in the inventory."""
+    svc = _svc(guard=True, force=args.force)
+    if args.watch:
+        print("[potions] watching — favorite a potion (alt-click) to switch it on, "
+              "unfavorite or drop it to let it lapse. Ctrl-C to stop.")
+        try:
+            got = svc.watch_potions(min_stack=args.min_stack, ticks=args.ticks,
+                                    interval=args.interval, rounds=args.rounds,
+                                    on_event=lambda r: print(_potion_line(r), flush=True))
+        except KeyboardInterrupt:
+            print("\n[potions] stopped — your buffs will lapse on their own")
+            return 0
+        if args.json:
+            print(json.dumps(got))
+        else:
+            print(f"[potions] {got['applied']} applied over {got['rounds']} rounds")
+        return 0
+    got = svc.potion_tick(min_stack=args.min_stack, ticks=args.ticks)
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    print(_potion_line(got))
+    return 0
 
 
 def cmd_extract(args) -> int:
@@ -668,6 +706,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rounds", type=int,
                    help="with --watch, stop after this many polls (default: forever)")
     p.set_defaults(func=cmd_extract)
+
+    p = sub.add_parser("potions",
+                       help="favorited potions grant their buff from the inventory")
+    p.add_argument("--min-stack", type=int, default=1, dest="min_stack",
+                   help="only potions with at least this many in the stack (default 1)")
+    p.add_argument("--ticks", type=int, default=None,
+                   help="buff time written per round, in frames (60 = 1s)")
+    p.add_argument("--interval", type=float, default=0.25,
+                   help="seconds between rounds; must be well under --ticks")
+    p.add_argument("--watch", action="store_true",
+                   help="keep them topped up (otherwise a single round)")
+    p.add_argument("--rounds", type=int,
+                   help="with --watch, stop after this many rounds (default: forever)")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_potions)
 
     p = sub.add_parser("extract-tick",
                        help="one slice of vein watching (GUI; WRITES to the world)")
