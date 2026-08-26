@@ -121,7 +121,13 @@ proper lake:
   resets at all.
 
 So it is not a simple ramping value in either object, and the search would have to move to
-Main's statics next. That work is unnecessary, because **insta-fishing and fishing power
+Main's statics next. **Both conclusions were wrong, and were corrected on 2026-08-26: the
+counter is `Projectile.localAI[1]` on the bobber, a float.** The scan could never have seen
+it, because `localAI` is a `float[3]` *reference* — the numbers live behind a pointer, not
+inline in the bobber's bytes, so sweeping the object's first `0x600` bytes as int and as
+float was looking in a place the value is not. See "The bite signal, settled" below.
+
+The search was unnecessary anyway, because **insta-fishing and fishing power
 are the same lever**: the maintainer measured about a bite a second at power 255 against a
 trickle at 30, which is what the published counter formula predicts. There is no second
 mechanism to find.
@@ -171,12 +177,10 @@ the premise has not been established.
 
 ## Recon still needed
 
-- **The bobber's wait timer.** Which field counts down between cast and nibble is not
-  known. Method: cast a line, sample the live bobber's struct repeatedly, and take the
-  field that decreases while the player is fishing and stops when they are not. This is
-  the same differential that found the buff arrays, and it has the same trap — a sample
-  taken while the game is paused shows nothing moving and proves nothing, so the probe
-  must carry its own liveness control.
+- ~~**The bobber's wait timer.**~~ Answered, and the framing was wrong: nothing counts
+  *down* between cast and nibble. `Projectile.localAI[1]` counts **up** to 660 — see "The
+  bite signal, settled" below. Reading the game's IL got there in an afternoon after two
+  memory-differential probes had failed, which is the method note worth keeping.
 - **Whether a player-side fishing field exists, which would make the item edit
   unnecessary.** If the player carries a fishing-power value that the game recomputes each
   frame from rod and bait, pinning it is a held effect that evaporates on its own — exactly
@@ -187,9 +191,10 @@ the premise has not been established.
 - **Whether the catch is worth influencing separately.** Fishing power decides quality;
   insta-fishing decides speed. If they turn out to be the same field in practice, the two
   toggles should be merged rather than shipped as a distinction that is not real.
-- **`Main.projectile`'s address.** Found structurally during recon (a 1001-element object
-  array whose elements share a vtable), but that search has not been made repeatable or
-  tested. It needs the same treatment as the other locators before anything depends on it.
+- **`Main.projectile`'s address.** Now pinned to Main statics `+0x9BC` and re-derived by
+  the structural search (a 1001-element object array whose elements share a vtable) on a
+  second session, but it still lives in a scratch probe. It needs promoting to a real
+  locator with the same treatment as the others before auto-catch depends on it.
 
 ## Auto-catch — see spec 043
 
@@ -203,11 +208,12 @@ Reeling in is still a manual act: the cheat makes fish bite constantly, and the 
 clicks. Automating that is a separate question and is **not ruled out** — it has simply not
 been investigated. It splits in two, and only one half is hard.
 
-**Detecting a bite looks solved already.** While sampling the bobber, four fields moved
-together in a repeating cycle — `+0x078` dropping 1 → 0 and `+0x0B4` 59 → 0, with `+0x100`
-and `+0x128` flipping. That fired 8 times in 40 seconds, which matches the bite count over
-the same window from an independent measurement. It reads as the bite event, though it has
-not been confirmed against a bite the maintainer called out at the moment it happened.
+**Detecting a bite was inferred from a four-field cycle**, and that inference is now
+superseded. While sampling the bobber, `+0x078` dropped 1 → 0 and `+0x0B4` 59 → 0 with
+`+0x100` and `+0x128` flipping, 8 times in 40 seconds, matching an independent bite count.
+The count matched because those fields *are* disturbed by a bite — `AI_061_FishingBobber`
+jitters the bobber's `velocity` and clears `wet`/`lavaWet`/`honeyWet` during the bite
+window — but they are the splash, not the signal. The real condition is below.
 
 **The generic route was tried: drive the player's "use item" control.** The maintainer's
 suggestion, and the right instinct — it is not fishing-specific, so it would serve auto-fire
@@ -299,6 +305,66 @@ five in play, and High Test Fishing Line removes it. The bait is consumed either
 costs the player nothing here, because the bait pin tops the stack back up regardless of
 whether the catch landed, but an auto-catch that silently swallows a break will look
 broken, and the counting must not treat a break as a failure of the cheat.
+
+### The bite signal, settled — 2026-08-26
+
+Read out of the game's own IL with `tools/ilrecon`, then confirmed on the running game.
+No differential hunting was needed, and the two earlier probes had both been looking in
+the wrong place.
+
+`Player.ItemCheck_PullFishingBobbers` is the game's own reel-in path, and it says what a
+bite is. For a projectile that is `active`, owned by the local player and `bobber`:
+
+```
+ai[0] == 0          // still fishing, not already being reeled in
+ai[1] <  0          // the bite window; counts up 1-5 per tick until it expires at 0
+localAI[1] != 0     // the catch: > 0 an item type, < 0 an NPC type
+```
+
+That is the condition auto-catch triggers on. `SetFishingCheckResults` opens the window
+with `ai[1] = Next(-240, -90) + <a fishingLevel term>` and stows the catch in `localAI[1]`;
+when the window runs out the bobber clears both back to 0 and the fish is gone.
+
+**`localAI[1]` is also the catch counter** — the same slot, used for both. Per tick
+`AI_061_FishingBobber` adds `Next(1,3)` at a `FinalFishingLevel/300` chance, `+ level/30`,
+`+ Next(1,3)`, and `+60` on a 1-in-60; past **660** it resets the slot to 0 and calls
+`FishingCheck`. That is the published formula, term for term, from the game rather than the
+wiki — and it is the value the probes above failed to find.
+
+**Live offsets on 1.4.5.8+24893155**, derived on the running game:
+
+| Thing | Where | How |
+|---|---|---|
+| `Main.projectile` | Main statics `+0x9BC`, array data at `+0x10` | structural scan for a 1001-element object array; exactly one candidate, all elements sharing one vtable |
+| `Projectile.ai` | object `+0x044` → `float[3]` | the two adjacent array references, in declaration order |
+| `Projectile.localAI` | object `+0x048` → `float[3]` | as above |
+| `Projectile.bobber` | `+0x088` | this spec's, reused as the slot filter |
+
+Projectile object stride is `0x198`. Note the mono array length is at `+0x0C`, not `+0x08`
+— a first pass using `+0x08` found no array at all and read as "the structure is not
+there".
+
+**Measured, hands off the mouse (75 s):** 19 bites about 4 s apart, each preceded by the
+counter peaking at 648–660, `ai[1]` between −376 and −576, and `localAI[1]` naming real
+catches (Bass, Stinkfish, Rockfish, Armored Cavefish, a Wooden Crate, and one NPC). Every
+unreeled window closed itself after ~3 s with both fields zeroed.
+
+**Confirmed against the player, which is what spec 043 was waiting on.** Rather than have
+the maintainer call out a bite by keypress, the probe took the reel-in itself as ground
+truth: the pull path sets `ai[0] = 0 → 1`, so a click timestamps the maintainer's own
+perception. Six reels on six seen dips, **six with the signal already raised, none
+without**. The gap between signal and click was ~1-2 s of human reaction time, all of which
+a stub firing on the signal would have back.
+
+Two instrument flaws, recorded rather than buried:
+
+- The probe's liveness guard reported "paused game" four times during a plainly running
+  session. It trips on 30 identical rounded samples, so it is not yet trustworthy as a
+  pause detector. It suppressed no bite, but a guard that cries wolf is the same class of
+  broken instrument as the two already recorded above.
+- The confirmation lines printed the catch as `NPC 0` for fish, because `localAI[1]` was
+  read back *after* the pull had cleared it. The verdict uses the previous sample and
+  stands; only the label was wrong.
 
 ## Risks & Assumptions
 
