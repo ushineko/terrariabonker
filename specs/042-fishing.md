@@ -191,7 +191,13 @@ the premise has not been established.
   array whose elements share a vtable), but that search has not been made repeatable or
   tested. It needs the same treatment as the other locators before anything depends on it.
 
-## Auto-catch — not yet attempted
+## Auto-catch — see spec 043
+
+The trigger is solved and is written up in **`specs/043-auto-use.md`**: press the use
+button from inside the frame, which is not fishing-specific. Auto-catch becomes its first
+consumer. What remains fishing's own problem is confirming the bite signal below.
+
+## Auto-catch — the recon that led to spec 043
 
 Reeling in is still a manual act: the cheat makes fish bite constantly, and the player
 clicks. Automating that is a separate question and is **not ruled out** — it has simply not
