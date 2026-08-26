@@ -301,6 +301,23 @@ def cmd_fishing(args) -> int:
     """Hand out a rod and bait, and keep the bait from running out."""
     svc = _svc(guard=True, force=args.force)
     out = {}
+    if args.restore:
+        out["restore"] = svc.restore_fishing_power()
+        if not args.json:
+            done = out["restore"]["restored"]
+            print("[fishing] " + (", ".join(
+                "rod in slot %d back to power %d" % (d["slot"], d["power"])
+                for d in done) if done else "no rod power to put back"))
+        if args.json:
+            print(json.dumps(out))
+        return 0
+    if args.power:
+        out["power"] = svc.set_fishing_power(args.power)
+        if not args.json:
+            ch = out["power"]["changed"]
+            print("[fishing] " + (", ".join(
+                "slot %d %d -> %d" % (c["slot"], c["was"], c["now"]) for c in ch)
+                if ch else "rods already at power %d" % args.power))
     if not args.no_kit:
         out["kit"] = svc.fishing_kit()
         if not args.json:
@@ -741,6 +758,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="seconds between rounds with --watch")
     p.add_argument("--rounds", type=int,
                    help="with --watch, stop after this many rounds")
+    p.add_argument("--power", type=int,
+                   help="raise every rod you carry to this fishing power (1-255); the "
+                        "original is recorded and put back by --restore")
+    p.add_argument("--restore", action="store_true",
+                   help="put every rod back to the power it had, and forget the record")
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.add_argument("--force", action="store_true", help="run on an unverified build")
     p.set_defaults(func=cmd_fishing)

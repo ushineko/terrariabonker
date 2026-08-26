@@ -192,6 +192,14 @@ class Inventory:
                 out.append((i, buff))
         return out
 
+    def set_fishing_power(self, index: int, value: int) -> bool:
+        """Write a rod's fishing power. A byte field, so anything over 255 would wrap."""
+        addr = self._item_addr(index)
+        if not addr or not 0 <= value <= 255:
+            return False
+        self.mem.write(addr + ITEM_FISHING_POLE, bytes([value]))
+        return True
+
     def fishing_gear(self, index: int | None = None) -> dict:
         """``{"rods": [(slot, power)], "baits": [(slot, power, stack)]}``.
 

@@ -284,3 +284,156 @@ def test_a_refilled_stack_is_logged_once_not_on_every_bait(qt_app, monkeypatch):
                     if "[fishing]" in ln]) == 2
     finally:
         w.close()
+
+
+# --- fishing power: raise it, and be able to put it back ----------------------
+
+@pytest.fixture
+def profile_tmp(tmp_path, monkeypatch):
+    from terrariabonker import profile
+
+    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
+    return profile
+
+
+def test_every_rod_carried_is_raised_and_its_original_recorded(profile_tmp):
+    m, svc, _ = _service({0: (2292, 1, 30, 0), 3: (GOLDEN_ROD, 1, 50, 0)})
+    got = svc.set_fishing_power(255)
+    assert [(c["slot"], c["was"], c["now"]) for c in got["changed"]] == [
+        (0, 30, 255), (3, 50, 255)]
+    assert m.read(ITEMS + 0 * 0x200 + ITEM_FISHING_POLE, 1)[0] == 255
+    assert profile_tmp.rod_powers_to_restore() == {2292: 30, GOLDEN_ROD: 50}
+
+
+def test_the_original_survives_a_second_switch_on(profile_tmp):
+    _, svc, _ = _service({0: (2292, 1, 30, 0)})
+    svc.set_fishing_power(255)
+    svc.set_fishing_power(200)
+    assert profile_tmp.rod_powers_to_restore() == {2292: 30}, "the original was lost"
+
+
+def test_restoring_puts_the_rod_back_and_clears_the_debt(profile_tmp):
+    m, svc, _ = _service({0: (2292, 1, 30, 0)})
+    svc.set_fishing_power(255)
+    got = svc.restore_fishing_power()
+    assert got["restored"] == [{"slot": 0, "type": 2292, "power": 30}]
+    assert m.read(ITEMS + 0 * 0x200 + ITEM_FISHING_POLE, 1)[0] == 30
+    assert profile_tmp.rod_powers_to_restore() == {}
+
+
+def test_a_rod_that_moved_slots_is_still_restored(profile_tmp):
+    """Restores are by item type. Spec 038 exists because slot-keyed restores lose a rod
+    the moment the player rearranges their inventory."""
+    m, svc, _ = _service({0: (2292, 1, 30, 0)})
+    svc.set_fishing_power(255)
+    # the player moves the rod from slot 0 to slot 12
+    for off, val in ((ITEM_TYPE, 0), (ITEM_STACK, 0)):
+        m.poke_i32(ITEMS + 0 * 0x200 + off, val)
+    m.write(ITEMS + 0 * 0x200 + ITEM_FISHING_POLE, bytes([0]))
+    m.poke_i32(ITEMS + 12 * 0x200 + ITEM_TYPE, 2292)
+    m.poke_i32(ITEMS + 12 * 0x200 + ITEM_STACK, 1)
+    m.write(ITEMS + 12 * 0x200 + ITEM_FISHING_POLE, bytes([255]))
+
+    got = svc.restore_fishing_power()
+    assert got["restored"] == [{"slot": 12, "type": 2292, "power": 30}]
+    assert m.read(ITEMS + 12 * 0x200 + ITEM_FISHING_POLE, 1)[0] == 30
+
+
+def test_restoring_with_nothing_owed_is_not_an_error(profile_tmp):
+    _, svc, _ = _service({0: (2292, 1, 30, 0)})
+    assert svc.restore_fishing_power() == {"restored": []}
+
+
+def test_a_rod_not_carried_at_restore_time_is_forgotten_not_kept(profile_tmp):
+    """Keeping the debt would re-apply an old power to a rod picked up months later."""
+    _, svc, _ = _service({0: (2292, 1, 30, 0)})
+    svc.set_fishing_power(255)
+    _, svc2, _ = _service({})                      # the rod is gone from the inventory
+    svc2.restore_fishing_power()
+    assert profile_tmp.rod_powers_to_restore() == {}
+
+
+def test_power_beyond_the_byte_is_refused(profile_tmp):
+    from terrariabonker.service import ServiceError
+
+    _, svc, _ = _service({0: (2292, 1, 30, 0)})
+    for bad in (0, 256, 1000):
+        with pytest.raises(ServiceError):
+            svc.set_fishing_power(bad)
+
+
+def test_the_ceiling_is_the_bytes_own_limit():
+    from terrariabonker import service as S
+
+    assert S.Service.MAX_FISHING_POWER == 255, "a byte cannot hold more"
+
+
+def test_the_original_is_recorded_before_the_rod_is_written(profile_tmp, monkeypatch):
+    """Order matters for the one case the persistence exists for. Dying between the two
+    steps must leave a spare record (harmless — it causes a restore that changes nothing)
+    rather than a raised rod with no record, whose real power would be gone for good."""
+    from terrariabonker import profile as prof
+
+    m, svc, _ = _service({0: (2292, 1, 30, 0)})
+
+    def boom(item_type, power):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(prof, "remember_rod_power", boom)
+    with pytest.raises(OSError):
+        svc.set_fishing_power(255)
+    assert m.read(ITEMS + 0 * 0x200 + ITEM_FISHING_POLE, 1)[0] == 30, \
+        "the rod was raised before its original was safely recorded"
+
+
+def test_switching_the_cheat_off_asks_for_the_rod_back(qt_app, monkeypatch):
+    """Rod power is the only thing on this tab written into the save. Leaving it raised
+    would make one cheat in a group of held effects quietly permanent."""
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
+    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
+
+    w = mw.MainWindow()
+    try:
+        sent = []
+        w.helper.available = True
+        monkeypatch.setattr(w.helper, "request",
+                            lambda argv, cb: (sent.append(list(argv)), True)[1])
+
+        w.sp_power.setValue(200)
+        w.cb_fishing.setChecked(True)
+        assert ["--power", "200"] == sent[-1][-2:], sent
+        w.cb_fishing.setChecked(False)
+        assert "--restore" in sent[-1], sent
+    finally:
+        w.close()
+
+
+def test_a_rod_left_raised_by_a_killed_trainer_is_put_back_on_the_next_start(
+        qt_app, monkeypatch):
+    """The reason the record is on disk rather than in memory."""
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: True)
+    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
+
+    sent = []
+    real = mw.MainWindow.refresh_patches
+
+    def spy(self):
+        self.helper.available = True
+        monkeypatch.setattr(self.helper, "request",
+                            lambda argv, cb: (sent.append(list(argv)), True)[1])
+        return real(self)
+
+    monkeypatch.setattr(mw.MainWindow, "refresh_patches", spy)
+    w = mw.MainWindow()
+    try:
+        assert any("--restore" in a for a in sent), sent
+    finally:
+        w.close()

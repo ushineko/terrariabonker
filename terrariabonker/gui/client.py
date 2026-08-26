@@ -152,6 +152,14 @@ def fishing_argv(keep: int = 30, kit: bool = True) -> list[str]:
     return argv
 
 
+def fishing_power_argv(power: int) -> list[str]:
+    return ["fishing", "--json", "--no-kit", "--power", str(power)]
+
+
+def fishing_restore_argv() -> list[str]:
+    return ["fishing", "--json", "--no-kit", "--restore"]
+
+
 def patch_status_argv() -> list[str]:
     return ["patch", "status", "--json"]
 
@@ -236,6 +244,7 @@ SAMPLE_ARGVS: list[list[str]] = [
     extract_recipes_argv(),
     potions_argv(), potions_argv(30),
     fishing_argv(), fishing_argv(50, kit=False),
+    fishing_power_argv(255), fishing_restore_argv(),
 ]
 
 

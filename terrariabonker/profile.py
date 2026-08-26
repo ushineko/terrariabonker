@@ -47,6 +47,11 @@ def load() -> dict:
     d.setdefault("cheats", {})       # name -> value (None for valueless)
     d.setdefault("item_edits", {})   # item type(str) -> {restorable field: value}
     d.setdefault("empty_slots", [])  # slots the user deliberately cleared
+    # Rod type(str) -> the fishing power it had before the cheat raised it (spec 042).
+    # Distinct from item_edits, which exists to RE-APPLY an edit after a restart; this is
+    # the opposite, a note to put something back. On disk rather than in memory because
+    # the hard case is the trainer being killed while the cheat is on.
+    d.setdefault("fishing_restore", {})
     return _migrate(d)
 
 
@@ -125,6 +130,32 @@ def clear_item(slot: int) -> None:
         if int(slot) not in d["empty_slots"]:
             d["empty_slots"].append(int(slot))
         _save(d)
+
+
+def remember_rod_power(item_type: int, power: int) -> None:
+    """Record a rod's original fishing power, once. Later calls do not overwrite it.
+
+    Overwriting would be the bug: switch the cheat on twice without an intervening
+    restore and the second call would record the *cheated* power as the original, so the
+    rod could never be put back.
+    """
+    with _locked():
+        d = load()
+        if str(int(item_type)) not in d["fishing_restore"]:
+            d["fishing_restore"][str(int(item_type))] = int(power)
+            _save(d)
+
+
+def rod_powers_to_restore() -> dict:
+    """``{item type (int): original power}`` still owed a restore."""
+    return {int(k): int(v) for k, v in load().get("fishing_restore", {}).items()}
+
+
+def forget_rod_power(item_type: int) -> None:
+    with _locked():
+        d = load()
+        if d["fishing_restore"].pop(str(int(item_type)), None) is not None:
+            _save(d)
 
 
 def cheats() -> dict:

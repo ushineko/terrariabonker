@@ -82,7 +82,7 @@ holds no state.*
 | [Vanity accessories](#working-vanity-accessories) | the seven vanity slots grant their effects |
 | Accessories from inventory | accessories work without being equipped |
 | [Passive potions](#passive-potions) | favorite a potion and its effect stays up |
-| [Fishing](#fishing) | a rod and bait if you have none, and bait that lasts |
+| [Fishing](#fishing) | a rod, bait that lasts, and fish that bite at once |
 
 ### Passive potions
 
@@ -103,6 +103,11 @@ Switch it on and you get a fishing rod and bait if you have none, and your bait 
 running out — any stack below the number beside the toggle is topped back up as you fish.
 
 It leaves gear you already own alone: your own rod is the one you chose, so it stays.
+
+**Rod power** is the other half. Every rod you carry is raised to the number you set, and
+put back to what it was when you switch the cheat off — including after a crash, because
+the original is written down rather than remembered. Power is also what makes fish bite:
+at 255 they bite roughly once a second, where a starting rod can leave you waiting.
 
 **Fish in a lake, not a puddle.** Water smaller than about 300 tiles cuts your fishing
 power sharply, and a tiny pond costs you most of it — that is the game's own rule, not

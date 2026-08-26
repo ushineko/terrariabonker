@@ -18,11 +18,12 @@ Three related cheats behind one group, because nobody wants one of them on its o
       gives a Golden Fishing Rod and 30 Master Bait; unit-tested, not yet run in-game.)*
 - [x] Bait never runs out while the cheat is on. *(Any stack below the configured floor
       is topped back up to it; every low stack in one round, not just the first.)*
-- [ ] Fishing power is a tunable, and the rod in hand reports the configured number.
+- [x] Fishing power is a tunable, and every rod carried is raised to it. *(Ceiling 255,
+      the byte's own limit; the maintainer chose to ship that rather than 125.)*
 - [ ] At the configured power, bites come fast enough to be worth calling instant —
       measured, not asserted, against the same rod at its normal power.
-- [ ] Switching the cheat off restores normal fishing — the wait comes back and bait is
-      consumed again — with the game still running.
+- [x] Switching the cheat off restores the rod's original power, with the game still
+      running, and a rod left raised by a killed trainer is put back on the next start.
 - [x] Nothing is given twice, and a rod the player already carries is left alone.
 - [x] The cheat never overwrites a slot holding something else. *(`give_item` picks a
       free slot from the live inventory, which is the fix from the earlier data loss.)*

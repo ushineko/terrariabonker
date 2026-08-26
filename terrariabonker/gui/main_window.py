@@ -221,6 +221,10 @@ class MainWindow(QWidget):
         self._vein_inflight = False
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
+        # A rod left raised by a trainer that was killed with the cheat on: the record is
+        # on disk precisely so this can be put right on the next start.
+        if self.helper.available:
+            self.helper.request(client.fishing_restore_argv(), self._said_restored)
         self._check_sudo()
 
     def _check_sudo(self):
@@ -389,6 +393,13 @@ class MainWindow(QWidget):
         self.sp_bait.setToolTip(uitext.wrap(
             "Any bait stack below this is topped back up to it."))
         fb2.addWidget(self.sp_bait)
+        fb2.addWidget(QLabel("Rod power"))
+        self.sp_power = self._spin(1, 255, 255)
+        self.sp_power.setToolTip(uitext.wrap(
+            "Every rod you carry is raised to this while the cheat is on, and put back "
+            "to what it was when you switch it off. High power is also what makes fish "
+            "bite quickly — at 255 they bite about once a second."))
+        fb2.addWidget(self.sp_power)
         fb2.addStretch()
         col.addWidget(fishing_box)
 
@@ -782,14 +793,35 @@ class MainWindow(QWidget):
             self._fishing_inflight = False
 
     def _set_fishing_watch(self, on: bool):
-        """Nothing to undo on the way out: the bait you have is yours to keep."""
+        """The bait you have is yours to keep — but a raised rod must be put back.
+
+        Everything else on this tab evaporates when the trainer closes. Rod power is the
+        one thing here that is written into the save, so switching off restores it rather
+        than leaving one permanent change behind.
+        """
         if on and not self._fishing_timer.isActive():
             self._fishing_kit_done = False
             self._fishing_said.clear()
             self._fishing_timer.start(1000)
+            self.helper.request(client.fishing_power_argv(self.sp_power.value()),
+                                lambda _out: None)
         elif not on and self._fishing_timer.isActive():
             self._fishing_timer.stop()
             self._fishing_inflight = False
+            self.helper.request(client.fishing_restore_argv(), self._said_restored)
+
+    def _said_restored(self, raw: str):
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                got = json.loads(line)
+            except ValueError:
+                continue
+            for d in (got.get("restore") or {}).get("restored", []):
+                self.log.appendPlainText(
+                    f"[fishing] rod in slot {d['slot']} back to power {d['power']}")
 
     def _set_potion_watch(self, on: bool):
         """Nothing to disarm on the way out: stop renewing and the buffs expire.

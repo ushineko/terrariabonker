@@ -908,6 +908,59 @@ class Service:
                 "baits": [{"slot": s, "power": p, "stack": n}
                           for s, p, n in after["baits"]]}
 
+    #: The ceiling on the tunable. The published bite *chance* stops improving at 125,
+    #: but the counter that decides how often a bite is rolled scales with power and is
+    #: not obviously capped — 255 measurably out-fished what a 125 cap would allow. 255 is
+    #: also the field's own limit: it is a byte, and 256 would wrap to nothing.
+    MAX_FISHING_POWER = 255
+
+    def set_fishing_power(self, power: int) -> dict:
+        """Raise every rod carried to ``power``, recording what each was first.
+
+        The original goes to disk before the new value is written, not after: if this
+        process dies between the two, a missing record loses the rod's real power forever
+        while a spare record only causes a harmless restore.
+        """
+        from terrariabonker import profile
+
+        if not 1 <= power <= self.MAX_FISHING_POWER:
+            raise ServiceError(f"fishing power must be 1..{self.MAX_FISHING_POWER}")
+        inv = self._live_inventory()
+        changed = []
+        for slot, was in inv.fishing_gear()["rods"]:
+            if was == power:
+                continue
+            item_type = inv.read_slot(slot).type
+            profile.remember_rod_power(item_type, was)
+            inv.set_fishing_power(slot, power)
+            changed.append({"slot": slot, "type": item_type, "was": was, "now": power})
+        return {"power": power, "changed": changed}
+
+    def restore_fishing_power(self) -> dict:
+        """Put every rod back to the power it had. Safe to call when nothing is owed.
+
+        Restores by item **type**, not slot: a rod that has been moved since the cheat was
+        switched on is still the same rod, and spec 038 exists because slot-keyed restores
+        lose track of exactly that.
+        """
+        from terrariabonker import profile
+
+        owed = profile.rod_powers_to_restore()
+        if not owed:
+            return {"restored": []}
+        inv = self._live_inventory()
+        by_slot = {s: inv.read_slot(s).type for s, _ in inv.fishing_gear()["rods"]}
+        done = []
+        for slot, item_type in by_slot.items():
+            if item_type in owed:
+                inv.set_fishing_power(slot, owed[item_type])
+                done.append({"slot": slot, "type": item_type, "power": owed[item_type]})
+        # Forget every owed rod, including any not carried right now: keeping it would
+        # re-apply an old power to a rod picked up again much later.
+        for item_type in owed:
+            profile.forget_rod_power(item_type)
+        return {"restored": done, "forgotten": sorted(owed)}
+
     def bait_tick(self, *, keep: int = 30) -> dict:
         """Top any bait stack below ``keep`` back up to it. One round.
 
