@@ -43,9 +43,11 @@ Checked items were verified against the running game on 1.4.5.8, not only in tes
       one the player carried favorited, so the `kept` path itself was not exercised live.
       Needs: drink a potion you also carry favorited, and confirm the round reports `kept`
       and the long duration survives.
-- [ ] Non-consumables are inert: a favorited pet, light pet or mount item does nothing,
-      even though it carries a `buffType`. Unit-tested; no favorited pet has been tried
-      in-game.
+- [x] Non-consumables are inert: a favorited pet, light pet or mount item does nothing,
+      even though it carries a `buffType`. *(A favorited Slime Staff carrying buff 64 and
+      reading `consumable=0` was present in the bag throughout: the round skipped it while
+      taking the ten potions beside it, and buff 64 never appeared in the buff array. The
+      gate was exercised, not merely unreached.)*
 - [x] Works from the CLI and the trainer panel, sharing one implementation. *(The panel
       calls the same single round the CLI does — `potions --json --min-stack N` — driven
       from a 250ms timer, since the worker must not block.)*
