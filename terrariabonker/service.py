@@ -877,6 +877,54 @@ class Service:
             w.close()
         return {"stopped": w is not None}
 
+    # --- passive potions (spec 041) ---------------------------------------
+
+    def potion_tick(self, *, min_stack: int = 1, ticks: int | None = None) -> dict:
+        """Renew the buff of every favorited potion in the inventory. One round.
+
+        Stateless on purpose, unlike the vein watcher: there is nothing to remember
+        between rounds, and re-reading the inventory each time is what makes favoriting a
+        potion take effect immediately rather than at the next rescan.
+        """
+        from terrariabonker import buffs as B
+
+        want = B.DEFAULT_TICKS if ticks is None else ticks
+        inv = self._live_inventory()
+        bar = B.Buffs(self.mem, self.live_block().life_addr)
+        out: dict[str, list] = {"added": [], "renewed": [], "kept": [], "full": []}
+        for slot, buff in inv.favorited_potions(min_stack):
+            out[bar.renew(buff, want)].append({"slot": slot, "buff": buff})
+        return {"ticks": want, "min_stack": min_stack,
+                "carried": sum(len(v) for v in out.values()), **out}
+
+    def watch_potions(self, *, min_stack: int = 1, ticks: int | None = None,
+                      interval: float = 0.25, rounds: int | None = None,
+                      on_event=None) -> dict:
+        """Keep the buffs of favorited potions renewed. Blocking; the GUI uses a timer.
+
+        ``interval`` must stay well under the buff time or the buff lapses between rounds
+        and the player sees it flicker.
+        """
+        import time
+
+        from terrariabonker import buffs as B
+
+        want = B.DEFAULT_TICKS if ticks is None else ticks
+        if interval * 60 >= want:
+            raise ServiceError(
+                f"a {interval}s interval cannot hold a {want}-tick buff up — "
+                f"the buff would lapse between rounds")
+        n, seen = 0, 0
+        while rounds is None or n < rounds:
+            n += 1
+            r = self.potion_tick(min_stack=min_stack, ticks=want)
+            if r["added"] or r["renewed"]:
+                seen += len(r["added"]) + len(r["renewed"])
+                if on_event:
+                    on_event(r)
+            time.sleep(interval)
+        return {"rounds": n, "applied": seen}
+
     def frames_advancing(self, window: float = 0.08) -> bool:
         """Is the game actually simulating, or merely open?
 

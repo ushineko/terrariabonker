@@ -3,7 +3,8 @@
 import struct
 
 from terrariabonker.inventory import (ARR_DATA_OFF, ARR_LEN_OFF, INVENTORY_PTR_OFF,
-                                      ITEM_DAMAGE, ITEM_PICK, ITEM_STACK, ITEM_TYPE,
+                                      ITEM_BUFF_TYPE, ITEM_CONSUMABLE, ITEM_DAMAGE,
+                                      ITEM_FAVORITED, ITEM_PICK, ITEM_STACK, ITEM_TYPE,
                                       ITEM_USE_ANIM, ITEM_USE_TIME, Inventory)
 
 BASE = 0x30000000
@@ -107,3 +108,68 @@ def test_make_fast_mining_only_touches_pickaxes():
     assert hit == [0]
     assert inv.read_slot(0).use_time == 8 and inv.read_slot(0).pick == 200
     assert inv.read_slot(1).use_time == 10   # dirt untouched
+
+
+# --- passive potions: which items qualify (spec 041) ---------------------------
+
+def _potions(items):
+    """items: (type, stack, favorited, consumable, buffType) per slot."""
+    from conftest import FakeMem
+    m = FakeMem(BASE, 0x8000)
+    m.write(LIFE + INVENTORY_PTR_OFF, struct.pack("<I", ARR))
+    m.poke_i32(ARR + ARR_LEN_OFF, len(items))
+    for i, (t, st, fav, cons, buff) in enumerate(items):
+        addr = ITEMS + i * 0x200
+        m.write(ARR + ARR_DATA_OFF + i * 4, struct.pack("<I", addr))
+        m.poke_i32(addr + ITEM_TYPE, t)
+        m.poke_i32(addr + ITEM_STACK, st)
+        m.write(addr + ITEM_FAVORITED, bytes([fav]))
+        m.write(addr + ITEM_CONSUMABLE, bytes([cons]))
+        m.poke_i32(addr + ITEM_BUFF_TYPE, buff)
+    return m
+
+
+IRONSKIN = (292, 4, 1, 1, 5)          # favorited, consumable, grants buff 5
+
+
+def test_a_favorited_consumable_with_a_buff_qualifies():
+    m = _potions([IRONSKIN])
+    assert Inventory(m, LIFE).favorited_potions() == [(0, 5)]
+
+
+def test_an_unfavorited_potion_never_qualifies():
+    """The whole point of the favorite gate: potions you pick up must stay inert, however
+    large the stack."""
+    m = _potions([(292, 999, 0, 1, 5)])
+    assert Inventory(m, LIFE).favorited_potions() == []
+
+
+def test_a_favorited_pet_is_inert_because_it_is_not_consumable():
+    """Pets, light pets and mounts all carry a buffType. Summoning a pet because it was
+    in the bag is not what "passive potions" means."""
+    m = _potions([(1927, 1, 1, 0, 40)])
+    assert Inventory(m, LIFE).favorited_potions() == []
+
+
+def test_a_stack_below_the_threshold_does_not_qualify():
+    m = _potions([IRONSKIN])
+    inv = Inventory(m, LIFE)
+    assert inv.favorited_potions(min_stack=4) == [(0, 5)]
+    assert inv.favorited_potions(min_stack=5) == []
+
+
+def test_a_favorited_consumable_with_no_buff_is_skipped():
+    """Most consumables are food or ammo, not potions, and carry no buff."""
+    m = _potions([(40, 500, 1, 1, 0)])
+    assert Inventory(m, LIFE).favorited_potions() == []
+
+
+def test_every_qualifying_potion_is_reported_not_just_the_first():
+    m = _potions([IRONSKIN, (292, 1, 0, 1, 5), (290, 6, 1, 1, 3), (302, 6, 1, 1, 15)])
+    assert Inventory(m, LIFE).favorited_potions() == [(0, 5), (2, 3), (3, 15)]
+
+
+def test_an_empty_slot_is_skipped_without_reading_through_a_null():
+    m = _potions([IRONSKIN, (0, 0, 0, 0, 0)])
+    m.write(ARR + ARR_DATA_OFF + 1 * 4, struct.pack("<I", 0))
+    assert Inventory(m, LIFE).favorited_potions() == [(0, 5)]

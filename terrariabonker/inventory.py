@@ -15,6 +15,7 @@ Offsets are for Terraria 1.4.5.7. See docs/discovery.md.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 
 INVENTORY_PTR_OFF = -0x664      # Player field holding the Item[] pointer, from statLife
@@ -148,6 +149,42 @@ class Inventory:
     def find_type(self, item_type: int) -> list[int]:
         """Indices of slots holding the given ItemID."""
         return [s.index for s in self.slots() if s.type == item_type]
+
+    # The four fields passive potions (spec 041) care about span 0x70..0x134, so one read
+    # per item covers all of them. Four separate reads would be four syscalls per slot and
+    # this runs on a timer several times a second.
+    _POTION_LO = ITEM_FAVORITED
+    _POTION_HI = ITEM_BUFF_TYPE + 4
+
+    def favorited_potions(self, min_stack: int = 1) -> list[tuple[int, int]]:
+        """``(slot index, buff type)`` for each favorited consumable carrying a buff.
+
+        The favorite is the player's opt-in: without it, every potion picked up would
+        start doing something. ``consumable`` is what keeps pets, light pets and mounts
+        out -- they carry a ``buffType`` too, and summoning a pet because it was in the
+        bag is not what anyone means by a potion.
+        """
+        out: list[tuple[int, int]] = []
+        arr = self.array_addr()
+        if arr is None:
+            return out
+        lo, width = self._POTION_LO, self._POTION_HI - self._POTION_LO
+        for i in range(INVENTORY_SLOTS):
+            addr = self.mem.read_u32(arr + ARR_DATA_OFF + i * 4)
+            if not addr:
+                continue
+            try:
+                w = self.mem.read(addr + lo, width)
+            except OSError:
+                continue
+            if not w[ITEM_FAVORITED - lo] or not w[ITEM_CONSUMABLE - lo]:
+                continue                       # the two cheap byte gates first
+            if struct.unpack_from("<i", w, ITEM_STACK - lo)[0] < min_stack:
+                continue
+            buff = struct.unpack_from("<i", w, ITEM_BUFF_TYPE - lo)[0]
+            if buff > 0:
+                out.append((i, buff))
+        return out
 
     def nonempty_count(self) -> int:
         """How many slots hold a real item.
