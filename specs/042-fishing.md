@@ -49,6 +49,10 @@ v0.2.2 by copying a ContentSamples template into a free slot, and it is what the
 compendium's spawn button uses. The kit is a Golden Fishing Rod (2294) and a stack of a
 50-power bait — Master Bait (2676) or Gold Worm (2895).
 
+**Sources for the mechanic** (not derived here — read from the community wiki and used to
+explain measurements taken in-game):
+<https://terraria.wiki.gg/wiki/Fishing>
+
 ## Requirements
 
 - **Give nothing the player already has.** Check for a rod (`fishingPole != 0`) and for
@@ -79,14 +83,33 @@ Confirmed at a pond on 1.4.5.8+24893155:
 - **A catch needs the player to reel in.** That bounds any "insta-fishing" claim: the rate
   is limited by clicking, not only by the game's willingness to give a bite.
 
-Not established, and deliberately not claimed:
+**Fishing power drives the bite rate — settled.** The maintainer watched it: bites came
+about once a second at power 255, against a trickle at 30. The published mechanic explains
+both numbers exactly, and corrects a wrong call made here.
 
-- **Whether fishing power perceptibly changes the bite rate.** 4 catches in 60s at power
-  255, against no controlled baseline — and the manual reel-in confounds it. Settling this
-  needs an A/B of equal length with the same fishing cadence, at 30 and at 255.
-- **Which field holds the wait or bite state.** The cycle at `+0x078`/`+0x0B4`/`+0x100`/
-  `+0x128` repeats every 4–5 seconds whether or not a fish is interested, so it reads as
-  idle bobbing rather than a bite.
+There is a hidden **catch counter** that counts *up*. Per tick it gains 1–2 (base), plus
+`fishingPower / 30`, plus a `(fishingPower / 3)%` chance of another 1–2, plus a 1-in-60
+chance of +60. When it passes **660** a bite is rolled at `(75 + fishingPower) / 2` percent,
+and the counter resets either way.
+
+| Power | Counter gain/tick | Time to 660 | Observed |
+|---|---|---|---|
+| 30 | ~2.5 | ~4.4 s | the 4–5 s cycle seen in the bobber fields |
+| 255 | ~10 | ~1.1 s | "a bite each second" |
+
+That cycle at `+0x078`/`+0x0B4`/`+0x100`/`+0x128` was written off here as idle bobbing. It
+almost certainly *was* the counter cycling, and the arithmetic says so. The reason the
+probe missed it is that it searched for a field counting **down**; nothing here does.
+
+Still open, but now a narrow question rather than a vague one:
+
+- **Where the catch counter lives.** It did not appear in the bobber's first 0x200 bytes,
+  so look on the Player for a value ramping 0 → 660 and resetting. Holding it above 660 is
+  what "insta-fishing" would actually mean.
+- **Whether the game clamps fishing power before using it.** The published bite *chance*
+  caps at 125 (which is 100%), but the counter term is `power / 30` and is not obviously
+  capped — the 255 result suggests it is not, since 255 behaved faster than 125 would
+  predict. Worth confirming before the tunable's ceiling is chosen.
 
 ### Two broken instruments, recorded because both nearly became findings
 
@@ -136,6 +159,14 @@ unexpected pre-value as a reason to abort, not a value to record.
   so nothing restores the rod and the original is lost. Persist the recorded value rather
   than holding it in memory, and restore any pending entry on the next start.
 - **A byte field caps the tunable at 255.** Higher is not "more"; it wraps.
+- **Lake size is a bigger lever than the cheat.** A body of water under 300 tiles is
+  penalised multiplicatively, and a 75-tile pond takes roughly −75%. A player fishing in a
+  puddle will see a fraction of what the configured power promises, so the README must say
+  where to fish rather than let the cheat look broken.
+- **Bait power lowers how often bait is consumed**, so a high-power bait is worth giving in
+  the kit for its own sake, independently of pinning the stack.
+- **One catch in seven is lost to a line break** without the right accessory, and the bait
+  is consumed anyway. Not a bug in the cheat when it happens.
 - **Rollback**: no patching, so nothing to restore in the game's code. Given items and an
   edited rod are the exceptions, per the point above.
 - ~~**Assumption**: bait is consumed by decrementing the stack.~~ Measured; see above.
