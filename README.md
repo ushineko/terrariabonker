@@ -14,7 +14,7 @@ side in order to re-derive patch offsets after a game update. See
 *This edits your own single-player game in memory. It writes nothing to disk and
 holds no state.*
 
-![Effects tab: the freezes for godmode and infinite mana, and passive potions switched on with a minimum stack size of 1, above a note that these need the trainer running while the Patches tab keeps working until the game restarts](assets/screenshot-effects.png)
+![Effects tab: the freezes for godmode and infinite mana; a Fishing group switched on with bait kept at 30 and rod power 255; and passive potions switched on with a minimum stack of 1 — above a note that these need the trainer running while the Patches tab keeps working until the game restarts](assets/screenshot-effects.png)
 
 ![Patches tab: the Build group of code patches, all ticked, with their per-patch values — mining speed, placement reach, multiple pylons, fast placement, tool and interaction reach, smart-cursor radius, and the ore extractor set to sweep ores and gems](assets/screenshot-patches.png)
 
