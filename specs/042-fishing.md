@@ -9,7 +9,8 @@ Three related cheats behind one group, because nobody wants one of them on its o
 1. **Set me up to fish** — if you have no rod, you get one; if you have no bait, you get
    some. Fish anywhere without having gone shopping first.
 2. **Fishing power** — a configurable number rather than whatever your rod happens to be.
-3. **Insta-fishing** — the bobber catches at once instead of waiting for a nibble.
+3. ~~**Insta-fishing**~~ — folded into (2). Bites come about once a second at high
+   fishing power, so it is the same lever, not a second one. See the recon below.
 
 ## Acceptance criteria
 
@@ -18,7 +19,8 @@ Three related cheats behind one group, because nobody wants one of them on its o
 - [x] Bait never runs out while the cheat is on. *(Any stack below the configured floor
       is topped back up to it; every low stack in one round, not just the first.)*
 - [ ] Fishing power is a tunable, and the rod in hand reports the configured number.
-- [ ] Insta-fishing: a cast produces a catch without the usual wait, repeatedly.
+- [ ] At the configured power, bites come fast enough to be worth calling instant —
+      measured, not asserted, against the same rod at its normal power.
 - [ ] Switching the cheat off restores normal fishing — the wait comes back and bait is
       consumed again — with the game still running.
 - [x] Nothing is given twice, and a rod the player already carries is left alone.
@@ -66,8 +68,8 @@ explain measurements taken in-game):
   offer a number that silently truncates.
 - **Bait**: hold the stack at what it was, the same shape as the potion renewal. Do not
   write when the stack has not dropped.
-- **Insta-fishing**: find the live bobber in `Main.projectile` (`bobber` set, and active)
-  and clear whatever holds its remaining wait. One write per bobber per round.
+- **No separate insta-fishing path.** Bite rate follows fishing power; there is nothing
+  else to write.
 
 ## Live recon, 2026-08-25
 
@@ -103,15 +105,32 @@ That cycle at `+0x078`/`+0x0B4`/`+0x100`/`+0x128` was written off here as idle b
 almost certainly *was* the counter cycling, and the arithmetic says so. The reason the
 probe missed it is that it searched for a field counting **down**; nothing here does.
 
-Still open, but now a narrow question rather than a vague one:
+**The counter was hunted and not found, and no longer needs to be.** Three probes at a
+proper lake:
 
-- **Where the catch counter lives.** It did not appear in the bobber's first 0x200 bytes,
-  so look on the Player for a value ramping 0 → 660 and resetting. Holding it above 660 is
-  what "insta-fishing" would actually mean.
+- The Player object across `statLife ± 0x1200`, scanned for any int that climbs and
+  resets: one candidate at `statLife-0x49C`, ruled out because it keeps ticking with no
+  line in the water (126 changes in 20 s). It is a general timer, and the apparent
+  correlation came only from the bobber happening to be out the whole time.
+- The bobber across its first `0x600` bytes, as **int and as float**: nothing climbs and
+  resets at all.
+
+So it is not a simple ramping value in either object, and the search would have to move to
+Main's statics next. That work is unnecessary, because **insta-fishing and fishing power
+are the same lever**: the maintainer measured about a bite a second at power 255 against a
+trickle at 30, which is what the published counter formula predicts. There is no second
+mechanism to find.
+
+**Insta-fishing is therefore folded into the fishing-power tunable** rather than shipped as
+its own toggle. Two switches implying two mechanisms would be a distinction the game does
+not have.
+
+Still open:
+
 - **Whether the game clamps fishing power before using it.** The published bite *chance*
   caps at 125 (which is 100%), but the counter term is `power / 30` and is not obviously
-  capped — the 255 result suggests it is not, since 255 behaved faster than 125 would
-  predict. Worth confirming before the tunable's ceiling is chosen.
+  capped — the 255 result behaved faster than a 125 cap would allow. This decides whether
+  the tunable's ceiling is 125 or 255, and is answerable with an A/B at those two values.
 
 ### Two broken instruments, recorded because both nearly became findings
 
