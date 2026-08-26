@@ -425,12 +425,15 @@ class MainWindow(QWidget):
             col.addWidget(box)
         col.addStretch()
         area.setWidget(inner)
-        # The grid's natural size governs the window minimum, so the full 10-column
-        # layout shows without a horizontal scrollbar and without hand-resizing.
+        # Width only. Pinning the width keeps the full 10-column layout visible without a
+        # horizontal scrollbar, which is what this was for. Pinning the *height* as well
+        # made the grid's full height the minimum for the whole window -- and since a tab
+        # strip is as tall as its tallest page, every other tab inherited it and sat above
+        # several hundred pixels of nothing. The grid scrolls vertically instead; the
+        # window remembers whatever height it is given.
         inner.adjustSize()
         sh = inner.sizeHint()
         area.setMinimumWidth(sh.width() + 6)
-        area.setMinimumHeight(sh.height() + 6)
         ov.addWidget(area, 1)
         return outer
 

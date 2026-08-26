@@ -290,3 +290,27 @@ def test_the_potions_checkbox_drives_the_renewal_timer(app, monkeypatch):
         assert not w._potion_timer.isActive()
     finally:
         w.close()
+
+
+def test_the_inventory_grid_does_not_set_the_window_minimum_height(app, monkeypatch):
+    """A tab strip is as tall as its tallest page. Pinning the grid's full height as a
+    minimum therefore set the floor for the whole window, and the short tabs sat above
+    several hundred pixels of nothing. The width pin stays — that is what keeps all ten
+    columns visible without a horizontal scrollbar."""
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
+    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
+
+    w = mw.MainWindow()
+    try:
+        page = w.tab_inventory
+        assert page.minimumSizeHint().height() < page.sizeHint().height() / 2, (
+            "the inventory page still demands its whole natural height as a minimum, so "
+            "every other tab inherits it")
+        assert page.minimumSizeHint().width() >= page.sizeHint().width(), (
+            "the width pin is gone — the grid would get a horizontal scrollbar")
+    finally:
+        w.close()
