@@ -74,9 +74,12 @@ This stub calls nothing.
 
 **Two constants to derive at build time**, neither of which is known yet:
 
-- `USE_OFF` as an offset from the **Player object base**, not from `statLife`. Recon found
-  it at `statLife-0x00c6`; the stub will hold the Player pointer, so this must be
-  re-expressed against that base and checked, not assumed to be the same number.
+- ~~`USE_OFF`~~ **Confirmed 2026-08-26: `Player + 0x672`.** It resolves to exactly
+  `statLife-0x00c6` on the live object, so the arithmetic holds against the game and not
+  only on paper, and it is an input control by the cheap discriminator: resting value 0,
+  and a written 1 wiped by the game in 4.9–20.6 ms across five trials — one frame at
+  60 fps. The liveness gate was run first and passed, so this is not spec 042's
+  paused-game result.
 - The hook site. `ore_extract` already occupies the `GrabItems` call inside `Player.Update`,
   and two jumps at one site is the thing to avoid, so this needs its own per-frame site
   where the Player is reachable.
@@ -104,6 +107,28 @@ This stub calls nothing.
   own reel-ins: six seen dips, six clicks, the signal already raised on all six and never
   raised without a real catch behind it. Offsets and measurements are in spec 042, "The
   bite signal, settled".
+
+## The whole cheat, proven with the poller — 2026-08-26
+
+Before building the stub, auto-catch was run end to end from the unprivileged side, to
+establish that the only thing left to fix is precision.
+
+Detect a bite with `terrariabonker/projectiles.py`, burst on `Player + 0x672` for 20 ms,
+count the fish:
+
+```
+bite: Bass (2290)   8208 writes in 20 ms
+  Bass: 5 -> 6   (delta +1)
+```
+
+Hands off the mouse, a controlled before/after count, one fish. An earlier run watched the
+pull path claim the bobber (`ai[0]` 0 → 1) within 50 ms of the burst.
+
+**And the precision problem was measured in the same session.** That earlier burst took
+the water from **one bobber to three**: it caught the fish and re-cast twice, because every
+frame the burst spanned is its own press. This is exactly the failure this spec predicted
+from the bobber's mid-arc behaviour, now with a number on it. The capability is not in
+doubt; the count of presses is, and that is what the stub fixes.
 
 ## Alternatives considered
 
