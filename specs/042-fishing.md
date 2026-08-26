@@ -71,6 +71,13 @@ compendium's spawn button uses. The kit is a Golden Fishing Rod (2294) and a sta
   the same differential that found the buff arrays, and it has the same trap — a sample
   taken while the game is paused shows nothing moving and proves nothing, so the probe
   must carry its own liveness control.
+- **Whether a player-side fishing field exists, which would make the item edit
+  unnecessary.** If the player carries a fishing-power value that the game recomputes each
+  frame from rod and bait, pinning it is a held effect that evaporates on its own — exactly
+  how the potion buffs behave — and then nothing touches the save, the restore bookkeeping
+  above disappears, and the byte cap on the tunable goes with it. **Check this before
+  building the record-and-restore path**, because it would be work done to solve a problem
+  that need not exist. The item edit is the fallback, not the first choice.
 - **Whether the catch is worth influencing separately.** Fishing power decides quality;
   insta-fishing decides speed. If they turn out to be the same field in practice, the two
   toggles should be merged rather than shipped as a distinction that is not real.
@@ -80,12 +87,17 @@ compendium's spawn button uses. The kit is a Golden Fishing Rod (2294) and a sta
 
 ## Risks & Assumptions
 
-- **Item edits persist.** Writing fishing power to a rod changes an item in the player's
-  save, unlike everything else in this cheat. That is how the existing item editor already
-  behaves, and `profile.py` restores such edits — but it means "switch it off" does not
-  put the rod's original power back unless we record it. Decide before building: either
-  record and restore the original value, or say plainly in the README that the rod stays
-  upgraded.
+- **Item edits persist, so the original power is recorded and restored** (maintainer's
+  decision). A group sitting under "Effects" must not quietly leave one permanent change
+  behind; everything else there evaporates when the trainer closes, and this has to match.
+
+  Note that `profile.py`'s `item_edits` is the **wrong** mechanism: it exists to
+  *re-apply* an edit after a game restart, which is the opposite intent. This needs its own
+  record of the pre-cheat value.
+
+  The bookkeeping has one hard case: the trainer is closed or killed while the cheat is on,
+  so nothing restores the rod and the original is lost. Persist the recorded value rather
+  than holding it in memory, and restore any pending entry on the next start.
 - **A byte field caps the tunable at 255.** Higher is not "more"; it wraps.
 - **Rollback**: no patching, so nothing to restore in the game's code. Given items and an
   edited rod are the exceptions, per the point above.
