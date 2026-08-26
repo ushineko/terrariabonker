@@ -213,6 +213,10 @@ class MainWindow(QWidget):
         self._potion_timer.timeout.connect(self._tick_potions)
         self._potion_inflight = False
         self._potion_said: set = set()      # buffs already logged, so the log is not spam
+        self._fishing_timer = QTimer(self)
+        self._fishing_timer.timeout.connect(self._tick_fishing)
+        self._fishing_inflight = False
+        self._fishing_kit_done = False
         self._vein_inflight = False
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
@@ -368,6 +372,24 @@ class MainWindow(QWidget):
         fb.addWidget(self.cb_mana)
         fb.addStretch()
         col.addWidget(freeze_box)
+
+        fishing_box = QGroupBox("Fishing")
+        fb2 = QHBoxLayout(fishing_box)
+        self.cb_fishing = QCheckBox("Rod and bait, and bait that does not run out")
+        self.cb_fishing.setToolTip(uitext.wrap(
+            "Hands you a rod and bait if you have none — it leaves your own gear alone — "
+            "and tops any bait stack back up as you fish. Fish in a lake rather than a "
+            "puddle: water under 300 tiles cuts fishing power hard, and a tiny pond costs "
+            "you most of it."))
+        self.cb_fishing.toggled.connect(self._set_fishing_watch)
+        fb2.addWidget(self.cb_fishing)
+        fb2.addWidget(QLabel("Keep bait at"))
+        self.sp_bait = self._spin(1, 999, 30)
+        self.sp_bait.setToolTip(uitext.wrap(
+            "Any bait stack below this is topped back up to it."))
+        fb2.addWidget(self.sp_bait)
+        fb2.addStretch()
+        col.addWidget(fishing_box)
 
         potion_box = QGroupBox("Passive potions")
         pb = QHBoxLayout(potion_box)
@@ -721,6 +743,46 @@ class MainWindow(QWidget):
         argv = client.potions_argv(self.sp_potion_stack.value())
         if not self.helper.request(argv, done):
             self._potion_inflight = False
+
+    def _tick_fishing(self):
+        """One bait round. The kit is asked for on the first round only: after that the
+        service would find gear and do nothing anyway, and this saves the round trip."""
+        if not self.helper.available or self._fishing_inflight:
+            return
+        self._fishing_inflight = True
+        want_kit = not self._fishing_kit_done
+
+        def done(raw: str):
+            self._fishing_inflight = False
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    got = json.loads(line)
+                except ValueError:
+                    continue
+                for what, e in (got.get("kit") or {}).get("gave", {}).items():
+                    self.log.appendPlainText(
+                        f"[fishing] gave you a {what} (slot {e['slot']})")
+                self._fishing_kit_done = True
+                for t in (got.get("bait") or {}).get("topped", []):
+                    self.log.appendPlainText(
+                        f"[fishing] bait topped up: slot {t['slot']} "
+                        f"{t['was']} -> {t['now']}")
+
+        argv = client.fishing_argv(self.sp_bait.value(), kit=want_kit)
+        if not self.helper.request(argv, done):
+            self._fishing_inflight = False
+
+    def _set_fishing_watch(self, on: bool):
+        """Nothing to undo on the way out: the bait you have is yours to keep."""
+        if on and not self._fishing_timer.isActive():
+            self._fishing_kit_done = False
+            self._fishing_timer.start(1000)
+        elif not on and self._fishing_timer.isActive():
+            self._fishing_timer.stop()
+            self._fishing_inflight = False
 
     def _set_potion_watch(self, on: bool):
         """Nothing to disarm on the way out: stop renewing and the buffs expire.

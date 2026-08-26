@@ -1,6 +1,6 @@
 # Spec 042: Fishing — a kit, bait that never runs out, and no waiting
 
-**Status**: INCOMPLETE
+**Status**: INCOMPLETE — the kit and the bait top-up are built and unit-tested; fishing power and insta-fishing are not started, and nothing is verified in-game yet.
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -13,17 +13,19 @@ Three related cheats behind one group, because nobody wants one of them on its o
 
 ## Acceptance criteria
 
-- [ ] With no rod and no bait, switching the cheat on leaves you able to fish.
-- [ ] Bait never runs out while the cheat is on: the stack does not drop, however many
-      casts are made.
+- [x] With no rod and no bait, switching the cheat on leaves you able to fish. *(The kit
+      gives a Golden Fishing Rod and 30 Master Bait; unit-tested, not yet run in-game.)*
+- [x] Bait never runs out while the cheat is on. *(Any stack below the configured floor
+      is topped back up to it; every low stack in one round, not just the first.)*
 - [ ] Fishing power is a tunable, and the rod in hand reports the configured number.
 - [ ] Insta-fishing: a cast produces a catch without the usual wait, repeatedly.
 - [ ] Switching the cheat off restores normal fishing — the wait comes back and bait is
       consumed again — with the game still running.
-- [ ] Nothing is given twice: toggling the cheat repeatedly does not fill the inventory
-      with rods, and a rod the player already carries is used rather than duplicated.
-- [ ] The cheat never overwrites a slot holding something else.
-- [ ] Works from the CLI and the Effects tab, sharing one implementation.
+- [x] Nothing is given twice, and a rod the player already carries is left alone.
+- [x] The cheat never overwrites a slot holding something else. *(`give_item` picks a
+      free slot from the live inventory, which is the fix from the earlier data loss.)*
+- [x] Works from the CLI and the Effects tab, sharing one implementation. *(The panel
+      calls the same single round the CLI does, from a 1s timer.)*
 - [ ] Verified in-game on the current build, with the build recorded in the ledger.
 
 ## Context

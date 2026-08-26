@@ -877,6 +877,74 @@ class Service:
             w.close()
         return {"stopped": w is not None}
 
+    # --- fishing (spec 042) -----------------------------------------------
+
+    #: What the kit hands out. The Golden Fishing Rod is the best in the game and Master
+    #: Bait the strongest common bait — and bait power does double duty, because a higher
+    #: power also lowers how often a bait is consumed.
+    KIT_ROD = 2294
+    KIT_BAIT = 2676
+    KIT_BAIT_STACK = 30
+
+    def fishing_kit(self) -> dict:
+        """Give a rod and bait to a player who has neither. Idempotent.
+
+        Deliberately gives nothing to a player who already has gear: a cheat that hands
+        out another rod every time it is switched on would fill the inventory, and the
+        rod someone chose is likelier to be the one they want.
+        """
+        inv = self._live_inventory()
+        gear = inv.fishing_gear()
+        gave = {}
+        if not gear["rods"]:
+            gave["rod"] = {"type": self.KIT_ROD, "slot": self.give_item(self.KIT_ROD)}
+        if not gear["baits"]:
+            gave["bait"] = {"type": self.KIT_BAIT,
+                            "slot": self.give_item(self.KIT_BAIT, self.KIT_BAIT_STACK),
+                            "stack": self.KIT_BAIT_STACK}
+        after = self._live_inventory().fishing_gear()
+        return {"gave": gave,
+                "rods": [{"slot": s, "power": p} for s, p in after["rods"]],
+                "baits": [{"slot": s, "power": p, "stack": n}
+                          for s, p, n in after["baits"]]}
+
+    def bait_tick(self, *, keep: int = 30) -> dict:
+        """Top any bait stack below ``keep`` back up to it. One round.
+
+        Stateless, like the potion round and for the same reason: the CLI runs it in a
+        fresh process each time, so anything remembered between rounds would exist for the
+        GUI and not for the CLI. "Keep at least N" needs no memory and says exactly what
+        it does.
+        """
+        if keep < 1:
+            raise ServiceError("keep must be at least 1")
+        inv = self._live_inventory()
+        topped = []
+        for slot, power, stack in inv.fishing_gear()["baits"]:
+            if stack < keep:
+                for i in self._all_inventories():
+                    i.set_stack(slot, keep)
+                topped.append({"slot": slot, "power": power,
+                               "was": stack, "now": keep})
+        return {"keep": keep, "topped": topped,
+                "baits": len(inv.fishing_gear()["baits"])}
+
+    def watch_bait(self, *, keep: int = 30, interval: float = 1.0,
+                   rounds: int | None = None, on_event=None) -> dict:
+        """Keep bait topped up. Blocking; the GUI drives :meth:`bait_tick` from a timer."""
+        import time
+
+        n, refills = 0, 0
+        while rounds is None or n < rounds:
+            n += 1
+            r = self.bait_tick(keep=keep)
+            if r["topped"]:
+                refills += len(r["topped"])
+                if on_event:
+                    on_event(r)
+            time.sleep(interval)
+        return {"rounds": n, "refills": refills}
+
     # --- passive potions (spec 041) ---------------------------------------
 
     def potion_tick(self, *, min_stack: int = 1, ticks: int | None = None) -> dict:

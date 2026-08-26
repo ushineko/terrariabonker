@@ -143,6 +143,15 @@ def potions_argv(min_stack: int = 1) -> list[str]:
     return ["potions", "--json", "--min-stack", str(min_stack)]
 
 
+def fishing_argv(keep: int = 30, kit: bool = True) -> list[str]:
+    """One round: hand out the kit if asked, then top bait up. Never ``--watch`` — the
+    worker must not block, so the GUI drives the cadence from its own timer."""
+    argv = ["fishing", "--json", "--keep", str(keep)]
+    if not kit:
+        argv.append("--no-kit")
+    return argv
+
+
 def patch_status_argv() -> list[str]:
     return ["patch", "status", "--json"]
 
@@ -204,7 +213,7 @@ COMMANDS: set[str] = {
     "status", "inventory", "set-hp", "set-mana", "set-max-hp", "set-max-mana",
     "set-stack", "set-item", "give", "spawn-npc", "compendium", "fast-mining",
     "long-reach", "freeze",
-    "patch", "potions",
+    "patch", "potions", "fishing",
     "extract-recipes",
 }
 
@@ -226,6 +235,7 @@ SAMPLE_ARGVS: list[list[str]] = [
     patch_set_argv("spawn_rate", True, value=40),
     extract_recipes_argv(),
     potions_argv(), potions_argv(30),
+    fishing_argv(), fishing_argv(50, kit=False),
 ]
 
 

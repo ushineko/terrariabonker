@@ -82,6 +82,7 @@ holds no state.*
 | [Vanity accessories](#working-vanity-accessories) | the seven vanity slots grant their effects |
 | Accessories from inventory | accessories work without being equipped |
 | [Passive potions](#passive-potions) | favorite a potion and its effect stays up |
+| [Fishing](#fishing) | a rod and bait if you have none, and bait that lasts |
 
 ### Passive potions
 
@@ -95,6 +96,20 @@ shortens one you took yourself.
 
 This one needs the trainer running: close it and the buffs lapse on their own within a
 couple of seconds. Find it under **Effects**, or run `terrariabonker potions --watch`.
+
+### Fishing
+
+Switch it on and you get a fishing rod and bait if you have none, and your bait stops
+running out — any stack below the number beside the toggle is topped back up as you fish.
+
+It leaves gear you already own alone: your own rod is the one you chose, so it stays.
+
+**Fish in a lake, not a puddle.** Water smaller than about 300 tiles cuts your fishing
+power sharply, and a tiny pond costs you most of it — that is the game's own rule, not
+something the trainer can help with. A big lake catches far more than a small one whatever
+gear you carry.
+
+Under **Effects**, or `terrariabonker fishing --watch`.
 
 ### Ore extractor (vein mining)
 

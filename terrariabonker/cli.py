@@ -161,7 +161,7 @@ SERVE_OPS = frozenset({
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
     "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
     "accept-build", "vein", "extract", "extract-tick", "extract-stop",
-    "potions",
+    "potions", "fishing",
 })
 
 
@@ -288,6 +288,45 @@ def _extract_line(got) -> str:
             f"({at[0]}, {at[1]})"
             + (f", median {med:.2f}s/tile" if med is not None else "")
             + (f" — {got['reason']}" if got["reason"] else ""))
+
+
+def _bait_line(r: dict) -> str:
+    if not r["topped"]:
+        return "[fishing] bait ok" if r["baits"] else "[fishing] no bait carried"
+    return "[fishing] topped up " + ", ".join(
+        "slot %d %d->%d" % (t["slot"], t["was"], t["now"]) for t in r["topped"])
+
+
+def cmd_fishing(args) -> int:
+    """Hand out a rod and bait, and keep the bait from running out."""
+    svc = _svc(guard=True, force=args.force)
+    out = {}
+    if not args.no_kit:
+        out["kit"] = svc.fishing_kit()
+        if not args.json:
+            gave = out["kit"]["gave"]
+            print("[fishing] " + ("gave " + ", ".join(
+                "%s (slot %d)" % (k, v["slot"]) for k, v in gave.items())
+                if gave else "you already have a rod and bait"))
+    if args.watch:
+        print("[fishing] watching — your bait will not run out. Ctrl-C to stop.")
+        try:
+            got = svc.watch_bait(keep=args.keep, interval=args.interval,
+                                 rounds=args.rounds,
+                                 on_event=lambda r: print(_bait_line(r), flush=True))
+        except KeyboardInterrupt:
+            print("\n[fishing] stopped")
+            return 0
+        out["watch"] = got
+        if not args.json:
+            print(f"[fishing] {got['refills']} refill(s) over {got['rounds']} rounds")
+    else:
+        out["bait"] = svc.bait_tick(keep=args.keep)
+        if not args.json:
+            print(_bait_line(out["bait"]))
+    if args.json:
+        print(json.dumps(out))
+    return 0
 
 
 def _potion_line(r: dict) -> str:
@@ -690,6 +729,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--map", action="store_true", help="draw the vein")
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.set_defaults(func=cmd_vein)
+
+    p = sub.add_parser("fishing",
+                       help="a rod and bait if you have none, and bait that lasts")
+    p.add_argument("--keep", type=int, default=30,
+                   help="top any bait stack below this back up to it (default 30)")
+    p.add_argument("--no-kit", action="store_true", dest="no_kit",
+                   help="do not hand out a rod or bait, only keep bait topped up")
+    p.add_argument("--watch", action="store_true", help="keep topping bait up")
+    p.add_argument("--interval", type=float, default=1.0,
+                   help="seconds between rounds with --watch")
+    p.add_argument("--rounds", type=int,
+                   help="with --watch, stop after this many rounds")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_fishing)
 
     p = sub.add_parser("extract",
                        help="mine the vein at a tile (WRITES to the world)")

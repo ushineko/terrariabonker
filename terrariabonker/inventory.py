@@ -60,6 +60,12 @@ ITEM_LEG_SLOT = 0xE0
 # by the flag turning back ON when a favorited item is clicked.
 ITEM_FAVORITED = 0x70   # byte bool
 
+# Fishing (spec 042). Both derived by differencing templates and checked against the
+# game's own numbers: exactly 7 items carry a nonzero fishingPole and every one is a rod
+# (Golden 50 down to Chum Caster 25); 13 carry bait and none of them is a rod.
+ITEM_FISHING_POLE = 0x58   # byte: the rod's fishing power
+ITEM_BAIT = 0x5C           # byte: the bait's power
+
 ITEM_ACCESSORY = 0x7D
 ITEM_MELEE = 0x15D
 ITEM_MAGIC = 0x15E
@@ -184,6 +190,33 @@ class Inventory:
             buff = struct.unpack_from("<i", w, ITEM_BUFF_TYPE - lo)[0]
             if buff > 0:
                 out.append((i, buff))
+        return out
+
+    def fishing_gear(self, index: int | None = None) -> dict:
+        """``{"rods": [(slot, power)], "baits": [(slot, power, stack)]}``.
+
+        Both lists rather than a first hit: a player may carry several rods, and topping
+        up one bait stack while another runs dry is not "bait never runs out".
+        """
+        out: dict[str, list] = {"rods": [], "baits": []}
+        arr = self.array_addr()
+        if arr is None:
+            return out
+        for i in range(INVENTORY_SLOTS):
+            addr = self.mem.read_u32(arr + ARR_DATA_OFF + i * 4)
+            if not addr:
+                continue
+            try:
+                w = self.mem.read(addr + ITEM_FISHING_POLE, 8)
+            except OSError:
+                continue
+            if not self.mem.read_i32(addr + ITEM_TYPE):
+                continue
+            pole, bait = w[0], w[ITEM_BAIT - ITEM_FISHING_POLE]
+            if pole:
+                out["rods"].append((i, pole))
+            if bait:
+                out["baits"].append((i, bait, self.mem.read_i32(addr + ITEM_STACK)))
         return out
 
     def nonempty_count(self) -> int:
