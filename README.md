@@ -104,6 +104,10 @@ running out — any stack below the number beside the toggle is topped back up a
 
 It leaves gear you already own alone: your own rod is the one you chose, so it stays.
 
+Some casts come back empty — the line breaks now and then and the bait goes with it. That
+is the game, not the cheat, and High Test Fishing Line stops it. Your bait is topped back
+up either way.
+
 **Rod power** is the other half. Every rod you carry is raised to the number you set, and
 put back to what it was when you switch the cheat off — including after a crash, because
 the original is written down rather than remembered. Power is also what makes fish bite:

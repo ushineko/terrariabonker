@@ -239,9 +239,12 @@ race is the answer and the honest conclusion is that this belongs in a stub, not
   input, Wayland restricts synthetic input anyway, and a cheat that moves the player's
   mouse is a different kind of program from this one.
 
-Worth knowing before starting: a catch is lost to a line break one time in seven without
-the right accessory, and the bait is consumed anyway. An auto-catch that silently swallows
-that will look broken.
+Worth knowing before starting: a share of catches is lost to the line breaking — the wiki
+puts it at one in seven without the right accessory, the maintainer observed nearer one in
+five in play, and High Test Fishing Line removes it. The bait is consumed either way. That
+costs the player nothing here, because the bait pin tops the stack back up regardless of
+whether the catch landed, but an auto-catch that silently swallows a break will look
+broken, and the counting must not treat a break as a failure of the cheat.
 
 ## Risks & Assumptions
 
@@ -263,8 +266,10 @@ that will look broken.
   where to fish rather than let the cheat look broken.
 - **Bait power lowers how often bait is consumed**, so a high-power bait is worth giving in
   the kit for its own sake, independently of pinning the stack.
-- **One catch in seven is lost to a line break** without the right accessory, and the bait
-  is consumed anyway. Not a bug in the cheat when it happens.
+- **Some catches are lost to the line breaking** — around one in five in play, one in
+  seven per the wiki, none at all with High Test Fishing Line. The bait goes anyway, which
+  the bait pin already covers. Not a bug in the cheat when it happens, and worth saying so
+  before someone reports it as one.
 - **Rollback**: no patching, so nothing to restore in the game's code. Given items and an
   edited rod are the exceptions, per the point above.
 - ~~**Assumption**: bait is consumed by decrementing the stack.~~ Measured; see above.
