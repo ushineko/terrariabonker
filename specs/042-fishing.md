@@ -187,6 +187,35 @@ the premise has not been established.
   array whose elements share a vtable), but that search has not been made repeatable or
   tested. It needs the same treatment as the other locators before anything depends on it.
 
+## Auto-catch — not yet attempted
+
+Reeling in is still a manual act: the cheat makes fish bite constantly, and the player
+clicks. Automating that is a separate question and is **not ruled out** — it has simply not
+been investigated. It splits in two, and only one half is hard.
+
+**Detecting a bite looks solved already.** While sampling the bobber, four fields moved
+together in a repeating cycle — `+0x078` dropping 1 → 0 and `+0x0B4` 59 → 0, with `+0x100`
+and `+0x128` flipping. That fired 8 times in 40 seconds, which matches the bite count over
+the same window from an independent measurement. It reads as the bite event, though it has
+not been confirmed against a bite the maintainer called out at the moment it happened.
+
+**Triggering the reel-in is the real unknown**, and the routes are not equally good:
+
+- *Replicate what reeling in does.* Find what the game changes when the player clicks with
+  a bite on, and do the same. Best fit for this project — memory only, no new machinery —
+  but it needs the catch path understood, and that path is where the fish is actually
+  granted, so getting it wrong could destroy a catch rather than take it.
+- *A code patch on the fishing check.* Powerful and in keeping with the older cheats, but
+  it needs an anchor and a stub, which the whole of spec 041 and this spec so far have
+  avoided.
+- *Synthesising a mouse click.* Rejected: the trainer edits memory and does not drive
+  input, Wayland restricts synthetic input anyway, and a cheat that moves the player's
+  mouse is a different kind of program from this one.
+
+Worth knowing before starting: a catch is lost to a line break one time in seven without
+the right accessory, and the bait is consumed anyway. An auto-catch that silently swallows
+that will look broken.
+
 ## Risks & Assumptions
 
 - **Item edits persist, so the original power is recorded and restored** (maintainer's
