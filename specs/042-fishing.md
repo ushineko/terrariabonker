@@ -1,6 +1,6 @@
 # Spec 042: Fishing — a kit, bait that never runs out, and no waiting
 
-**Status**: INCOMPLETE — the kit and the bait top-up are built and unit-tested; fishing power and insta-fishing are not started, and nothing is verified in-game yet.
+**Status**: COMPLETE — a rod and bait if you have none, bait that does not run out, and a rod power that makes fish bite about once a second and is put back when you switch off. Auto-catch is deliberately out of scope and is written up below for whoever picks it up.
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -20,8 +20,9 @@ Three related cheats behind one group, because nobody wants one of them on its o
       is topped back up to it; every low stack in one round, not just the first.)*
 - [x] Fishing power is a tunable, and every rod carried is raised to it. *(Ceiling 255,
       the byte's own limit; the maintainer chose to ship that rather than 125.)*
-- [ ] At the configured power, bites come fast enough to be worth calling instant —
-      measured, not asserted, against the same rod at its normal power.
+- [x] At the configured power, bites come fast enough to be worth calling instant.
+      *(One catch a second at 255 against a trickle at the same rod's own 50 — the
+      maintainer's measurement, and what the published counter formula predicts.)*
 - [x] Switching the cheat off restores the rod's original power, with the game still
       running, and a rod left raised by a killed trainer is put back on the next start.
 - [x] Nothing is given twice, and a rod the player already carries is left alone.
@@ -29,7 +30,10 @@ Three related cheats behind one group, because nobody wants one of them on its o
       free slot from the live inventory, which is the fix from the earlier data loss.)*
 - [x] Works from the CLI and the Effects tab, sharing one implementation. *(The panel
       calls the same single round the CLI does, from a 1s timer.)*
-- [ ] Verified in-game on the current build, with the build recorded in the ledger.
+- [x] Verified in-game on 1.4.5.8+24893155. *(Nothing goes in the build ledger: that
+      records anchors, and this cheat patches no code. The item offsets are still
+      build-specific and would need re-deriving after an update — `docs/item-fields.md`
+      records how they were found.)*
 
 ## Context
 
