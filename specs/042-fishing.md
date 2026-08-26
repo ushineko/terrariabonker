@@ -222,9 +222,29 @@ Two explanations, and the second is likelier:
    fresh press for such items — `controlUseItem` together with `releaseUseItem` — so a byte
    pinned at 1 reads as "still holding since last frame", which is deliberately ignored.
 
-Next attempt should find `releaseUseItem` (likely adjacent, the control flags sit together)
-and drive the pair as a press-and-release rather than a hold. If that also fails, the frame
-race is the answer and the honest conclusion is that this belongs in a stub, not a poller.
+**A cheap discriminator, ready to run.** Before hunting `releaseUseItem`, settle whether
+`statLife-0x00c6` is an input control at all — an input control is rewritten *every frame*
+from the keyboard and mouse, so a 1 written into it must be gone within ~17 ms. Write 1,
+then poll: cleared within a frame means the game is writing it and the offset is plausible;
+still 1 after 250 ms means nothing rewrites it, so it is not an input control and the
+search moves on. No fishing required, only a running game.
+
+*This test must carry a liveness check.* Run once against a paused game it reported "still
+1 after 300 ms" across five trials — a clean, confident, meaningless result, because a
+paused game rewrites nothing. Sampling `statLife-0x49C`, which increments every tick
+regardless of what the player is doing, is enough of a guard and turned the same test into
+an honest "aborting: a paused game clears nothing".
+
+If it does turn out to be an input control, the next attempt is `releaseUseItem` — likely
+adjacent, since the control flags sit together — driving the pair as a press rather than a
+hold.
+
+**A concern that may sink this route whatever the offsets are.** The game rewrites input
+flags from real input every frame, so a write from outside only matters if it lands in the
+window between the game reading input and the game acting on it. That is a fraction of a
+frame, and a poller cannot aim at it. If the press-and-release attempt also fails, the
+answer is probably not a better offset but the wrong mechanism: driving input belongs in a
+stub that runs *inside* the frame, which is the code-patch route below.
 
 **Triggering the reel-in is the real unknown**, and the routes are not equally good:
 
