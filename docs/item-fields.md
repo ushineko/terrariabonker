@@ -25,6 +25,13 @@ pattern.
 | `0x11C` | `mana` | Space Gun 6, Water Bolt 10 — both match the wiki exactly |
 | `0x124` | `value` | sell price in copper; Wooden Sword 100, Water Bolt 75000 |
 
+Two more, added while scoping the fishing cheat (spec 042) and verified the same way:
+
+| Offset | Field | Evidence it is what it says |
+|---|---|---|
+| `0x058` | `fishingPole` | exactly 7 items carry it, all rods, matching the game's own powers |
+| `0x05C` | `bait` | 13 items, no rods; Master Bait 50, Sluggy 25, Firefly 20, Snail 10 |
+
 `0x150` looked like `crit` (7 on the Pulse Bow, 0 elsewhere) but one sample is not
 evidence and it is recorded here as unconfirmed.
 
@@ -48,6 +55,7 @@ behaves is on the projectile.
 |---|---|---|
 | `0x0D4` | `penetrate` | Wooden Arrow 1, Water Bolt 10, skull 3, some -1 (infinite) |
 | `0x0D0`, `0x100` | tile/collision flags | the two bools that separate the skull from an arrow |
+| `0x088` | `bobber` | true for 19 of 1100, including every bobber the fishing rods shoot |
 
 `0x0DC` carries values identical to `0x0D4` on every template — probably the "restore to"
 copy the game resets `penetrate` from. Worth resolving before either is written to.
