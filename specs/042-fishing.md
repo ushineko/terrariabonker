@@ -222,6 +222,33 @@ Two explanations, and the second is likelier:
    fresh press for such items — `controlUseItem` together with `releaseUseItem` — so a byte
    pinned at 1 reads as "still holding since last frame", which is deliberately ignored.
 
+### Result: the use-item action can be driven from memory
+
+Confirmed in-game on 1.4.5.8+24893155. **`statLife-0x00c6` is the use-item control.**
+
+- It is rewritten every frame: a 1 written into it is gone in 3–26 ms, averaging about one
+  frame. That is what an input control looks like and nothing else does.
+- With a rod selected, the player not touching the mouse, and no bobber in the water,
+  writing it in a tight loop for two seconds **cast the line**.
+- With a bobber already out, bursts as short as 20 ms moved it 150-odd pixels, alternating
+  between two positions — the arc of repeated cast-and-reel cycles caught mid-flight.
+
+**Write rate is the whole trick, and it is why the first attempt failed.** 100 Hz did
+nothing; the tight loop managed ~400,000 writes/second. The game sets the flag from real
+input at the top of each frame and acts on it later in the same frame, so a write only
+counts if it lands in that window. Hammering wins by covering every frame many times over
+rather than by aiming.
+
+**This is not fishing-specific**, which was the point of the maintainer's suggestion: it is
+"use the held item", so it applies to auto-fire, auto-place and anything else driven by the
+use button.
+
+**What it must not become**, though, is a busy loop left running. 400k writes/second is a
+core spinning on `/proc/<pid>/mem`. A 20 ms burst is ~8,000 writes and is enough, so the
+shape for a real cheat is: detect the event, burst briefly, stop. For auto-catch that means
+bursting on a detected bite, not hammering continuously — and the cost of a burst should be
+measured before it ships, not assumed to be free.
+
 **A cheap discriminator, ready to run.** Before hunting `releaseUseItem`, settle whether
 `statLife-0x00c6` is an input control at all — an input control is rewritten *every frame*
 from the keyboard and mouse, so a 1 written into it must be gone within ~17 ms. Write 1,
@@ -246,7 +273,8 @@ frame, and a poller cannot aim at it. If the press-and-release attempt also fail
 answer is probably not a better offset but the wrong mechanism: driving input belongs in a
 stub that runs *inside* the frame, which is the code-patch route below.
 
-**Triggering the reel-in is the real unknown**, and the routes are not equally good:
+**Triggering the reel-in** is answered by the above: drive the use control. The routes
+below are kept for the record, and the third is now moot.
 
 - *Replicate what reeling in does.* Find what the game changes when the player clicks with
   a bite on, and do the same. Best fit for this project — memory only, no new machinery —
