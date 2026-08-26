@@ -1,6 +1,6 @@
 # Spec 041: Passive potions — buffs from a favorited potion in the bag
 
-**Status**: INCOMPLETE
+**Status**: COMPLETE — favorite a potion and its buff stays up while it sits in your bag, from the CLI or the Effects tab, without consuming it and without shortening a potion you drank yourself.
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -35,9 +35,13 @@ Checked items were verified against the running game on 1.4.5.8, not only in tes
       network path to spam: renewal writes an integer.)*
 - [x] Switching it off needs no undoing: stop renewing and the buffs expire. There are no
       displaced bytes to restore, because nothing is patched.
-- [ ] Favoriting a potion mid-session starts the effect and unfavoriting stops it. The
-      round re-reads the inventory every time, so this follows — but the transitions have
-      not been watched directly.
+- [x] Favoriting a potion mid-session starts the effect and unfavoriting stops it.
+      *(Favoriting: four potions favorited after the trainer was already running — 
+      Spelunker, Dangersense, Hunter, Flipper — were all active on the next round.
+      Unfavoriting: reported by the maintainer against the Spelunker potion. The two
+      halves of the mechanism were each measured separately as well: a favorited
+      non-consumable is excluded from what the round acts on, and a buff whose renewal
+      stops is gone from the array within seconds.)*
 - [x] **Drinking a potion normally is never degraded by the cheat.** *(A Night Owl potion
       was drunk while the same potion sat favorited in the bag and was being renewed
       passively. The drunk buff read 35578 ticks — 9.9 minutes — and four consecutive
