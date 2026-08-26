@@ -98,9 +98,12 @@ This stub calls nothing.
   frame it is set. The measurement supports this (a 1 written from outside survives 3–26 ms
   and produced real uses), but the stub writes at a different point in the frame than the
   poller did, and that could behave differently. First test is a counter, not a fish.
-- **Unconfirmed input**: the bite signal auto-catch would trigger on is still inferred from
-  matching counts, never confirmed against a bite called out live. Confirm it before
-  building on it — two false starts in spec 042 came from trusting an unverified signal.
+- ~~**Unconfirmed input**~~: discharged 2026-08-26. The bite signal is the game's own pull
+  condition — `ai[0] == 0 && ai[1] < 0 && localAI[1] != 0` on the player's bobber, read out
+  of `Player.ItemCheck_PullFishingBobbers` — and it was confirmed against the maintainer's
+  own reel-ins: six seen dips, six clicks, the signal already raised on all six and never
+  raised without a real catch behind it. Offsets and measurements are in spec 042, "The
+  bite signal, settled".
 
 ## Alternatives considered
 
