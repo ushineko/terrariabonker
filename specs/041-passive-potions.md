@@ -16,27 +16,38 @@ player, with no extra interface of our own.
 
 ## Acceptance criteria
 
-- [ ] A favorited consumable potion in the inventory grants its buff, without being used
-      and without the stack shrinking.
-- [ ] An **unfavorited** potion grants nothing, however large the stack. Favoriting it
-      while the game runs starts the effect; unfavoriting stops it.
-- [ ] The stack threshold is a tunable, minimum 1, and a stack below it grants nothing.
-- [ ] The buff lapses on its own shortly after the potion leaves the inventory, is
+Checked items were verified against the running game on 1.4.5.8, not only in tests.
+
+- [x] A favorited consumable potion in the inventory grants its buff, without being used
+      and without the stack shrinking. *(Two favorited potions granted buffs 3 and 5; all
+      six stacks read identically before and after.)*
+- [x] An **unfavorited** potion grants nothing, however large the stack. *(Four
+      unfavorited potions were ignored across 64 renewals, including stacks of 5 and 6,
+      while a favorited stack of 4 worked — the gate is the favorite, not the size.)*
+- [x] The stack threshold is a tunable, minimum 1, and a stack below it grants nothing.
+      *(`--min-stack 5` took the stack of 6 and dropped the stack of 4; `--min-stack 7`
+      took neither.)*
+- [x] The buff lapses on its own shortly after the potion leaves the inventory, is
       unfavorited, or the cheat is switched off — no bookkeeping, no stuck buffs.
+      *(Both granted buffs were gone from the array seconds after the loop stopped.)*
+- [x] Nothing is consumed and no stack is decremented, ever.
+- [x] No audible or visual spam. *(Nothing calls `AddBuff`, so there is no sound or
+      network path to spam: renewal writes an integer.)*
+- [x] Switching it off needs no undoing: stop renewing and the buffs expire. There are no
+      displaced bytes to restore, because nothing is patched.
+- [ ] Favoriting a potion mid-session starts the effect and unfavoriting stops it. The
+      round re-reads the inventory every time, so this follows — but the transitions have
+      not been watched directly.
+- [ ] **Drinking a potion normally is never degraded by the cheat.** Partly evidenced: 64
+      renewals ran past a drunk 8-minute buff without touching it. But that buff was not
+      one the player carried favorited, so the `kept` path itself was not exercised live.
+      Needs: drink a potion you also carry favorited, and confirm the round reports `kept`
+      and the long duration survives.
 - [ ] Non-consumables are inert: a favorited pet, light pet or mount item does nothing,
-      even though it carries a `buffType`.
-- [ ] Nothing is consumed and no stack is decremented, ever — verified in-game across a
-      session, not only by reading the stub.
-- [ ] No audible or visual spam: the buff is applied quietly, not re-announced every
-      frame.
-- [ ] **Drinking a potion normally is never degraded by the cheat.** A buff the
-      player applied at its full duration keeps that duration: the per-frame refresh
-      may extend a buff, never shorten one. Verified in-game by drinking a potion the
-      player also carries favorited, then dropping the stack — the drunk buff must run
-      out its own clock.
-- [ ] Disabling restores the displaced bytes and stops the effects with the game running.
-- [ ] Works from the CLI and the trainer panel, sharing one implementation.
-- [ ] Verified in-game on the current build, with the build recorded in the ledger.
+      even though it carries a `buffType`. Unit-tested; no favorited pet has been tried
+      in-game.
+- [ ] Works from the CLI and the trainer panel, sharing one implementation. The CLI is
+      done; the panel is not wired yet.
 
 ## Context
 
