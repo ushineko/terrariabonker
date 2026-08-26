@@ -33,8 +33,13 @@ def test_main_window_builds_with_every_tab(app, monkeypatch):
     w = mw.MainWindow()
     try:
         titles = [w.tabs.tabText(i) for i in range(w.tabs.count())]
-        assert titles == ["Trainer", "Inventory", "Recipes", "Compendium"]
+        assert titles == ["Player", "Effects", "Patches", "Inventory", "Recipes",
+                          "Compendium"]
         assert w.log is not None, "the log widget the tabs log through must exist"
+        # the controls that moved out of the old Trainer tab must still be wired
+        for attr in ("cb_god", "cb_mana", "sp_maxhp", "sp_maxmana", "sp_reach",
+                     "cb_potions", "sp_potion_stack"):
+            assert getattr(w, attr, None) is not None, f"{attr} was lost in the split"
     finally:
         w.close()
 
@@ -223,5 +228,65 @@ def test_the_gems_choice_actually_reaches_the_watcher(app, monkeypatch):
         w._vein_inflight = False
         w._tick_veins()
         assert "--gems" in sent[-1], "the choice never reached the worker"
+    finally:
+        w.close()
+
+
+def test_selecting_a_tab_dispatches_by_widget_not_by_position(app, monkeypatch):
+    """Reordering the tab strip used to break this silently. The handler keyed off a
+    hardcoded index, so promoting Patches to its own tab made the compendium load when
+    Inventory was clicked and never when Compendium was -- no error, just a tab that
+    stayed empty."""
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
+    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.sprites, "is_cached", lambda: True)   # no extraction here
+
+    w = mw.MainWindow()
+    try:
+        fired = []
+        monkeypatch.setattr(w.compendium, "ensure_loaded", lambda: fired.append("comp"))
+        monkeypatch.setattr(w, "refresh_inventory", lambda: fired.append("inv"))
+        monkeypatch.setattr(w, "_ensure_recipe_grid", lambda: fired.append("recipes"))
+
+        by_title = {w.tabs.tabText(i): i for i in range(w.tabs.count())}
+        for title, want in (("Compendium", "comp"), ("Inventory", "inv"),
+                            ("Recipes", "recipes")):
+            fired.clear()
+            w.tabs.setCurrentIndex(by_title[title])
+            assert fired == [want], f"selecting {title} fired {fired}"
+
+        for title in ("Player", "Effects", "Patches"):
+            fired.clear()
+            w.tabs.setCurrentIndex(by_title[title])
+            assert fired == [], f"selecting {title} fired {fired}"
+    finally:
+        w.close()
+
+
+def test_the_potions_checkbox_drives_the_renewal_timer(app, monkeypatch):
+    """The checkbox is the whole interface to passive potions. Wired to nothing, it looks
+    exactly like a working cheat that grants no buffs."""
+    from terrariabonker import buffs
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
+    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
+
+    w = mw.MainWindow()
+    try:
+        assert not w._potion_timer.isActive(), "renewing before being asked to"
+        w.cb_potions.setChecked(True)
+        assert w._potion_timer.isActive()
+        buff_ms = buffs.DEFAULT_TICKS / 60 * 1000
+        assert w._potion_timer.interval() < buff_ms, \
+            "the timer is slower than the buff it writes — the buff would flicker"
+        w.cb_potions.setChecked(False)
+        assert not w._potion_timer.isActive()
     finally:
         w.close()

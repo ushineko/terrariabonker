@@ -46,8 +46,9 @@ Checked items were verified against the running game on 1.4.5.8, not only in tes
 - [ ] Non-consumables are inert: a favorited pet, light pet or mount item does nothing,
       even though it carries a `buffType`. Unit-tested; no favorited pet has been tried
       in-game.
-- [ ] Works from the CLI and the trainer panel, sharing one implementation. The CLI is
-      done; the panel is not wired yet.
+- [x] Works from the CLI and the trainer panel, sharing one implementation. *(The panel
+      calls the same single round the CLI does — `potions --json --min-stack N` — driven
+      from a 250ms timer, since the worker must not block.)*
 
 ## Context
 

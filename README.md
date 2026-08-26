@@ -79,6 +79,20 @@ holds no state.*
 | [Ore extractor](#ore-extractor-vein-mining) | break one ore and the vein goes with it |
 | [Vanity accessories](#working-vanity-accessories) | the seven vanity slots grant their effects |
 | Accessories from inventory | accessories work without being equipped |
+| [Passive potions](#passive-potions) | favorite a potion and its effect stays up |
+
+### Passive potions
+
+Alt-click a potion to favorite it and its effect stays up while the potion sits in your
+bag. Nothing is drunk and the stack never shrinks.
+
+Only favorited potions count, so the ones you pick up along the way stay inert until you
+say otherwise. Set a minimum stack size if you would rather a single spare potion did not
+switch anything on. Potions you drink normally are untouched — a passive effect never
+shortens one you took yourself.
+
+This one needs the trainer running: close it and the buffs lapse on their own within a
+couple of seconds. Find it under **Effects**, or run `terrariabonker potions --watch`.
 
 ### Ore extractor (vein mining)
 

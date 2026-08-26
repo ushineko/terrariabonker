@@ -137,6 +137,12 @@ def long_reach_argv(tiles: int) -> list[str]:
     return ["long-reach", "--tiles", str(tiles)]
 
 
+def potions_argv(min_stack: int = 1) -> list[str]:
+    """One renewal round. Deliberately not ``--watch``: the worker must not block, so the
+    GUI drives the cadence from its own timer, as it does for vein watching."""
+    return ["potions", "--json", "--min-stack", str(min_stack)]
+
+
 def patch_status_argv() -> list[str]:
     return ["patch", "status", "--json"]
 
@@ -198,7 +204,7 @@ COMMANDS: set[str] = {
     "status", "inventory", "set-hp", "set-mana", "set-max-hp", "set-max-mana",
     "set-stack", "set-item", "give", "spawn-npc", "compendium", "fast-mining",
     "long-reach", "freeze",
-    "patch",
+    "patch", "potions",
     "extract-recipes",
 }
 
@@ -219,6 +225,7 @@ SAMPLE_ARGVS: list[list[str]] = [
     patch_set_argv("tool_reach", True, value=40), patch_set_argv("pickup", True, value=50),
     patch_set_argv("spawn_rate", True, value=40),
     extract_recipes_argv(),
+    potions_argv(), potions_argv(30),
 ]
 
 

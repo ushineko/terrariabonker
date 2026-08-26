@@ -209,6 +209,10 @@ class MainWindow(QWidget):
         # authority on whether the cheat is actually on.
         self._vein_timer = QTimer(self)
         self._vein_timer.timeout.connect(self._tick_veins)
+        self._potion_timer = QTimer(self)
+        self._potion_timer.timeout.connect(self._tick_potions)
+        self._potion_inflight = False
+        self._potion_said: set = set()      # buffs already logged, so the log is not spam
         self._vein_inflight = False
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
@@ -271,9 +275,16 @@ class MainWindow(QWidget):
 
         tabs = QTabWidget()
         self.tabs = tabs
-        tabs.addTab(self._trainer_tab(), "Trainer")
-        tabs.addTab(self._inventory_tab(), "Inventory")
-        tabs.addTab(self._recipes_tab(), "Recipes")
+        tabs.addTab(self._player_tab(), "Player")
+        tabs.addTab(self._effects_tab(), "Effects")
+        tabs.addTab(self._patches_tab(), "Patches")
+        # Kept as attributes because _on_tab_changed dispatches on the widget, not on an
+        # index: indices moved when this strip was reorganised, and a stale number is a
+        # silent bug (the compendium loaded on whatever tab happened to be third).
+        self.tab_inventory = self._inventory_tab()
+        tabs.addTab(self.tab_inventory, "Inventory")
+        self.tab_recipes = self._recipes_tab()
+        tabs.addTab(self.tab_recipes, "Recipes")
         # The log widget is built after the tabs, so bind it late rather than passing
         # self.log.appendPlainText here (which would resolve it now, and fail).
         self.compendium = CompendiumTab(self, self._fetch_compendium, self._give_item,
@@ -297,9 +308,55 @@ class MainWindow(QWidget):
         self.log.setMaximumHeight(150)
         root.addWidget(self.log)
 
-    def _trainer_tab(self) -> QWidget:
+    def _player_tab(self) -> QWidget:
+        """The player themselves: what they are made of and what they carry."""
         w = QWidget()
         col = QVBoxLayout(w)
+
+        stat_box = QGroupBox("Stats")
+        sg = QGridLayout(stat_box)
+        sg.addWidget(self._btn("Heal to full", client.set_hp_argv("max")), 0, 0)
+        sg.addWidget(self._btn("Refill mana", client.set_mana_argv("max")), 0, 1)
+        self.sp_maxhp = self._spin(100, 9999, 400)
+        self.sp_maxmana = self._spin(20, 400, 200)
+        sg.addWidget(QLabel("Max HP"), 1, 0)
+        sg.addWidget(self.sp_maxhp, 1, 1)
+        sg.addWidget(self._btn("Set", lambda: client.set_max_hp_argv(self.sp_maxhp.value())),
+                     1, 2)
+        sg.addWidget(QLabel("Max mana"), 2, 0)
+        sg.addWidget(self.sp_maxmana, 2, 1)
+        sg.addWidget(
+            self._btn("Set", lambda: client.set_max_mana_argv(self.sp_maxmana.value())), 2, 2)
+        col.addWidget(stat_box)
+
+        tool_box = QGroupBox("Tools")
+        tg = QHBoxLayout(tool_box)
+        tg.addWidget(self._btn("Fast mining (all pickaxes)", client.fast_mining_argv()))
+        self.sp_reach = self._spin(1, 100, 20)
+        tg.addWidget(QLabel("Reach +"))
+        tg.addWidget(self.sp_reach)
+        tg.addWidget(self._btn("Long reach",
+                               lambda: client.long_reach_argv(self.sp_reach.value())))
+        col.addWidget(tool_box)
+        col.addStretch()
+        return w
+
+    def _effects_tab(self) -> QWidget:
+        """Cheats the trainer keeps up rather than writes once.
+
+        Separated from the patches because they behave differently in the one way a
+        player will actually notice: close the trainer and these stop, while a patch keeps
+        working until the game restarts.
+        """
+        w = QWidget()
+        col = QVBoxLayout(w)
+
+        note = QLabel("These need the trainer running. Close it and they stop — "
+                      "unlike the Patches tab, which keeps working until the game "
+                      "restarts.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray")
+        col.addWidget(note)
 
         freeze_box = QGroupBox("Freezes (held against the game)")
         fb = QHBoxLayout(freeze_box)
@@ -312,29 +369,28 @@ class MainWindow(QWidget):
         fb.addStretch()
         col.addWidget(freeze_box)
 
-        stat_box = QGroupBox("Stats")
-        sg = QGridLayout(stat_box)
-        sg.addWidget(self._btn("Heal to full", client.set_hp_argv("max")), 0, 0)
-        sg.addWidget(self._btn("Refill mana", client.set_mana_argv("max")), 0, 1)
-        self.sp_maxhp = self._spin(100, 9999, 400)
-        self.sp_maxmana = self._spin(20, 400, 200)
-        sg.addWidget(QLabel("Max HP"), 1, 0)
-        sg.addWidget(self.sp_maxhp, 1, 1)
-        sg.addWidget(self._btn("Set", lambda: client.set_max_hp_argv(self.sp_maxhp.value())), 1, 2)
-        sg.addWidget(QLabel("Max mana"), 2, 0)
-        sg.addWidget(self.sp_maxmana, 2, 1)
-        sg.addWidget(self._btn("Set", lambda: client.set_max_mana_argv(self.sp_maxmana.value())), 2, 2)
-        col.addWidget(stat_box)
+        potion_box = QGroupBox("Passive potions")
+        pb = QHBoxLayout(potion_box)
+        self.cb_potions = QCheckBox("Favorited potions work from the inventory")
+        self.cb_potions.setToolTip(uitext.wrap(
+            "Alt-click a potion to favorite it and its effect stays up while it sits in "
+            "your bag. The potion is not used and the stack does not shrink. Only "
+            "favorited potions count, so anything you pick up stays inert."))
+        self.cb_potions.toggled.connect(self._set_potion_watch)
+        pb.addWidget(self.cb_potions)
+        pb.addWidget(QLabel("Min stack"))
+        self.sp_potion_stack = self._spin(1, 999, 1)
+        self.sp_potion_stack.setToolTip(uitext.wrap(
+            "Only potions with at least this many in the stack take effect."))
+        pb.addWidget(self.sp_potion_stack)
+        pb.addStretch()
+        col.addWidget(potion_box)
+        col.addStretch()
+        return w
 
-        tool_box = QGroupBox("Tools")
-        tg = QHBoxLayout(tool_box)
-        tg.addWidget(self._btn("Fast mining (all pickaxes)", client.fast_mining_argv()))
-        self.sp_reach = self._spin(1, 100, 20)
-        tg.addWidget(QLabel("Reach +"))
-        tg.addWidget(self.sp_reach)
-        tg.addWidget(self._btn("Long reach", lambda: client.long_reach_argv(self.sp_reach.value())))
-        col.addWidget(tool_box)
-
+    def _patches_tab(self) -> QWidget:
+        w = QWidget()
+        col = QVBoxLayout(w)
         col.addWidget(self._patches_group())
         col.addStretch()
         return w
@@ -419,15 +475,17 @@ class MainWindow(QWidget):
         self._run(client.spawn_npc_argv(net_id, distance))
 
     def _on_tab_changed(self, i: int):
-        if i == 3:
+        """Dispatch on the widget, never on the index — see the note where tabs are added."""
+        w = self.tabs.widget(i)
+        if w is self.compendium:
             self.compendium.ensure_loaded()
             if not sprites.is_cached():
                 self._extract_sprites(after=self.compendium.ensure_loaded)
-        if i == 1:
+        elif w is self.tab_inventory:
             self.refresh_inventory()
             if not sprites.is_cached():               # icons missing/stale: build them,
                 self._extract_sprites(after=self.refresh_inventory)   # then redraw the grid
-        elif i == 2:
+        elif w is self.tab_recipes:
             self._ensure_recipe_grid()
 
     def _patches_group(self) -> QGroupBox:
@@ -627,6 +685,53 @@ class MainWindow(QWidget):
             argv.append("--gems")
         if not self.helper.request(argv, done):
             self._vein_inflight = False
+
+    def _tick_potions(self):
+        """One renewal round. Skipped while a request is already out, so a slow round
+        cannot pile overlapping ticks onto the worker."""
+        if not self.helper.available or self._potion_inflight:
+            return
+        self._potion_inflight = True
+
+        def done(raw: str):
+            self._potion_inflight = False
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    got = json.loads(line)
+                except ValueError:
+                    continue
+                # Only the transitions are worth saying: this runs four times a second,
+                # and "renewed" every round would bury everything else in the log.
+                for e in got.get("added", []):
+                    if e["buff"] not in self._potion_said:
+                        self._potion_said.add(e["buff"])
+                        self.log.appendPlainText(
+                            f"[potions] slot {e['slot']} buff {e['buff']} is up")
+                for e in got.get("full", []):
+                    self.log.appendPlainText(
+                        f"[potions] no free buff slot for buff {e['buff']} "
+                        f"— unfavorite something or let a buff expire")
+
+        argv = client.potions_argv(self.sp_potion_stack.value())
+        if not self.helper.request(argv, done):
+            self._potion_inflight = False
+
+    def _set_potion_watch(self, on: bool):
+        """Nothing to disarm on the way out: stop renewing and the buffs expire.
+
+        The interval must stay well under the buff time the round writes, or the buff
+        lapses between rounds and the player sees it flicker.
+        """
+        if on and not self._potion_timer.isActive():
+            self._potion_timer.start(250)
+        elif not on and self._potion_timer.isActive():
+            self._potion_timer.stop()
+            self._potion_inflight = False
+            self._potion_said.clear()
+            self.log.appendPlainText("[potions] off — your buffs will lapse on their own")
 
     def _set_vein_watch(self, on: bool):
         """Follow the cheat: watch while it is on, and disarm when it goes off.
