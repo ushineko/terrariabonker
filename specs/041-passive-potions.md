@@ -94,14 +94,13 @@ None of these are known yet, and each is a place the work can stall:
   snapshots tracking the player's alt-clicks. The premise holds: every potion carried a
   distinct `buffType` and `consumable=1`, and the non-potion beside them read zero for
   both, so the gate separates cleanly with no item table.
-- `Player.buffType[]` and `Player.buffTime[]` offsets. **Strong candidates, not yet
-  confirmed**: pointers at `statLife-0x670` and `statLife-0x66C`, each to a 44-element int
-  array — not 22, which is what a first search assumed and why it found nothing. The pair
-  is adjacent, same length, one holding small ids and the other holding 18000 (five
-  minutes exactly) plus two entries pinned at 1, which is what a station buff renewed every
-  frame looks like. Confirming needs a sample taken while the player is actually updating:
-  three attempts read them as frozen, every one of them with the player standing still or
-  the game paused, which proves nothing either way.
+- ~~`Player.buffType[]` and `Player.buffTime[]` offsets.~~ **Done.** `statLife-0x670` and
+  `statLife-0x66C`, each to a 44-element int array — not 22, which is what a first search
+  assumed and why it found nothing at all. Confirmed by watching a buff appear: drinking a
+  potion put `(type 6, time 28798)` into a free slot, eight minutes minus the two frames it
+  had already counted down. The count-down is the part that matters — five earlier samples
+  read the arrays as frozen, every one of them taken with the player standing still or the
+  game paused, and none of them was evidence of anything.
 - What the refresh interval and buff time should be. They trade against each other: the
   time must outlast the interval by enough margin that a stalled trainer does not make the
   buff flicker.
