@@ -217,6 +217,7 @@ class MainWindow(QWidget):
         self._fishing_timer.timeout.connect(self._tick_fishing)
         self._fishing_inflight = False
         self._fishing_kit_done = False
+        self._fishing_said: set = set()     # slots already reported, so the log is not spam
         self._vein_inflight = False
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
@@ -766,10 +767,15 @@ class MainWindow(QWidget):
                     self.log.appendPlainText(
                         f"[fishing] gave you a {what} (slot {e['slot']})")
                 self._fishing_kit_done = True
+                # Say it once per stack and then stay quiet. Every bait consumed is a
+                # top-up, so logging each one buries everything else in the panel within
+                # a minute of fishing -- which is exactly what it did in testing.
                 for t in (got.get("bait") or {}).get("topped", []):
-                    self.log.appendPlainText(
-                        f"[fishing] bait topped up: slot {t['slot']} "
-                        f"{t['was']} -> {t['now']}")
+                    if t["slot"] not in self._fishing_said:
+                        self._fishing_said.add(t["slot"])
+                        self.log.appendPlainText(
+                            f"[fishing] keeping the bait in slot {t['slot']} "
+                            f"topped up to {t['now']}")
 
         argv = client.fishing_argv(self.sp_bait.value(), kit=want_kit)
         if not self.helper.request(argv, done):
@@ -779,6 +785,7 @@ class MainWindow(QWidget):
         """Nothing to undo on the way out: the bait you have is yours to keep."""
         if on and not self._fishing_timer.isActive():
             self._fishing_kit_done = False
+            self._fishing_said.clear()
             self._fishing_timer.start(1000)
         elif not on and self._fishing_timer.isActive():
             self._fishing_timer.stop()

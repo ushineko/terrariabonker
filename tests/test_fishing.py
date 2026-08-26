@@ -246,3 +246,41 @@ def test_the_first_round_asks_for_the_kit_and_later_ones_do_not(qt_app, monkeypa
         assert "--no-kit" in sent[1], "kept asking for the kit after it was handled"
     finally:
         w.close()
+
+
+def test_a_refilled_stack_is_logged_once_not_on_every_bait(qt_app, monkeypatch):
+    """Reported from the game: every bait consumed produced its own "29 -> 30" line, so
+    a few minutes of fishing buried everything else in the panel."""
+    from terrariabonker.gui import main_window as mw
+
+    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
+    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
+
+    w = mw.MainWindow()
+    try:
+        reply = ('{"bait": {"topped": [{"slot": 17, "power": 30, '
+                 '"was": 29, "now": 30}]}}')
+
+        def fake_request(argv, cb):
+            cb(reply)
+            return True
+
+        w.helper.available = True
+        monkeypatch.setattr(w.helper, "request", fake_request)
+
+        for _ in range(5):
+            w._tick_fishing()
+        lines = [ln for ln in w.log.toPlainText().splitlines() if "[fishing]" in ln]
+        assert len(lines) == 1, lines
+        assert "slot 17" in lines[0]
+
+        # a fresh session says it again: the player has been told nothing this time
+        w._set_fishing_watch(False)
+        w._set_fishing_watch(True)
+        w._tick_fishing()
+        assert len([ln for ln in w.log.toPlainText().splitlines()
+                    if "[fishing]" in ln]) == 2
+    finally:
+        w.close()

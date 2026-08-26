@@ -125,6 +125,26 @@ where 30 was expected and carried on regardless. **Locate an item by identity on
 access, never by a cached address** — the lesson spec 038 already exists for — and treat an
 unexpected pre-value as a reason to abort, not a value to record.
 
+### In-game, 2026-08-25 (kit and bait top-up)
+
+- **The kit works.** The maintainer threw away their rod, ticked the cheat, and the panel
+  logged `gave you a rod (slot 9)` — a Golden Fishing Rod, power 50.
+- **It leaves owned gear alone**: run against a player who already had a rod and bait, it
+  gave nothing and said so.
+- **Bait is held up.** Both stacks were topped in one round (15 → 30 and 3 → 30), and it
+  kept a single stack at 30 through continuous fishing.
+- **The trash is not part of `Player.inventory`.** A bait moved to the trash vanished from
+  what the cheat sees, which is the behaviour wanted — a rod someone threw away must not
+  read as "you already have a rod". Slots 50–57 are coins and ammo; 58 read empty and its
+  purpose is still unknown. No special-casing was added, because none is needed.
+- **One flaw found and fixed**: every bait consumed logged its own `29 -> 30` line, which
+  buries the panel within minutes of fishing. It now says it once per stack.
+
+Still unverified: whether an item held on the mouse cursor is absent from the inventory
+array. If it is, a player dragging their rod when the first round fires would be given a
+second one. The exposure is one round per enable, and no fix has been attempted because
+the premise has not been established.
+
 ## Recon still needed
 
 - **The bobber's wait timer.** Which field counts down between cast and nibble is not
