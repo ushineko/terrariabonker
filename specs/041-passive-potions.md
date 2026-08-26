@@ -38,11 +38,11 @@ Checked items were verified against the running game on 1.4.5.8, not only in tes
 - [ ] Favoriting a potion mid-session starts the effect and unfavoriting stops it. The
       round re-reads the inventory every time, so this follows — but the transitions have
       not been watched directly.
-- [ ] **Drinking a potion normally is never degraded by the cheat.** Partly evidenced: 64
-      renewals ran past a drunk 8-minute buff without touching it. But that buff was not
-      one the player carried favorited, so the `kept` path itself was not exercised live.
-      Needs: drink a potion you also carry favorited, and confirm the round reports `kept`
-      and the long duration survives.
+- [x] **Drinking a potion normally is never degraded by the cheat.** *(A Night Owl potion
+      was drunk while the same potion sat favorited in the bag and was being renewed
+      passively. The drunk buff read 35578 ticks — 9.9 minutes — and four consecutive
+      rounds each reported `kept` and left it at 35578. A renewal writes 120, so an
+      unguarded round would have cut nearly ten minutes down to two seconds.)*
 - [x] Non-consumables are inert: a favorited pet, light pet or mount item does nothing,
       even though it carries a `buffType`. *(A favorited Slime Staff carrying buff 64 and
       reading `consumable=0` was present in the bag throughout: the round skipped it while
