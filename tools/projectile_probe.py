@@ -84,14 +84,17 @@ def main() -> int:
         sys.exit("could not find Main.projectile")
     tm = tiles.TileMap(mem, base)
 
-    print(f"watching for {args.seconds:.0f}s. Fire whenever -- nothing here needs timing.")
+    # Line-buffered on purpose: piped or backgrounded, Python holds stdout until exit, so
+    # a probe you start and then wonder about prints nothing at all until it is over.
+    print(f"watching for {args.seconds:.0f}s. Fire whenever -- nothing here needs timing.",
+          flush=True)
     if wanted:
         print(f"enforcing {wanted} on {'every other slot' if args.ab else 'every projectile'}"
-              f"{'' if args.type is None else f' of type {args.type}'}")
-    print()
+              f"{'' if args.type is None else f' of type {args.type}'}", flush=True)
+    print(flush=True)
 
     stat = collections.defaultdict(lambda: [0, 0])
-    t0 = time.time()
+    t0 = said = time.time()
     while time.time() - t0 < args.seconds:
         for slot, obj in enumerate(struct.unpack("<1001I", mem.read(arr + 0x10, 4004))):
             if not obj or mem.read(obj + ACTIVE, 1) != b"\x01":
@@ -112,6 +115,10 @@ def main() -> int:
                 continue
             solid = tm.solid_type_at(int(x // 16), int(y // 16)) is not None
             stat[(ptype, patched)][0 if solid else 1] += 1
+        if time.time() - said > 10:                    # a heartbeat, so it is visibly alive
+            said = time.time()
+            live = sum(i + o for i, o in stat.values())
+            print(f"  [{time.time() - t0:5.0f}s] {live} projectile samples so far", flush=True)
         time.sleep(1 / 120)
 
     if not stat:
