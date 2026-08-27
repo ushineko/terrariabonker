@@ -832,10 +832,10 @@ def test_disarm_drops_a_press_that_has_not_landed(game):
     m, p = game
     _plant_auto_use(m, p)
     p.enable("auto_use")
-    p.auto_use_arm()
-    assert p.auto_use_armed()
-    p.auto_use_disarm()
-    assert not p.auto_use_armed()
+    p.auto_use.arm()
+    assert p.auto_use.armed()
+    p.auto_use.disarm()
+    assert not p.auto_use.armed()
 
 
 def test_slot_addresses_come_from_the_declared_order(game):
@@ -886,3 +886,38 @@ def test_the_cave_path_still_works_for_a_non_arena_injection(game):
 
 def _b_test(hexstr: str) -> bytes:
     return bytes(int(x, 16) for x in hexstr.split())
+
+
+def test_the_patch_engine_holds_no_per_cheat_protocol(game):
+    """Adding a cheat must not mean editing the patch engine.
+
+    Eight methods for two cheats had accumulated on Patcher -- auto_use_arm/disarm/
+    armed/presses and ore_queue/armed/arm/disarm -- so a third cheat's arena words would
+    have landed here too. They live in arena_state now, one class per cheat, reached
+    through the `auto_use` and `ore` properties.
+    """
+    import inspect
+
+    from terrariabonker import arena_state
+
+    leaked = [n for n, _ in inspect.getmembers(P.Patcher)
+              if n.startswith(("auto_use_", "ore_"))]
+    assert not leaked, f"per-cheat protocol back on the patch engine: {leaked}"
+
+    _, p = game
+    assert isinstance(p.auto_use, arena_state.AutoUse)
+    assert isinstance(p.ore, arena_state.OreQueue)
+
+
+def test_an_arena_view_without_an_arena_does_nothing(game):
+    """Every one of these is reachable before the arena exists -- the cheat being off is
+    the normal case, not an error."""
+    from terrariabonker import arena_state
+
+    auto = arena_state.AutoUse(None, None)
+    assert auto.arm() is False and auto.disarm() is False
+    assert auto.armed() is False and auto.presses() == 0
+
+    ore = arena_state.OreQueue(None, None)
+    assert ore.address is None and ore.armed() is False
+    assert ore.arm([(1, 2)]) == 0 and ore.disarm() is False

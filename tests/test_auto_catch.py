@@ -21,6 +21,26 @@ class FakeInventory:
         return self.holding
 
 
+class _FakeAutoUse:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def arm(self):
+        self.owner.arms += 1
+        self.owner.presses += 1      # the stub consumes it on the next frame
+        return True
+
+    def armed(self):
+        return False                 # already consumed
+
+    def presses(self):
+        return self.owner.presses
+
+    def disarm(self):
+        self.owner.disarmed = True
+        return True
+
+
 class FakePatcher:
     def __init__(self, enabled=True):
         self.enabled = enabled
@@ -31,20 +51,11 @@ class FakePatcher:
     def is_enabled(self, name):
         return self.enabled and name == "auto_use"
 
-    def auto_use_arm(self):
-        self.arms += 1
-        self.presses += 1        # the stub consumes it on the next frame
-        return True
-
-    def auto_use_armed(self):
-        return False             # already consumed
-
-    def auto_use_presses(self):
-        return self.presses
-
-    def auto_use_disarm(self):
-        self.disarmed = True
-        return True
+    @property
+    def auto_use(self):
+        """The shape `Patcher.auto_use` now has: per-cheat arena protocol moved onto
+        arena_state.AutoUse, so the double follows the object, not the old flat names."""
+        return _FakeAutoUse(self)
 
 
 def _bobber(*, biting, catch=2290, slot=3):
@@ -110,13 +121,16 @@ def test_a_confirmed_cast_is_the_bobber_going_out(monkeypatch):
     p = FakePatcher()
     water: list = []
     svc = _service(monkeypatch, water, p)
-    real = p.auto_use_arm
+    # The line goes out when the press lands: patch the view's arm, not the patcher's.
+    real_view = _FakeAutoUse(p)
+    real_arm = real_view.arm
 
     def arm_and_cast():
         water.append(_bobber(biting=False))
-        return real()
+        return real_arm()
 
-    p.auto_use_arm = arm_and_cast
+    real_view.arm = arm_and_cast
+    monkeypatch.setattr(type(p), "auto_use", property(lambda _self: real_view))
     got = svc.catch_tick(recast=True, budget=0.05)
     assert got["events"] == [{"what": "cast", "confirmed": True}]
 

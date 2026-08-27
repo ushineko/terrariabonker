@@ -22,6 +22,8 @@ import fcntl
 import json
 import os
 import struct
+
+from terrariabonker import arena_state
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -573,8 +575,8 @@ def _teleport_body(player_base: int, call_target: int) -> bytes:
 # is the number that turns "one block per swing" into "the vein just goes" -- a typical
 # vein is 10-30 tiles. Draining a 400-tile vein in a single call would run 400 PickTiles
 # in one frame, each spawning dust, drops and light updates, and would visibly hitch.
-ORE_MAX_BATCH = 32
-ORE_QUEUE_OFF = 0x400            # queue sits well clear of the ~100-byte stub
+ORE_MAX_BATCH = arena_state.ORE_MAX_BATCH
+ORE_QUEUE_OFF = arena_state.ORE_QUEUE_OFF
 ORE_QUEUE_BYTES = 4 + ORE_MAX_BATCH * 8
 # The pick power handed to PickTile. It was 100, and 100 is not enough: a tile breaks on
 # accumulated damage, and the game credits a short list of tile types -- hellstone among
@@ -593,9 +595,9 @@ ORE_PICK_POWER = 250
 # overlapped it: mining a vein wrote the extractor's tile count into auto-use's arm word,
 # and the stub pressed the player's use button for every batch queued. Nothing in the
 # auto-use code was involved, which is what made it baffling in the log.
-AUTO_USE_ARMED_OFF = 0x600
-AUTO_USE_COUNT_OFF = 0x604
-AUTO_USE_RELEASE_OFF = 0x608     # which byte the stub also sets (see RELEASE_ITEM_OFF)
+AUTO_USE_ARMED_OFF = arena_state.AUTO_USE_ARMED_OFF
+AUTO_USE_COUNT_OFF = arena_state.AUTO_USE_COUNT_OFF
+AUTO_USE_RELEASE_OFF = arena_state.AUTO_USE_RELEASE_OFF
 USE_ITEM_OFF = 0x672             # Player.controlUseItem, from the Player object base
 # Player.releaseUseItem. Setting controlUseItem alone reels a bobber in but never casts:
 # ItemCheck_PullFishingBobbers runs off controlUseItem, while starting a *use* needs a
@@ -1705,89 +1707,19 @@ class Patcher:
         self._inj[inj.name] = {"sites": sites, "stub_len": stub_len}
         self._save_state()
 
-    def auto_use_arm(self) -> bool:
-        """Ask the stub to press the use button once, on the next frame.
+    @property
+    def auto_use(self) -> arena_state.AutoUse:
+        """Auto-use's words in the arena. See :mod:`terrariabonker.arena_state`.
 
-        Returns False when there is no arena, which is the same as "the cheat is off".
-        Arming twice before a frame runs is one press, not two -- the stub consumes the
-        flag rather than counting it. That is deliberate: the flag means "press soon", and
-        a caller that wants N presses must wait for each to land.
+        Per-cheat protocol lives with the cheat, not on the patch engine: eight methods
+        for two cheats had accumulated here, so adding a third meant editing this class.
         """
-        if not self._arena:
-            return False
-        return self.mem.write_i32(self._arena + AUTO_USE_ARMED_OFF, 1)
+        return arena_state.AutoUse(self.mem, self._arena)
 
-    def auto_use_disarm(self) -> bool:
-        """Drop any press that has not landed yet.
-
-        An arm is a promise to press on the *next frame*, and frames stop -- at the title
-        screen, in a menu, on a world load. Left set, the flag waits and fires the moment
-        the game starts updating again, which is a press the player did not ask for
-        arriving at a moment nobody was thinking about. Found by arming 50 times at the
-        menu: nothing was consumed, and the flag sat there ready.
-        """
-        if not self._arena:
-            return False
-        return self.mem.write_i32(self._arena + AUTO_USE_ARMED_OFF, 0)
-
-    def auto_use_armed(self) -> bool:
-        """Is a press still waiting for a frame? Clears itself when the stub runs."""
-        return bool(self._arena
-                    and self.mem.read_i32(self._arena + AUTO_USE_ARMED_OFF))
-
-    def auto_use_presses(self) -> int:
-        """How many presses the stub has made since the arena was allocated.
-
-        The stub's own count, not ours -- which is what makes it evidence. A caller that
-        armed N times and reads back fewer knows the presses did not happen, rather than
-        assuming they did.
-        """
-        return (self.mem.read_i32(self._arena + AUTO_USE_COUNT_OFF) or 0) if self._arena \
-            else 0
-
-    def ore_queue(self) -> int | None:
-        """Address of the extractor's queue, or None when it has no arena yet.
-
-        The queue is at a fixed offset in our own arena rather than at the tail of a
-        borrowed cave, so it is simply an address -- no derivation from stub length, and
-        no risk of drifting away from what the stub reads.
-        """
-        return None if not self._arena else self._arena + ORE_QUEUE_OFF
-
-    def ore_armed(self) -> bool:
-        """Is anything queued for the stub to mine?
-
-        Only this side writes the queue, so this reports what *we* last set. Whether those
-        tiles actually got mined is answered by looking at the tiles.
-        """
-        q = self.ore_queue()
-        return bool(q and self.mem.read_i32(q))
-
-    def ore_arm(self, tiles) -> int:
-        """Queue up to :data:`ORE_MAX_BATCH` tiles. Returns how many were taken.
-
-        The count is written **last**, so the game can never see a count that covers
-        coordinates which are only half written -- the stub would mine whatever garbage
-        happened to be there, and mining the wrong tile cannot be undone.
-        """
-        q = self.ore_queue()
-        if q is None:
-            return 0
-        batch = list(tiles)[:ORE_MAX_BATCH]
-        if not batch:
-            return 0
-        self.mem.write(q + 4, b"".join(struct.pack("<ii", int(x), int(y))
-                                       for x, y in batch))
-        self.mem.write(q, struct.pack("<i", len(batch)))
-        return len(batch)
-
-    def ore_disarm(self) -> bool:
-        """Stop the stub mining. A queue left armed is re-mined on every swing."""
-        q = self.ore_queue()
-        if q is None:
-            return False
-        self.mem.write(q, struct.pack("<i", 0))
-        return True
+    @property
+    def ore(self) -> arena_state.OreQueue:
+        """The extractor's queue in the arena."""
+        return arena_state.OreQueue(self.mem, self._arena)
 
     def _disable_injection(self, inj: Injection) -> None:
         rec = self._inj.get(inj.name)
@@ -1801,8 +1733,8 @@ class Patcher:
             self.mem.write(s["inject"], inj.overwrite)  # restore original bytes
             if s.get("cave"):
                 self.mem.write(s["cave"], b"\xcc" * stub_len)   # scrub the stub
-        if inj.arena and self.ore_queue():
-            self.ore_disarm()          # an armed queue would outlive the stub
+        if inj.arena and self.ore.address:
+            self.ore.disarm()          # an armed queue would outlive the stub
         self._apply_edits(inj.edits, on=False)
         self._inj.pop(inj.name, None)
         self._save_state()

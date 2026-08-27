@@ -204,6 +204,30 @@ def test_a_vein_report_names_the_tile_even_when_it_is_not_an_ore():
 ARENA = 0x68000000
 
 
+class _FakeOre:
+    """The shape `Patcher.ore` now has, backed by whatever the fake wants to do.
+
+    The per-cheat arena protocol moved off Patcher onto arena_state.OreQueue, so the test
+    doubles follow the object rather than the old flat method names.
+    """
+
+    def __init__(self, owner):
+        self.owner = owner
+
+    def arm(self, batch):
+        return self.owner._arm(batch)
+
+    def disarm(self):
+        return self.owner._disarm() if hasattr(self.owner, "_disarm") else True
+
+    def armed(self):
+        return bool(getattr(self.owner, "_armed", False))
+
+    @property
+    def address(self):
+        return getattr(self.owner, "_queue_addr", 0x1000)
+
+
 def _ore_stub():
     """Build the extractor stub against stand-ins for the addresses it bakes in."""
     from terrariabonker import patcher as P
@@ -431,9 +455,9 @@ def test_arming_writes_the_pairs_before_the_count():
     p.mem = FakeMem()
     p._arena = ARENA
     q = ARENA + P.ORE_QUEUE_OFF
-    assert p.ore_queue() == q
+    assert p.ore.address == q
 
-    assert p.ore_arm([(7, 9), (8, 9)]) == 2
+    assert p.ore.arm([(7, 9), (8, 9)]) == 2
     assert [a for a, _ in p.mem.writes] == [q + 4, q], \
         "the count must be written after the pairs, never before"
     assert p.mem.writes[0][1] == struct.pack("<iiii", 7, 9, 8, 9)
@@ -441,11 +465,11 @@ def test_arming_writes_the_pairs_before_the_count():
 
     p.mem = FakeMem()
     over = [(i, i) for i in range(P.ORE_MAX_BATCH + 10)]
-    assert p.ore_arm(over) == P.ORE_MAX_BATCH, "the caller-side cap is not applied"
+    assert p.ore.arm(over) == P.ORE_MAX_BATCH, "the caller-side cap is not applied"
 
     p.mem = FakeMem(count=3)
-    assert p.ore_armed() is True
-    p.ore_disarm()
+    assert p.ore.armed() is True
+    p.ore.disarm()
     assert p.mem.writes == [(q, struct.pack("<i", 0))]
 
 
@@ -584,7 +608,7 @@ def test_the_watcher_rechecks_known_ore_instead_of_rescanning_everything():
         def values(self):
             return {"tool_reach": 75}
 
-        def ore_disarm(self):
+        def _disarm(self):
             return True
 
     svc = Service.__new__(Service)
@@ -672,7 +696,13 @@ def test_a_falling_deposit_is_followed_down_instead_of_lost():
         def is_enabled(self, n):
             return True
 
-        def ore_arm(self, batch):
+        @property
+        def ore(self):
+            # The queue moved onto its own view object (arena_state.OreQueue); the fake
+            # follows the shape rather than the old method name.
+            return _FakeOre(self)
+
+        def _arm(self, batch):
             batch = list(batch)[:ORE_MAX_BATCH]
             for q in batch:
                 live.discard(q)
@@ -687,7 +717,7 @@ def test_a_falling_deposit_is_followed_down_instead_of_lost():
             live.update(fallen)
             return len(batch)
 
-        def ore_disarm(self):
+        def _disarm(self):
             return True
 
     svc = S.Service.__new__(S.Service)
@@ -732,7 +762,13 @@ def _extract_world(vein, far, ground=(), ore=7, steal=0):
         def is_enabled(self, n):
             return True
 
-        def ore_arm(self, batch):
+        @property
+        def ore(self):
+            # The queue moved onto its own view object (arena_state.OreQueue); the fake
+            # follows the shape rather than the old method name.
+            return _FakeOre(self)
+
+        def _arm(self, batch):
             batch = list(batch)[:ORE_MAX_BATCH]
             for q in batch:
                 live.discard(q)
@@ -742,7 +778,7 @@ def _extract_world(vein, far, ground=(), ore=7, steal=0):
                     live.discard(q)           # the player got these
             return len(batch)
 
-        def ore_disarm(self):
+        def _disarm(self):
             return True
 
     svc = S.Service.__new__(S.Service)

@@ -786,7 +786,7 @@ class Service:
                                 budget - mined)[:ORE_MAX_BATCH]
                 if not batch:
                     break
-                if not p.ore_arm(batch):
+                if not p.ore.arm(batch):
                     stalled = "could not arm the stub"
                     break
                 batches += 1
@@ -804,7 +804,7 @@ class Service:
                                "%.0fs" % (len(batch), timeout))
                     break
         finally:
-            p.ore_disarm()          # a queue left armed is re-mined every frame
+            p.ore.disarm()          # a queue left armed is re-mined every frame
         left = still_standing() is not None
         return {"at": [x, y], "queued": len(first), "mined": mined,
                 "left": len(first) - mined if not left else -1,
@@ -1114,8 +1114,8 @@ class Service:
                 self._seen_cast = True          # the player has cast; recast may follow
             bite = P.find_bite(self.mem, arr)
             if bite is not None:
-                if p.auto_use_arm():
-                    while p.auto_use_armed() and time.time() < end + 0.2:
+                if p.auto_use.arm():
+                    while p.auto_use.armed() and time.time() < end + 0.2:
                         time.sleep(0.002)
                     events.append({"what": "reel", "catch": bite.catch,
                                    "slot": bite.slot})
@@ -1128,7 +1128,7 @@ class Service:
             if (recast and self._seen_cast and not P.find_bobbers(self.mem, arr)
                     and time.time() - self._last_reel > self.CAST_SETTLE
                     and self._live_inventory().holding_rod()):
-                if p.auto_use_arm():
+                if p.auto_use.arm():
                     deadline = time.time() + self.CAST_CONFIRM
                     while time.time() < deadline:
                         if P.find_bobbers(self.mem, arr):
@@ -1145,7 +1145,7 @@ class Service:
                         events.append({"what": "cast", "confirmed": False})
                 break
             time.sleep(1 / 120)
-        return {"events": events, "presses": p.auto_use_presses()}
+        return {"events": events, "presses": p.auto_use.presses()}
 
     def catch_stop(self) -> dict:
         """Forget the located array and the cast gate. Called when the cheat goes off.
@@ -1158,7 +1158,7 @@ class Service:
         self._seen_cast = False
         p = self.patcher()
         if p.is_enabled("auto_use"):
-            p.auto_use_disarm()      # a press promised but not yet landed is not wanted
+            p.auto_use.disarm()      # a press promised but not yet landed is not wanted
         return {"stopped": had}
 
     def watch_catch(self, *, recast: bool = False, interval: float = 0.0,
@@ -1493,6 +1493,6 @@ class _VeinWatch:
 
     def close(self):
         try:
-            self.p.ore_disarm()
+            self.p.ore.disarm()
         except Exception:
             pass
