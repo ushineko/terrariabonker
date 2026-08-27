@@ -93,6 +93,7 @@ class Service:
         self._compat = None                  # build never changes while the process lives
         self._main_base = None               # cached Main static block (see tilemap())
         self._watch = None                   # live _VeinWatch, driven by watch_tick()
+        self._proj_arr = None                # Main.projectile, kept once located (043)
 
     def invalidate(self) -> None:
         """Drop cached locate results; the next call rescans from scratch."""
@@ -981,6 +982,95 @@ class Service:
                                "was": stack, "now": keep})
         return {"keep": keep, "topped": topped,
                 "baits": len(inv.fishing_gear()["baits"])}
+
+    # --- auto-catch (spec 043) --------------------------------------------
+
+    def catch_tick(self, *, recast: bool = False, budget: float = 0.30) -> dict:
+        """Take any fish that is on the line, for up to ``budget`` seconds. One slice.
+
+        Polls fast inside the privileged worker rather than returning between samples: a
+        bite window lasts a second or two and a round trip per sample would spend most of
+        it in transit. The GUI drives this from a timer, exactly as vein watching does.
+
+        A bite is the game's own pull condition (see :mod:`terrariabonker.projectiles`),
+        and taking it is one arm of the auto-use stub -- one press, one reel. The poller
+        this replaces caught the fish and re-cast twice on the same burst.
+
+        ``recast`` also arms when the water is empty, which is what turns "take the fish"
+        into "keep fishing". It is off by default and gated by the caller (see
+        :meth:`watch_catch`): the game gives no signal for "the player meant to stop", so
+        an ungated recast follows them away from the lake.
+        """
+        import time
+
+        from terrariabonker import locate
+        from terrariabonker import projectiles as P
+
+        p = self.patcher()
+        if not p.is_enabled("auto_use"):
+            raise ServiceError("the auto-use cheat is not enabled")
+        if self._proj_arr is None:
+            base = locate.main_static_base(self.mem)
+            self._proj_arr = base and P.projectile_array(self.mem, base)
+            if not self._proj_arr:
+                raise ServiceError("could not locate Main.projectile")
+        arr = self._proj_arr
+        end = time.time() + budget
+        events: list[dict] = []
+        while time.time() < end:
+            bite = P.find_bite(self.mem, arr)
+            if bite is not None:
+                if p.auto_use_arm():
+                    while p.auto_use_armed() and time.time() < end + 0.2:
+                        time.sleep(0.002)
+                    events.append({"what": "reel", "catch": bite.catch,
+                                   "slot": bite.slot})
+                    # Wait out the window rather than arming again on the same fish: the
+                    # pull sets ai[0] and the bite reads as over a frame later.
+                    while P.find_bite(self.mem, arr) and time.time() < end + 0.5:
+                        time.sleep(0.01)
+                break
+            if recast and not P.find_bobbers(self.mem, arr):
+                if p.auto_use_arm():
+                    events.append({"what": "cast"})
+                break
+            time.sleep(1 / 120)
+        return {"events": events, "presses": p.auto_use_presses()}
+
+    def catch_stop(self) -> dict:
+        """Forget the located projectile array. Called when the cheat goes off."""
+        had, self._proj_arr = self._proj_arr is not None, None
+        return {"stopped": had}
+
+    def watch_catch(self, *, recast: bool = False, interval: float = 0.0,
+                    rounds: int | None = None, on_event=None) -> dict:
+        """Keep fishing. Blocking; the GUI drives :meth:`catch_tick` from a timer.
+
+        ``recast`` is gated here rather than in the tick: nothing is cast until the player
+        has cast once themselves. That way the loop follows a player who is fishing and
+        does nothing at all to one who is standing at a lake holding a rod.
+        """
+        import time
+
+        from terrariabonker import projectiles as P
+
+        n, caught, cast, seen_bobber = 0, 0, 0, False
+        while rounds is None or n < rounds:
+            n += 1
+            if recast and not seen_bobber and self._proj_arr:
+                seen_bobber = bool(P.find_bobbers(self.mem, self._proj_arr))
+            r = self.catch_tick(recast=recast and seen_bobber)
+            for e in r["events"]:
+                if e["what"] == "reel":
+                    caught += 1
+                    seen_bobber = True
+                else:
+                    cast += 1
+                if on_event:
+                    on_event(e)
+            if interval:
+                time.sleep(interval)
+        return {"rounds": n, "caught": caught, "cast": cast}
 
     def watch_bait(self, *, keep: int = 30, interval: float = 1.0,
                    rounds: int | None = None, on_event=None) -> dict:

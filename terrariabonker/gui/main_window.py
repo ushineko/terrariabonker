@@ -218,6 +218,10 @@ class MainWindow(QWidget):
         self._fishing_inflight = False
         self._fishing_kit_done = False
         self._fishing_said: set = set()     # slots already reported, so the log is not spam
+        self._catch_timer = QTimer(self)
+        self._catch_timer.timeout.connect(self._tick_catch)
+        self._catch_inflight = False
+        self._catch_n = 0
         self._vein_inflight = False
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
@@ -393,6 +397,13 @@ class MainWindow(QWidget):
         self.sp_bait.setToolTip(uitext.wrap(
             "Any bait stack below this is topped back up to it."))
         fb2.addWidget(self.sp_bait)
+        self.cb_catch = QCheckBox("Reel in for me")
+        self.cb_catch.setToolTip(uitext.wrap(
+            "Takes every fish that bites, one press per bite — you still cast. Needs "
+            "'Auto-use' on the Patches tab, which is what presses the button; this only "
+            "decides when. Switch it off and your own clicking is untouched."))
+        self.cb_catch.toggled.connect(self._set_catch_watch)
+        fb2.addWidget(self.cb_catch)
         fb2.addWidget(QLabel("Rod power"))
         self.sp_power = self._spin(1, 255, 255)
         self.sp_power.setToolTip(uitext.wrap(
@@ -791,6 +802,55 @@ class MainWindow(QWidget):
         argv = client.fishing_argv(self.sp_bait.value(), kit=want_kit)
         if not self.helper.request(argv, done):
             self._fishing_inflight = False
+
+    def _tick_catch(self):
+        """One slice of auto-catch. Skipped while a request is out, like vein watching."""
+        if not self.helper.available or self._catch_inflight:
+            return
+        self._catch_inflight = True
+
+        def done(raw: str):
+            self._catch_inflight = False
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.startswith("[ERROR]"):
+                    # The commonest case by far: Auto-use is off, so nothing can press
+                    # anything. Say it once and untick, rather than logging the same line
+                    # every 50 ms until the player notices.
+                    self.log.appendPlainText(f"[catch] {line[len('[ERROR]'):].strip()}")
+                    self.cb_catch.setChecked(False)
+                    return
+                if not line.startswith("{"):
+                    continue
+                try:
+                    got = json.loads(line)
+                except ValueError:
+                    continue
+                for e in got.get("events", []):
+                    self._catch_n += 1
+                    what = e.get("catch", 0)
+                    name = names.name(what) if what > 0 else f"NPC {-what}"
+                    self.log.appendPlainText(
+                        f"[catch] reeled in {name}" if e["what"] == "reel"
+                        else "[catch] cast the line")
+
+        if not self.helper.request(client.catch_argv(), done):
+            self._catch_inflight = False
+
+    def _set_catch_watch(self, on: bool):
+        """Follow the checkbox: watch while it is on, and drop the watcher when it goes off.
+
+        The stub is not touched here. Auto-use is a separate cheat on the Patches tab and
+        stays exactly as the player left it -- this only decides when to arm it, so
+        unticking stops the arming and nothing else.
+        """
+        if on and not self._catch_timer.isActive():
+            self._catch_n = 0
+            self._catch_timer.start(50)
+        elif not on and self._catch_timer.isActive():
+            self._catch_timer.stop()
+            self._catch_inflight = False
+            self.helper.request(client.catch_stop_argv(), lambda _out: None)
 
     def _set_fishing_watch(self, on: bool):
         """The bait you have is yours to keep — but a raised rod must be put back.

@@ -161,7 +161,7 @@ SERVE_OPS = frozenset({
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
     "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
     "accept-build", "vein", "extract", "extract-tick", "extract-stop",
-    "potions", "fishing",
+    "potions", "fishing", "catch", "catch-tick", "catch-stop",
 })
 
 
@@ -436,6 +436,50 @@ def cmd_extract_stop(args) -> int:
     """Drop the watcher and disarm; the cheat was switched off."""
     svc = _svc(guard=True, force=args.force)
     print(json.dumps(svc.watch_stop()) if args.json else "[extract] watcher stopped")
+    return 0
+
+
+def _catch_line(e: dict) -> str:
+    if e["what"] == "cast":
+        return "[catch] cast the line"
+    catch = e.get("catch", 0)
+    from terrariabonker import names
+    what = names.name(catch) if catch > 0 else f"NPC {-catch}"
+    return f"[catch] reeled in {what}"
+
+
+def cmd_catch(args) -> int:
+    """Take every fish that bites. Blocking; Ctrl-C stops it."""
+    svc = _svc(guard=True, force=args.force)
+    print("[catch] watching for bites. Ctrl-C to stop."
+          + ("" if args.recast else " (pass --recast to cast for you too)"))
+    try:
+        got = svc.watch_catch(recast=args.recast, rounds=args.rounds,
+                              on_event=lambda e: print(_catch_line(e), flush=True))
+    except KeyboardInterrupt:
+        print("\n[catch] stopped")
+        return 0
+    print(json.dumps(got) if args.json
+          else f"[catch] {got['caught']} fish over {got['rounds']} rounds")
+    return 0
+
+
+def cmd_catch_tick(args) -> int:
+    """One slice of auto-catch, for a caller that cannot block (the GUI)."""
+    svc = _svc(guard=True, force=args.force)
+    got = svc.catch_tick(recast=args.recast, budget=args.budget)
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    for e in got["events"]:
+        print(_catch_line(e))
+    return 0
+
+
+def cmd_catch_stop(args) -> int:
+    """Drop the located projectile array; the cheat was switched off."""
+    svc = _svc(guard=True, force=args.force)
+    print(json.dumps(svc.catch_stop()) if args.json else "[catch] stopped")
     return 0
 
 
@@ -815,6 +859,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.add_argument("--force", action="store_true", help="run on an unverified build")
     p.set_defaults(func=cmd_extract_stop)
+
+    p = sub.add_parser("catch",
+                       help="reel in every bite for you (needs the auto-use cheat on)")
+    p.add_argument("--recast", action="store_true",
+                   help="cast again when the water is empty, once you have cast once")
+    p.add_argument("--rounds", type=int, help="stop after this many rounds")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_catch)
+
+    p = sub.add_parser("catch-tick", help="one slice of auto-catch (GUI)")
+    p.add_argument("--recast", action="store_true", help="cast when the water is empty")
+    p.add_argument("--budget", type=float, default=0.30,
+                   help="seconds to spend watching in this call")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_catch_tick)
+
+    p = sub.add_parser("catch-stop", help="drop the auto-catch watcher")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_catch_stop)
 
     p = sub.add_parser("build-check",
                        help="report the running build and whether the cheats resolve on it")

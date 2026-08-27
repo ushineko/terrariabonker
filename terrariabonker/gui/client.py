@@ -152,6 +152,19 @@ def fishing_argv(keep: int = 30, kit: bool = True) -> list[str]:
     return argv
 
 
+def catch_argv(recast: bool = False) -> list[str]:
+    """One slice of auto-catch. Never the blocking ``catch`` loop, for the same reason as
+    the bait round: the worker must not block, so the GUI owns the cadence."""
+    argv = ["catch-tick", "--json"]
+    if recast:
+        argv.append("--recast")
+    return argv
+
+
+def catch_stop_argv() -> list[str]:
+    return ["catch-stop", "--json"]
+
+
 def fishing_power_argv(power: int) -> list[str]:
     return ["fishing", "--json", "--no-kit", "--power", str(power)]
 

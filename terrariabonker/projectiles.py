@@ -150,8 +150,16 @@ def find_bobbers(mem, arr: int) -> list[Bobber]:
     that want "the fish on my line" should take the first that is ``biting`` rather than
     assume a single bobber.
     """
+    raw = mem.read(arr + ARRAY_DATA_OFF, ARRAY_LEN * 4)
+    if len(raw) < ARRAY_LEN * 4:
+        return []
     out = []
-    for slot in range(ARRAY_LEN):
+    # One read for the whole element array rather than 1001 of them: this runs on a poll
+    # loop tight enough to catch a bite window, and the per-slot version spent its time in
+    # syscalls reading pointers that are almost all irrelevant.
+    for slot, obj in enumerate(struct.unpack(f"<{ARRAY_LEN}I", raw)):
+        if not obj or mem.read(obj + BOBBER_OFF, 1) != b"\x01":
+            continue
         b = read_bobber(mem, arr, slot)
         if b is not None:
             out.append(b)

@@ -1058,7 +1058,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
                "pylons", "ore_extract")),
     ("Combat", ("max_minions", "spawn_rate", "loot")),
     ("Accessories", ("vanity_accs", "inventory_accs")),
-    ("Misc", ("pickup", "teleport")),
+    ("Misc", ("pickup", "teleport", "auto_use")),
 )
 
 
@@ -1645,6 +1645,33 @@ class Patcher:
         self._apply_edits(inj.edits, on=True)
         self._inj[inj.name] = {"sites": sites, "stub_len": stub_len}
         self._save_state()
+
+    def auto_use_arm(self) -> bool:
+        """Ask the stub to press the use button once, on the next frame.
+
+        Returns False when there is no arena, which is the same as "the cheat is off".
+        Arming twice before a frame runs is one press, not two -- the stub consumes the
+        flag rather than counting it. That is deliberate: the flag means "press soon", and
+        a caller that wants N presses must wait for each to land.
+        """
+        if not self._arena:
+            return False
+        return self.mem.write_i32(self._arena + AUTO_USE_ARMED_OFF, 1)
+
+    def auto_use_armed(self) -> bool:
+        """Is a press still waiting for a frame? Clears itself when the stub runs."""
+        return bool(self._arena
+                    and self.mem.read_i32(self._arena + AUTO_USE_ARMED_OFF))
+
+    def auto_use_presses(self) -> int:
+        """How many presses the stub has made since the arena was allocated.
+
+        The stub's own count, not ours -- which is what makes it evidence. A caller that
+        armed N times and reads back fewer knows the presses did not happen, rather than
+        assuming they did.
+        """
+        return (self.mem.read_i32(self._arena + AUTO_USE_COUNT_OFF) or 0) if self._arena \
+            else 0
 
     def ore_queue(self) -> int | None:
         """Address of the extractor's queue, or None when it has no arena yet.
