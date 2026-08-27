@@ -343,6 +343,46 @@ Casting works without it, so this is not load-bearing, and it has not been shown
 identified.** Setting the word to 0 falls back to writing the control byte alone, which is
 what every measurement above was taken with.
 
+## Two bugs the player found by playing — 2026-08-26
+
+### "It recasts anything you wield, not just rods"
+
+Reported from the game, and true: `catch_tick` decided to press on *empty water* and never
+asked what was in the player's hand. The use button is not fishing-specific — that is the
+whole point of this spec — so "cast again" against a sword is "swing your sword", once a
+tick, for as long as the box is ticked.
+
+Two fixes, in order of how much they are worth:
+
+- **A cast that produces no bobber now closes the gate.** One stray press is a bug; a
+  stream of them is a different program. This needs no new knowledge and covers every
+  reason a press might go nowhere, including ones not thought of.
+- **Nothing is pressed on empty water unless a rod is held.** `Player.selectedItem` is at
+  **`statLife-0x694`** (`Player+0xA4`), found by watching which ints track the hotbar and
+  checking each against the slot the player was on — it named Slime Whip, Boomstick and
+  Book of Skulls correctly as they switched. A twin at `-0x690` never disagreed across
+  2473 samples; the lower of the pair is used. Two other candidates were rejected: `+0x30C`
+  cycles 0..9 continuously (a counter, and it fooled a "saw all ten values" test) and
+  `+0x6C8` cycles 0..2 many times a second.
+
+Reeling is deliberately **not** gated on the hand: a bite can only exist because a rod cast
+it, and the pull path does not care what is held now. Gating it would drop fish for nothing.
+
+### The extractor was pressing the use button
+
+Found while testing the above, in a log that made no sense: the stub's press counter
+climbed while the player held a pickaxe, with no arming anywhere in the auto-catch code.
+
+`ore_extract`'s queue occupies arena `0x400` through `0x504` — a count plus
+`ORE_MAX_BATCH` coordinate pairs. Auto-use's arm flag and counter were placed at `0x500`
+and `0x504`, **inside it**. Every vein queued wrote the extractor's tile count into the arm
+word, and the stub pressed the player's use button for each batch.
+
+Moved to `0x600`/`0x604`/`0x608`, with a test that computes the extractor's extent rather
+than trusting a comment. This is the second collision in this spec — the first put a stub
+on top of a live one — and both came from choosing a constant without checking what was
+already there. The arena is shared memory and needs to be read as such.
+
 ## Alternatives considered
 
 - *Keep the poller.* Rejected for the precision problem above, not the CPU one.

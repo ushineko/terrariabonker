@@ -13,6 +13,14 @@ from terrariabonker.service import ServiceError
 from terrariabonker import projectiles as P
 
 
+class FakeInventory:
+    def __init__(self, holding=True):
+        self.holding = holding
+
+    def holding_rod(self):
+        return self.holding
+
+
 class FakePatcher:
     def __init__(self, enabled=True):
         self.enabled = enabled
@@ -47,6 +55,7 @@ def _service(monkeypatch, water, patcher):
     svc._proj_arr = 0xC0FFEE
     svc._last_reel = 0.0
     svc._seen_cast = True          # most tests are mid-session; the gate has its own test
+    svc._live_inventory = lambda: FakeInventory(holding=True)
     svc.patcher = lambda: patcher
     monkeypatch.setattr(P, "find_bobbers", lambda mem, arr: list(water))
     monkeypatch.setattr(P, "find_bite",
@@ -330,3 +339,26 @@ def test_a_real_cast_reopens_the_gate(monkeypatch):
     water.append(_bobber(biting=False))               # the player casts
     svc.catch_tick(recast=True, budget=0.05)
     assert svc._seen_cast is True
+
+
+def test_nothing_is_cast_with_a_sword_in_hand(monkeypatch):
+    """Reported from the game: "and cast" recast anything you wield, not just rods.
+
+    The use button is not fishing-specific, so an empty-water press against a weapon is
+    a swing. The water is the wrong thing to look at on its own; the hand decides.
+    """
+    p = FakePatcher()
+    svc = _service(monkeypatch, [], p)
+    svc._live_inventory = lambda: FakeInventory(holding=False)
+    got = svc.catch_tick(recast=True, budget=0.05)
+    assert p.arms == 0 and got["events"] == []
+
+
+def test_reeling_does_not_need_a_rod_in_hand(monkeypatch):
+    """A bite can only exist because a rod cast it, and the pull path does not care what
+    is held now. Gating the reel on the hand would drop fish for no reason."""
+    p = FakePatcher()
+    svc = _service(monkeypatch, [_bobber(biting=True)], p)
+    svc._live_inventory = lambda: FakeInventory(holding=False)
+    got = svc.catch_tick(budget=0.05)
+    assert p.arms == 1 and got["events"][0]["what"] == "reel"

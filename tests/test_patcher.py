@@ -740,3 +740,19 @@ def test_accepts_a_scrubbed_slot(game):
     m.write(p.slot_for("auto_use"), b"\xcc" * 96)
     p.enable("auto_use")
     assert p.is_enabled("auto_use")
+
+
+def test_the_arena_data_slots_do_not_overlap(game):
+    """Two cheats sharing a word is invisible until one of them moves the other's data.
+
+    The extractor's queue is a count plus ORE_MAX_BATCH coordinate pairs from
+    ORE_QUEUE_OFF. Auto-use's three words were placed at 0x500 and landed inside it, so
+    queueing a vein armed the use button and the stub pressed it -- with nothing in the
+    auto-use code doing anything wrong.
+    """
+    ore = range(P.ORE_QUEUE_OFF, P.ORE_QUEUE_OFF + 4 + P.ORE_MAX_BATCH * 8)
+    auto = [P.AUTO_USE_ARMED_OFF, P.AUTO_USE_COUNT_OFF, P.AUTO_USE_RELEASE_OFF]
+    for off in auto:
+        assert off not in ore, f"{off:#x} is inside the extractor's queue"
+        assert off + 4 <= P.Patcher.ARENA_STUBS_OFF, f"{off:#x} runs into the stub slots"
+    assert len(set(auto)) == len(auto)

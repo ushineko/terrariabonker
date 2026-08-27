@@ -20,6 +20,11 @@ from dataclasses import dataclass
 
 INVENTORY_PTR_OFF = -0x664      # Player field holding the Item[] pointer, from statLife
 INVENTORY_SLOTS = 59
+# Player.selectedItem -- the hotbar index, 0..9 -- from statLife. Found by watching which
+# ints track the hotbar and checking each one against the slot the player was holding:
+# it named Slime Whip, Boomstick and Book of Skulls correctly as they switched. A twin at
+# statLife-0x690 never disagreed across 2473 samples; this is the lower of the pair.
+SELECTED_ITEM_OFF = -0x694
 
 ARR_LEN_OFF = 0x0C              # mono szarray max_length
 ARR_DATA_OFF = 0x10            # first element pointer
@@ -226,6 +231,23 @@ class Inventory:
             if bait:
                 out["baits"].append((i, bait, self.mem.read_i32(addr + ITEM_STACK)))
         return out
+
+    def selected_slot(self) -> int | None:
+        """Which hotbar slot the player is holding, or None if it reads implausibly."""
+        v = self.mem.read_i32(self.life + SELECTED_ITEM_OFF)
+        return v if v is not None and 0 <= v <= 9 else None
+
+    def holding_rod(self) -> bool:
+        """Is a fishing rod in the player's hand right now?
+
+        Auto-catch needs this before it presses anything on empty water: the use button
+        is not fishing-specific, so "cast again" against a sword is "swing your sword",
+        which is what it did when it could only see the water and not the hand.
+        """
+        slot = self.selected_slot()
+        if slot is None:
+            return False
+        return slot in {s for s, _ in self.fishing_gear()["rods"]}
 
     def nonempty_count(self) -> int:
         """How many slots hold a real item.

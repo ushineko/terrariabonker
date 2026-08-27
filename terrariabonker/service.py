@@ -1017,6 +1017,10 @@ class Service:
 
         A cast is only reported when a bobber actually appears: arming is not casting, and
         an earlier version took credit for the player's own casts by reporting the arm.
+
+        **Nothing is pressed unless a rod is in the player's hand.** The use button is not
+        fishing-specific, so "cast again" against a sword is "swing your sword" -- which is
+        what this did when it could see the water but not the hand.
         """
         import time
 
@@ -1051,7 +1055,8 @@ class Service:
                         time.sleep(0.01)
                 break
             if (recast and self._seen_cast and not P.find_bobbers(self.mem, arr)
-                    and time.time() - self._last_reel > self.CAST_SETTLE):
+                    and time.time() - self._last_reel > self.CAST_SETTLE
+                    and self._live_inventory().holding_rod()):
                 if p.auto_use_arm():
                     deadline = time.time() + self.CAST_CONFIRM
                     while time.time() < deadline:

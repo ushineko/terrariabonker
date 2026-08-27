@@ -588,9 +588,14 @@ ORE_PICK_POWER = 250
 # Auto-use (spec 043). Two dwords in the arena's reserved region, clear of every stub:
 # the arm flag the trainer sets, and a counter the stub bumps on each press so a test can
 # prove "armed N times -> pressed N times" without watching the game.
-AUTO_USE_ARMED_OFF = 0x500
-AUTO_USE_COUNT_OFF = 0x504
-AUTO_USE_RELEASE_OFF = 0x508     # which byte the stub also sets (see RELEASE_ITEM_OFF)
+# Clear of the extractor's queue, which runs 0x400..0x504 (a count plus ORE_MAX_BATCH
+# coordinate pairs). The first version of these three sat at 0x500/0x504/0x508 and
+# overlapped it: mining a vein wrote the extractor's tile count into auto-use's arm word,
+# and the stub pressed the player's use button for every batch queued. Nothing in the
+# auto-use code was involved, which is what made it baffling in the log.
+AUTO_USE_ARMED_OFF = 0x600
+AUTO_USE_COUNT_OFF = 0x604
+AUTO_USE_RELEASE_OFF = 0x608     # which byte the stub also sets (see RELEASE_ITEM_OFF)
 USE_ITEM_OFF = 0x672             # Player.controlUseItem, from the Player object base
 # Player.releaseUseItem. Setting controlUseItem alone reels a bobber in but never casts:
 # ItemCheck_PullFishingBobbers runs off controlUseItem, while starting a *use* needs a
