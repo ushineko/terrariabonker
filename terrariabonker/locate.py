@@ -23,10 +23,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from terrariabonker import layout
+
 NAME_OFF = -0x6C0        # Player.name (mono String*) relative to statLife
 BLOCK_LEN = 6            # ints in the life/mana signature
 STATLIFE_FROM_OBJ = 0x738   # Player.statLife offset within the Player object
-MAIN_PLAYER_OFF = 0xA7C     # Main.player field offset within Main's static-data block
+MAIN_PLAYER_OFF = layout.MAIN_PLAYER_OFF   # Main.player, within Main's statics
 
 
 def _b(hexstr: str) -> bytes:
@@ -214,7 +216,7 @@ def local_player_at(mem, anchor: int) -> PlayerBlock | None:
     idx = mem.read_i32(myplayer_static)
     if not arr or idx is None or not (0 <= idx < 256):
         return None
-    obj = mem.read_u32(arr + idx * 4 + 0x10)        # Player[] szarray data at +0x10
+    obj = mem.read_u32(arr + idx * 4 + layout.ARR_DATA_OFF)   # Player[] szarray data
     if not obj:
         return None
     return read_block(mem, obj + STATLIFE_FROM_OBJ)

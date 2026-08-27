@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import struct
 
-MAIN_TILE_OFF = 0x99C           # Main.tile within Main's static block
-MAIN_MAX_TILES_OFF = 0x5A4      # maxTilesX, then maxTilesY
+from terrariabonker import layout
+
+MAIN_TILE_OFF = layout.MAIN_TILE_OFF
+MAIN_MAX_TILES_OFF = layout.MAIN_MAX_TILES_OFF
 
 _BOUNDS_OFF = 0x08              # -> {width, originX, height, originY}
-_ENTRIES_OFF = 0x10             # the per-tile pointer array
+_ENTRIES_OFF = layout.ARR_DATA_OFF   # the per-tile pointer array
 _TILE_TYPE_OFF = 0x08           # ushort, within a tile object
 _TILE_HEADER_OFF = 0x0E         # sTileHeader, ushort
 _ACTIVE_BIT = 0x20              # Tile.active() is (sTileHeader & 32) == 32

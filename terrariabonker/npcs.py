@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import os
 
+from terrariabonker import layout
+
 # --- NPC object field offsets -----------------------------------------------
 # Derived on build 1.4.5.7+24893155 by differencing ContentSamples templates, the same
 # way the Item offsets in ``inventory`` were: no IL gives these, because mono decides the
@@ -54,14 +56,14 @@ MAX_NPC_TYPE = 2000      # sanity bound on a plausible NPCID (the game uses up t
 # ``locate.MAIN_PLAYER_OFF`` and ``recipes.MAIN_RECIPE_OFF``, pinned to build
 # 1.4.5.7+24893155. Validated on use rather than trusted: the array must be
 # ``maxNPCs + 1`` long, and a wrong offset is far more likely to miss that than to hit it.
-MAIN_NPC_OFF = 0x9B0
+MAIN_NPC_OFF = layout.MAIN_NPC_OFF
 MAX_NPCS = 200
 
 # Main.npcFrameCount: how many animation frames each type's sprite sheet holds. The sheets
 # are vertical strips of equal frames, so this is the only exact way to crop one to its
 # first frame — the item de-animator guesses from the shape and gets the wide NPCs wrong
 # (Blue Slime is 32x52 and really two frames of 26; Moon Lord is 573x804 and really one).
-MAIN_NPC_FRAME_COUNT_OFF = 0xC34
+MAIN_NPC_FRAME_COUNT_OFF = layout.MAIN_NPC_FRAME_COUNT_OFF
 MAX_NPC_FRAMES = 64          # sanity bound; the largest vanilla count is well under this
 
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "npcs.json")

@@ -7,8 +7,9 @@ writes do not affect the game. The real source is ``Player.inventory``, an
 
 mono szarray layout (32-bit): ``+0xC`` max_length, ``+0x10`` element pointers.
 Every slot holds a real ``Item`` (empty slots are type 0, never null). Within an
-``Item``: type at ``+0x6C`` (ItemID), stack at ``+0x88``, prefix at ``+0xAC``
-(modifier tier, -1 when unmodified).
+``Item``: type at ``+0x6C`` (ItemID), stack at ``+0x88``, damage at ``+0xAC``, prefix at
+``+0x15C`` (modifier tier, 0 when unmodified). The constants below are the authority --
+this paragraph said the prefix was at ``+0xAC``, which is the damage field.
 
 Offsets are for Terraria 1.4.5.7. See docs/discovery.md.
 """
@@ -18,6 +19,8 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
+from terrariabonker import layout
+
 INVENTORY_PTR_OFF = -0x664      # Player field holding the Item[] pointer, from statLife
 INVENTORY_SLOTS = 59
 # Player.selectedItem -- the hotbar index, 0..9 -- from statLife. Found by watching which
@@ -26,8 +29,10 @@ INVENTORY_SLOTS = 59
 # statLife-0x690 never disagreed across 2473 samples; this is the lower of the pair.
 SELECTED_ITEM_OFF = -0x694
 
-ARR_LEN_OFF = 0x0C              # mono szarray max_length
-ARR_DATA_OFF = 0x10            # first element pointer
+# Re-exported from `layout`, which is the one place these are declared -- several modules
+# import them from here, and this keeps those imports working.
+ARR_LEN_OFF = layout.ARR_LEN_OFF
+ARR_DATA_OFF = layout.ARR_DATA_OFF
 
 # Item field offsets, derived by diffing Copper Pickaxe (3509) vs Copper Axe (3506).
 ITEM_USE_ANIM = 0x80    # useAnimation (visual swing frames)

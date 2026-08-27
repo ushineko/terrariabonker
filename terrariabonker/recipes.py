@@ -17,22 +17,22 @@ import json
 import os
 import struct
 
-from terrariabonker import names
+from terrariabonker import inventory, layout, names
 from terrariabonker.locate import _exec_regions, main_static_base, read_mono_string
 from terrariabonker.patcher import _pat
 
 _DATA = os.path.join(os.path.dirname(__file__), "data", "recipes.json")
 
-MAIN_RECIPE_OFF = 0xA68
+MAIN_RECIPE_OFF = layout.MAIN_RECIPE_OFF
 RECIPE_CREATE_ITEM = 0x8
 RECIPE_REQUIRED_ITEM = 0xC
 RECIPE_REQUIRED_TILE = 0x1C
-ITEM_TYPE = 0x6C
-ITEM_STACK = 0x88
+ITEM_TYPE = inventory.ITEM_TYPE
+ITEM_STACK = inventory.ITEM_STACK
 ITEM_CREATE_TILE = 0xA0          # Item.createTile (placeable tile id, or -1)
 ITEM_PLACE_STYLE = 0xA8          # Item.placeStyle (which style within that tile)
-ARR_LEN = 0xC
-ARR_DATA = 0x10
+ARR_LEN = layout.ARR_LEN_OFF
+ARR_DATA = layout.ARR_DATA_OFF
 LOCALIZEDTEXT_VALUE = 0xC        # LocalizedText._value (String*)
 
 # AOBs (operand at offset 2) that read the two statics the tile-name lookup needs:

@@ -25,10 +25,12 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-MAIN_PROJECTILE_OFF = 0x9BC   # Main.projectile within Main's static-data block
+from terrariabonker import layout
+
+MAIN_PROJECTILE_OFF = layout.MAIN_PROJECTILE_OFF
 ARRAY_LEN = 1001              # Main.projectile is Projectile[1001]
-ARRAY_LEN_OFF = 0x0C          # mono array: length at +0x0C, elements from +0x10
-ARRAY_DATA_OFF = 0x10
+ARRAY_LEN_OFF = layout.ARR_LEN_OFF
+ARRAY_DATA_OFF = layout.ARR_DATA_OFF
 
 ACTIVE_OFF = 0x03C            # Projectile.active (bool)
 BOBBER_OFF = 0x088            # Projectile.bobber (bool)
