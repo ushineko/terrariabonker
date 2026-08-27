@@ -127,10 +127,12 @@ It argues against repairing existing items automatically. Re-assigning a modifie
 repair, and it should stay something the player chooses per item — with the dialog's own
 damage field (which wins over the modifier) as the way to keep a tuned number.
 
-Also seen and **not explained**: a Molten Hamaxe reads `knockback 8.05` (its Legendary
-bonus, applied) while its damage and use time read as base. A partially-bonused item does
-not fit either "editor set the byte only" or "reforged in the game", and guessing at it
-here would be inventing history. Worth a look if it recurs.
+Also seen and, at the time, **not explained**: a Molten Hamaxe reading `knockback 8.05`
+(its Legendary bonus, applied) while its damage and use time read as base. Explained later
+by the two Minishark reforges — see `docs/item-fields.md`: an item keeps a trainer's edits
+through its *first* reforge and loses them at the second, because the game only resets to
+defaults when it has an existing modifier to strip. A partially-bonused item is what an
+edit and a reforge leave behind between them.
 
 ## The follow-up report: "only works the first time"
 

@@ -24,7 +24,7 @@ pattern.
 | `0x10C` | `useAmmo` | Pulse Bow 40 = Wooden Arrow, Boomstick 97 = Musket Ball |
 | `0x11C` | `mana` | Space Gun 6, Water Bolt 10 — both match the wiki exactly |
 | `0x124` | `value` | sell price in copper; Wooden Sword 100, Water Bolt 75000 |
-| `0x150` | `crit` | reforged a Minishark to Sighted in-game: 0 → 3, exactly Sighted's +3 |
+| `0x150` | `crit` | two reforges of a Minishark: 0 → 3 for Sighted's +3, then → 5 for Demonic's +5 |
 
 Two more, added while scoping the fishing cheat (spec 042) and verified the same way:
 
@@ -122,7 +122,26 @@ are predicted by the same declaration order that placed `crit` correctly — but
 grants neither, so neither was observed changing. They remain unwritten. A reforge that
 rolls a modifier granting one would settle them the same way.
 
-**The game reforges from the item's current stats, not from its base.** The Minishark had
-been edited to damage 12 (its template base is 6), and Sighted took it to 13 — `12 × 1.1`,
-not `6 × 1.1`. In a vanilla game the two are the same number and the distinction never
-appears; it only shows on an item a trainer has already touched.
+**When the game resets an item to base, and when it does not.** Two reforges of the same
+Minishark, which had been edited to damage 12 and use time 4 against a template base of 6
+and 8:
+
+| Reforge | Item had | damage | useTime | crit |
+|---|---|---|---|---|
+| → Sighted (`×1.1`, `+3`) | no modifier | 12 → **13** = `12 × 1.1` | 4 → 4 | 0 → 3 |
+| → Demonic (`×1.15`, `+5`) | Sighted | 13 → **7** = `6 × 1.15` | 4 → **8** | 3 → **5** |
+
+The first multiplied the item's *current* stats; the second reset it to the template base
+first — wiping the edited use time back to 8 — and applied the modifier to that. The
+difference is whether there was an existing modifier to strip: a prefix-less item is taken
+to already be its base, so nothing is reset, while replacing a modifier goes through
+defaults.
+
+So an item a trainer has edited will keep those edits through its first reforge and lose
+them at the second. That also explains a **Molten Hamaxe** seen earlier carrying its
+Legendary knockback bonus while its damage and use time read as base — a partially-bonused
+item is what an edit and a reforge leave behind between them, not a bug.
+
+The trainer recomputes from the template base every time, which matches the game's
+behaviour for the case that recurs (replacing a modifier) and differs for the first one on
+an already-edited item, where the game would have kept the edit.
