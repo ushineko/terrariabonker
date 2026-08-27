@@ -1021,11 +1021,14 @@ class Service:
             if key not in want:
                 continue
             buff, name, _ = self.FISHING_BUFFS[key]
-            # Read the clock BEFORE renewing. `renew` returns "kept" both when something
-            # else owns the buff and when our own renewal from a moment ago has not run
-            # out yet, and those are different things to tell the player: the first is
-            # deferring to a potion, the second is the loop doing its job. Only a buff
-            # running LONGER than we would ever set belongs to somebody else.
+            # `renew` returns "kept" both when something else owns the buff and when our
+            # own renewal from a moment ago has not run out yet, and those are different
+            # things to tell the player: the first is deferring to a potion, the second is
+            # the loop doing its job. What separates them is the comparison below -- only
+            # a buff running LONGER than this cheat would ever set belongs to somebody
+            # else. (Reading the clock first is for clarity, not correctness: renew never
+            # shortens, so reading it after would classify the same. A mutation proved
+            # that, which is why the claim is not made here.)
             before = bar.time_of(buff)
             what = bar.renew(buff, ticks)
             row = {"effect": key, "buff": buff, "name": name, "what": what}

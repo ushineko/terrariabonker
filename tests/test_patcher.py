@@ -482,7 +482,7 @@ def test_the_arena_bootstrap_lands_on_the_bytes_it_will_restore(game):
     assert m.read(site, len(expect)) == expect, "the springboard would restore other bytes"
 
 
-def test_the_bootstrap_skips_a_springboard_that_is_already_hooked(game):
+def test_the_bootstrap_falls_back_when_the_first_site_is_gone(game):
     """A player with the ore extractor on and no arena to adopt could not allocate one.
 
     The bootstrap hung off that cheat's own injection site, so when it was enabled the
@@ -491,15 +491,30 @@ def test_the_bootstrap_skips_a_springboard_that_is_already_hooked(game):
     restored on launch.
     """
     m, p = game
-    m.write(CODE + 0x900, ANCHORS["borders_movement"].pattern.raw)
-    _, off, expect = P.Patcher.SPRINGBOARDS[0]
-    m.write(CODE + 0x900 + off, b"\xe9\x00\x00\x00\x00")      # somebody is hooked here
     m.write(CODE + 0x500, ANCHORS["grabitems_call"].pattern.raw)
-    key2, off2, expect2 = P.Patcher.SPRINGBOARDS[1]
+    _, off2, expect2 = P.Patcher.SPRINGBOARDS[1]
     m.write(CODE + 0x500 + off2, expect2)
-    site, overwrite = p._springboard()
+    site, overwrite = p._springboard()               # borders_movement is not planted
     assert site == CODE + 0x500 + off2, "it did not fall back to the second candidate"
     assert overwrite == expect2
+
+
+def test_a_hooked_springboard_is_skipped_on_its_bytes(game):
+    """The byte check, exercised where it is actually load-bearing.
+
+    An earlier version of this test hooked the FIRST candidate, whose bytes are literal in
+    its anchor pattern -- so the anchor stopped resolving and the fallback happened for
+    the wrong reason, leaving the byte check untested. It passed a mutation that removed
+    the check entirely. The extractor's patch site IS wildcarded in its anchor, so a
+    hooked site there still resolves and only the bytes give it away.
+    """
+    m, p = game
+    m.write(CODE + 0x500, ANCHORS["grabitems_call"].pattern.raw)
+    _, off2, _ = P.Patcher.SPRINGBOARDS[1]
+    m.write(CODE + 0x500 + off2, b"\xe9\x11\x22\x33\x44")     # a cheat is hooked here
+    with pytest.raises(PatchError) as e:
+        p._springboard()
+    assert "hooked" in str(e.value)
 
 
 def test_no_springboard_is_an_error_naming_what_was_tried(game):
