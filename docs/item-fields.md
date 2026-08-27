@@ -96,11 +96,18 @@ Matching those against the template bytes solves the offsets instead of inferrin
 | `tileCollide` | `0x100` | 290/293 |
 | `aiStyle` | `0x0B0` | 765/780 |
 | `friendly` | `0x0D0` | 584/592 |
-| `hostile` | `0x030` | 167/170 |
+| `hostile` | *unresolved* | ties three ways (`0x030`, `0x078`, `0x0C4`) — see below |
 | `width`, `height` | `0x034`, `0x038` | 720/845 |
 
 The shortfalls are where a `DefaultTo*` helper or a shared tail overwrites what the case
-declared, not disagreement about the offset. `tileCollide` at `0x100` and `friendly` at
+declared, not disagreement about the offset.
+
+**A field is only pinned when its declared values vary.** `SetDefaults` almost always
+declares `hostile = 1`, so every offset that happens to hold 1 scores equally and three tie
+— that one is not solved, and was briefly written down as `0x030` before the check was run.
+`tileCollide` survives the same check honestly: it is declared `0` 266 times and `1` 27
+times, and only `0x100` fits both. `friendly` likewise (575 ones, 17 zeros, only `0x0D0`).
+`aiStyle` and `timeLeft` are decisive on their own, with 210 and 40 distinct values. `tileCollide` at `0x100` and `friendly` at
 `0x0D0` close the question this file left open, and on far better evidence than the
 behavioural correlation above.
 
