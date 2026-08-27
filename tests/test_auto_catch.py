@@ -45,6 +45,7 @@ def _service(monkeypatch, water, patcher):
     svc = S.Service.__new__(S.Service)
     svc.mem = object()
     svc._proj_arr = 0xC0FFEE
+    svc._last_reel = 0.0
     svc.patcher = lambda: patcher
     monkeypatch.setattr(P, "find_bobbers", lambda mem, arr: list(water))
     monkeypatch.setattr(P, "find_bite",
@@ -68,18 +69,54 @@ def test_a_climbing_counter_is_not_a_bite(monkeypatch):
     assert p.arms == 0 and got["events"] == []
 
 
-def test_empty_water_is_left_alone(monkeypatch):
-    """The cheat never casts. It takes fish; it does not fish.
-
-    Casting needs a fresh press -- controlUseItem together with releaseUseItem -- and the
-    stub only writes the first. An earlier version armed on empty water and reported
-    "cast the line", which was measured to be false: six arms, six presses by the stub's
-    own counter, and not one line in the water. The player casts.
-    """
+def test_empty_water_is_left_alone_by_default(monkeypatch):
+    """Without --recast the cheat takes fish and never casts."""
     p = FakePatcher()
     svc = _service(monkeypatch, [], p)
     got = svc.catch_tick(budget=0.05)
     assert p.arms == 0 and got["events"] == []
+
+
+def test_a_cast_is_only_reported_when_a_bobber_appears(monkeypatch):
+    """Arming is not casting.
+
+    The first version logged "cast the line" the moment it armed, and was caught taking
+    credit for the player's own casts. Only a bobber in the water proves it.
+    """
+    p = FakePatcher()
+    svc = _service(monkeypatch, [], p)
+    svc.CAST_CONFIRM = 0.05
+    got = svc.catch_tick(recast=True, budget=0.05)
+    assert p.arms == 1
+    assert got["events"] == [{"what": "cast", "confirmed": False}]
+
+
+def test_a_confirmed_cast_is_the_bobber_going_out(monkeypatch):
+    p = FakePatcher()
+    water: list = []
+    svc = _service(monkeypatch, water, p)
+    real = p.auto_use_arm
+
+    def arm_and_cast():
+        water.append(_bobber(biting=False))
+        return real()
+
+    p.auto_use_arm = arm_and_cast
+    got = svc.catch_tick(recast=True, budget=0.05)
+    assert got["events"] == [{"what": "cast", "confirmed": True}]
+
+
+def test_recast_waits_until_the_player_has_cast_once(monkeypatch):
+    """The gate that stops the cheat following a player away from the lake.
+
+    Standing at the water holding a rod, having cast nothing, must produce nothing: the
+    game gives no signal for "I meant to stop", so the loop earns the right to cast by
+    seeing the player cast first.
+    """
+    p = FakePatcher()
+    svc = _service(monkeypatch, [], p)
+    got = svc.watch_catch(recast=True, rounds=3)
+    assert p.arms == 0 and got["cast"] == 0
 
 
 def test_the_cheat_must_be_on(monkeypatch):
@@ -169,3 +206,18 @@ def test_panel_logs_what_was_caught(qt_app, monkeypatch):
         assert "Bass" in w.log.toPlainText()
     finally:
         w.close()
+
+
+def test_a_cast_is_not_attempted_straight_after_a_reel(monkeypatch):
+    """The rod is still in its use animation for a few frames after the pull.
+
+    Measured in the game: every catch produced "tried to cast and no line went out"
+    followed by "cast the line" — one wasted press per fish, going somewhere unexamined.
+    """
+    import time
+
+    p = FakePatcher()
+    svc = _service(monkeypatch, [], p)
+    svc._last_reel = time.time()
+    got = svc.catch_tick(recast=True, budget=0.05)
+    assert p.arms == 0 and got["events"] == []

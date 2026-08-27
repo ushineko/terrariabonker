@@ -27,6 +27,7 @@ def plant(mem, bobber_slots=(2,), ai=(0.0, 0.0, 0.0), local_ai=(0.0, 0.0, 0.0)):
         obj = OBJ0 + slot * STRIDE
         mem.write(ARR + P.ARRAY_DATA_OFF + slot * 4, struct.pack("<I", obj))
         mem.write(obj, struct.pack("<I", VTABLE))
+        mem.write(obj + P.ACTIVE_OFF, b"\x01" if slot in bobber_slots else b"\x00")
         mem.write(obj + P.BOBBER_OFF, b"\x01" if slot in bobber_slots else b"\x00")
         for off, vals in ((P.AI_OFF, ai), (P.LOCALAI_OFF, local_ai)):
             arrp = obj + 0x100 + (0 if off == P.AI_OFF else 0x20)
@@ -114,3 +115,18 @@ def test_an_unreadable_ai_reference_is_not_a_bobber(mem):
     obj = OBJ0 + 2 * STRIDE
     mem.write(obj + P.LOCALAI_OFF, struct.pack("<I", 0))
     assert P.find_bobbers(mem, ARR) == []
+
+
+def test_a_finished_bobber_is_not_in_the_water(mem):
+    """The array keeps every object forever, flags and all.
+
+    A projectile the game has finished with is marked inactive and its fields are left
+    untouched -- so `bobber` alone reports a line that came out of the water minutes ago.
+    Measured in-game: a reeled bobber read as present for over fifteen seconds, and the
+    water never looked empty enough to cast into.
+    """
+    plant(mem, ai=(1.0, 0.0, 0.0), local_ai=(0.0, 0.0, 0.0))
+    obj = OBJ0 + 2 * STRIDE
+    mem.write(obj + P.ACTIVE_OFF, b"\x00")          # the game is done with it
+    assert P.find_bobbers(mem, ARR) == []
+    assert P.read_bobber(mem, ARR, 2) is None

@@ -279,36 +279,69 @@ player has a rod selected and no bobber in the water. The second half is the sam
 mechanism and needs its own guard, or it will re-cast while the player is trying to walk
 away.
 
-## The cheat cannot cast, only reel — measured 2026-08-26
+## Casting: wrong twice, then measured properly — 2026-08-26
 
-`--recast` shipped for one commit and was wrong. It armed the stub on empty water and
-reported "cast the line" on the strength of having armed, which the maintainer caught: they
-were the one casting.
+This section replaces a conclusion that was published and was false. It is kept as a
+correction rather than deleted, because the way it went wrong is the useful part.
 
-Tested directly, rod selected, hands off the mouse, six arms on empty water:
+**Claim 1 (wrong): "it casts."** `--recast` armed the stub on empty water and logged
+"cast the line" for having armed, never checking a bobber appeared. The maintainer caught
+it — they were the one casting. Arming is not casting.
+
+**Claim 2 (also wrong): "it cannot cast."** A test with the rod selected and hands off the
+mouse reported six arms, six presses, no line, and `--recast` was removed on the strength
+of it. The reasoning attached to it — casting needs `controlUseItem` *and*
+`releaseUseItem`, the stub writes only the first — is sound in general and was not what was
+happening here. Two faults in the instrument:
+
+- **The rod may not have been selected.** The test asked for it in a print statement and
+  never verified it, and the maintainer had been switching items to clear a bobber.
+- **The water was never empty**, and the detector was lying about it. See below.
+
+**Measured properly: one press casts.** With the water genuinely clear, `2/2` casts from a
+single arm, control byte only, release offset 0. Then end to end through the shipped CLI:
+**23 fish over 250 rounds, 23 casts, one manual cast to start it.**
+
+### The bug underneath both mistakes: `Projectile.active`
+
+`find_bobbers` filtered on `bobber` alone. The array holds all 1001 objects forever, and a
+projectile the game has finished with is marked inactive with its old fields left exactly
+as they were — `bobber` included. So a reeled-in bobber read as *still in the water*, for
+fifteen seconds and more, and every "can I cast?" check said no.
+
+`Projectile.active` is at **`+0x03C`**, found by diffing a live bobber against a finished
+one and confirmed by watching it flip:
 
 ```
-arm 1..6: pressed (1 each, by the stub's own counter) -> NO line went out
-0 casts, 6 misses out of 6 arms
+before cast: slot 7  active=0  ai[0]=1     <- finished, still flagged bobber
+after cast : slot 7  active=1  ai[0]=0
+after reel : slot 7  active=0  ai[0]=1
 ```
 
-**The presses are real and the game ignores them.** Reeling works because
-`Player.ItemCheck_PullFishingBobbers` runs off `controlUseItem` alone. Casting goes through
-the full item-use path, which for an item that is not auto-reuse needs a *fresh press* —
-`controlUseItem` **and** `releaseUseItem` — and the stub writes only the first. Spec 042
-recorded that distinction ("a held flag is not a press") and this was built anyway without
-checking it applied. The old poller looked like it cast because at ~400,000 writes/second
-it eventually landed on a frame where both were true; that is the same accident, not a
-capability.
+The game checks `active` first, in `ItemCheck_PullFishingBobbers`. Now so does this. Two
+false positives were rejected on the way: `+0x08` looked promising until its hits turned
+out to be slots 1, 257, 513 and 769 — evenly spaced by 256, a memory pattern rather than
+four live projectiles — and `+0x78`/`+0x100` mark low slots contiguously, so they are
+"ever used", not "alive".
 
-So `--recast` is removed rather than shipped as a flag that does nothing. **The player
-casts; the cheat takes the fish**, and the CLI says so.
+### One wasted press per fish, and where it went
 
-**To make casting work**, the stub needs `releaseUseItem` as well — likely adjacent to
-`+0x672`, since the control flags sit together, but its offset is not known and must be
-derived and confirmed the same way `controlUseItem` was: a byte that an input control
-rewrites every frame, verified with a liveness gate. That is the next piece of recon, and
-it would unlock auto-fire and auto-place as much as auto-cast.
+The first working version logged "tried to cast and no line went out" followed by "cast the
+line", once per catch. The rod is still in its use animation for a few frames after the
+pull, so the press is dropped. `CAST_SETTLE` (0.45 s) waits for it, and the wasted press is
+gone: 23 casts for 23 fish, none refused.
+
+That mattered beyond tidiness. A press that "does nothing" is a press going somewhere
+unexamined — the same class of assumption as reporting a cast because the arm succeeded.
+
+### Left as it is
+
+The stub still writes `releaseUseItem` if the arena word names an offset, and ships with it
+set to `RELEASE_ITEM_OFF` (`Player+0x67F`, the byte that inverts while an item is in use).
+Casting works without it, so this is not load-bearing, and it has not been shown to be
+`releaseUseItem` — only to be a byte with the right shape. **Do not treat that offset as
+identified.** Setting the word to 0 falls back to writing the control byte alone, which is
+what every measurement above was taken with.
 
 ## Alternatives considered
 

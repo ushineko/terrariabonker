@@ -440,6 +440,9 @@ def cmd_extract_stop(args) -> int:
 
 
 def _catch_line(e: dict) -> str:
+    if e["what"] == "cast":
+        return ("[catch] cast the line" if e.get("confirmed")
+                else "[catch] tried to cast and no line went out")
     catch = e.get("catch", 0)
     from terrariabonker import names
     what = names.name(catch) if catch > 0 else f"NPC {-catch}"
@@ -449,22 +452,26 @@ def _catch_line(e: dict) -> str:
 def cmd_catch(args) -> int:
     """Take every fish that bites. Blocking; Ctrl-C stops it."""
     svc = _svc(guard=True, force=args.force)
-    print("[catch] watching for bites — you cast, it reels. Ctrl-C to stop.")
+    print("[catch] watching for bites. Ctrl-C to stop."
+          + ("" if args.recast else " (pass --recast to cast for you too)"))
     try:
-        got = svc.watch_catch(rounds=args.rounds,
+        got = svc.watch_catch(recast=args.recast, rounds=args.rounds,
                               on_event=lambda e: print(_catch_line(e), flush=True))
     except KeyboardInterrupt:
         print("\n[catch] stopped")
         return 0
     print(json.dumps(got) if args.json
-          else f"[catch] {got['caught']} fish over {got['rounds']} rounds")
+          else f"[catch] {got['caught']} fish over {got['rounds']} rounds"
+               + (f", {got['cast']} casts" if got.get("cast") else "")
+               + (f", {got['cast_missed']} that did not go out"
+                  if got.get("cast_missed") else ""))
     return 0
 
 
 def cmd_catch_tick(args) -> int:
     """One slice of auto-catch, for a caller that cannot block (the GUI)."""
     svc = _svc(guard=True, force=args.force)
-    got = svc.catch_tick(budget=args.budget)
+    got = svc.catch_tick(recast=args.recast, budget=args.budget)
     if args.json:
         print(json.dumps(got))
         return 0
@@ -859,12 +866,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("catch",
                        help="reel in every bite for you (needs the auto-use cheat on)")
+    p.add_argument("--recast", action="store_true",
+                   help="cast again when the water is empty, once you have cast once")
     p.add_argument("--rounds", type=int, help="stop after this many rounds")
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.add_argument("--force", action="store_true", help="run on an unverified build")
     p.set_defaults(func=cmd_catch)
 
     p = sub.add_parser("catch-tick", help="one slice of auto-catch (GUI)")
+    p.add_argument("--recast", action="store_true", help="cast when the water is empty")
     p.add_argument("--budget", type=float, default=0.30,
                    help="seconds to spend watching in this call")
     p.add_argument("--json", action="store_true", help="machine-readable")

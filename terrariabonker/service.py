@@ -94,6 +94,7 @@ class Service:
         self._main_base = None               # cached Main static block (see tilemap())
         self._watch = None                   # live _VeinWatch, driven by watch_tick()
         self._proj_arr = None                # Main.projectile, kept once located (043)
+        self._last_reel = 0.0                # when auto-catch last pulled a bobber in
 
     def invalidate(self) -> None:
         """Drop cached locate results; the next call rescans from scratch."""
@@ -985,7 +986,16 @@ class Service:
 
     # --- auto-catch (spec 043) --------------------------------------------
 
-    def catch_tick(self, *, budget: float = 0.30) -> dict:
+    #: How long to wait for a bobber after arming a cast before calling it a miss. A cast
+    #: bobber exists within a frame or two; longer than this and the press did nothing.
+    CAST_CONFIRM = 0.5
+    #: How long after reeling in before a cast is worth attempting. The rod is still in
+    #: its use animation for a few frames after the pull and the game drops the press, so
+    #: without this every catch cost a wasted press: the log read "tried to cast and no
+    #: line went out" followed by "cast the line", once per fish.
+    CAST_SETTLE = 0.45
+
+    def catch_tick(self, *, recast: bool = False, budget: float = 0.30) -> dict:
         """Take any fish that is on the line, for up to ``budget`` seconds. One slice.
 
         Polls fast inside the privileged worker rather than returning between samples: a
@@ -996,11 +1006,12 @@ class Service:
         and taking it is one arm of the auto-use stub -- one press, one reel. The poller
         this replaces caught the fish and re-cast twice on the same burst.
 
-        **It does not cast.** Casting needs a fresh press -- ``controlUseItem`` together
-        with ``releaseUseItem`` -- and the stub only writes the first, so an arm on empty
-        water does nothing at all (measured: six arms, six presses, no line). Reeling in
-        works because ``ItemCheck_PullFishingBobbers`` runs off ``controlUseItem`` alone.
-        The player casts; the cheat takes the fish.
+        ``recast`` also arms when the water is empty, which turns "take the fish" into
+        "keep fishing". It is off by default and gated by the caller (see
+        :meth:`watch_catch`): the game gives no signal for "the player meant to stop", so
+        an ungated recast follows them away from the lake. A cast is only reported when a
+        bobber actually appears -- arming is not casting, and an earlier version took
+        credit for the player's own casts by reporting the arm.
         """
         import time
 
@@ -1026,10 +1037,23 @@ class Service:
                         time.sleep(0.002)
                     events.append({"what": "reel", "catch": bite.catch,
                                    "slot": bite.slot})
+                    self._last_reel = time.time()
                     # Wait out the window rather than arming again on the same fish: the
                     # pull sets ai[0] and the bite reads as over a frame later.
                     while P.find_bite(self.mem, arr) and time.time() < end + 0.5:
                         time.sleep(0.01)
+                break
+            if (recast and not P.find_bobbers(self.mem, arr)
+                    and time.time() - self._last_reel > self.CAST_SETTLE):
+                if p.auto_use_arm():
+                    deadline = time.time() + self.CAST_CONFIRM
+                    while time.time() < deadline:
+                        if P.find_bobbers(self.mem, arr):
+                            events.append({"what": "cast", "confirmed": True})
+                            break
+                        time.sleep(0.01)
+                    else:
+                        events.append({"what": "cast", "confirmed": False})
                 break
             time.sleep(1 / 120)
         return {"events": events, "presses": p.auto_use_presses()}
@@ -1039,21 +1063,36 @@ class Service:
         had, self._proj_arr = self._proj_arr is not None, None
         return {"stopped": had}
 
-    def watch_catch(self, *, interval: float = 0.0, rounds: int | None = None,
-                    on_event=None) -> dict:
-        """Take every fish that bites. Blocking; the GUI drives :meth:`catch_tick`."""
+    def watch_catch(self, *, recast: bool = False, interval: float = 0.0,
+                    rounds: int | None = None, on_event=None) -> dict:
+        """Keep fishing. Blocking; the GUI drives :meth:`catch_tick` from a timer.
+
+        ``recast`` is gated here rather than in the tick: nothing is cast until the player
+        has cast once themselves. That way the loop follows a player who is fishing and
+        does nothing at all to one standing at a lake holding a rod.
+        """
         import time
 
-        n, caught = 0, 0
+        from terrariabonker import projectiles as P
+
+        n, caught, cast, missed, seen = 0, 0, 0, 0, False
         while rounds is None or n < rounds:
             n += 1
-            for e in self.catch_tick()["events"]:
-                caught += 1
+            if recast and not seen and self._proj_arr:
+                seen = bool(P.find_bobbers(self.mem, self._proj_arr))
+            for e in self.catch_tick(recast=recast and seen)["events"]:
+                if e["what"] == "reel":
+                    caught += 1
+                    seen = True
+                elif e.get("confirmed"):
+                    cast += 1
+                else:
+                    missed += 1
                 if on_event:
                     on_event(e)
             if interval:
                 time.sleep(interval)
-        return {"rounds": n, "caught": caught}
+        return {"rounds": n, "caught": caught, "cast": cast, "cast_missed": missed}
 
     def watch_bait(self, *, keep: int = 30, interval: float = 1.0,
                    rounds: int | None = None, on_event=None) -> dict:

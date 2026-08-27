@@ -590,7 +590,14 @@ ORE_PICK_POWER = 250
 # prove "armed N times -> pressed N times" without watching the game.
 AUTO_USE_ARMED_OFF = 0x500
 AUTO_USE_COUNT_OFF = 0x504
+AUTO_USE_RELEASE_OFF = 0x508     # which byte the stub also sets (see RELEASE_ITEM_OFF)
 USE_ITEM_OFF = 0x672             # Player.controlUseItem, from the Player object base
+# Player.releaseUseItem. Setting controlUseItem alone reels a bobber in but never casts:
+# ItemCheck_PullFishingBobbers runs off controlUseItem, while starting a *use* needs a
+# fresh press -- controlUseItem together with releaseUseItem -- for an item that is not
+# auto-reuse. Found by hammering controlUseItem and taking the byte that inverts: idle
+# 100% ones, 2% while using, 13 bytes along from the control it mirrors.
+RELEASE_ITEM_OFF = 0x67F
 
 
 def _ore_extract_body(patcher, inj) -> bytes:
@@ -707,12 +714,22 @@ def _auto_use_body(patcher, inj) -> bytes:
     """
     armed = patcher.arena() + AUTO_USE_ARMED_OFF
     count = patcher.arena() + AUTO_USE_COUNT_OFF
+    release = patcher.arena() + AUTO_USE_RELEASE_OFF
+    patcher.mem.write_i32(release, RELEASE_ITEM_OFF)
+    tail = (b"\xc6\x80" + _u32(USE_ITEM_OFF) + b"\x01"   # mov byte [eax+0x672],1
+            # ...and the release flag, so the game reads a fresh press rather than a hold.
+            # Its offset lives in the arena rather than in the instruction so a candidate
+            # can be tried without re-patching; 0 means "write only the control".
+            + b"\x8b\x0d" + _u32(release)              # mov ecx,[release_off]
+            + b"\x85\xc9"                              # test ecx,ecx
+            + b"\x74\x04"                              # je +4
+            + b"\xc6\x04\x08\x01"                     # mov byte [eax+ecx],1
+            + b"\xff\x05" + _u32(count))               # inc [count]
     press = (b"\x83\x25" + _u32(armed) + b"\x00"      # and [armed],0   (consume first)
              + b"\x8b\x45\x08"                        # mov eax,[ebp+8] (this)
              + b"\x85\xc0"                             # test eax,eax
-             + b"\x74\x0d"                             # je skip (never taken; cheap)
-             + b"\xc6\x80" + _u32(USE_ITEM_OFF) + b"\x01"   # mov byte [eax+0x672],1
-             + b"\xff\x05" + _u32(count))              # inc [count]
+             + b"\x74" + bytes([len(tail)])             # je skip (never taken; cheap)
+             + tail)
     return (b"\x60\x9c"                                # pushad ; pushfd
             + b"\x83\x3d" + _u32(armed) + b"\x00"     # cmp [armed],0
             + b"\x74" + bytes([len(press)])             # je skip

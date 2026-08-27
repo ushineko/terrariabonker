@@ -30,6 +30,7 @@ ARRAY_LEN = 1001              # Main.projectile is Projectile[1001]
 ARRAY_LEN_OFF = 0x0C          # mono array: length at +0x0C, elements from +0x10
 ARRAY_DATA_OFF = 0x10
 
+ACTIVE_OFF = 0x03C            # Projectile.active (bool)
 BOBBER_OFF = 0x088            # Projectile.bobber (bool)
 AI_OFF = 0x044                # Projectile.ai      -> float[3]
 LOCALAI_OFF = 0x048           # Projectile.localAI -> float[3]
@@ -124,17 +125,25 @@ def projectile_array(mem, main_base: int) -> int | None:
 
 
 def read_bobber(mem, arr: int, slot: int) -> Bobber | None:
-    """Read one slot as a bobber, or None if it holds something else.
+    """Read one slot as a live bobber, or None.
 
-    Every slot holds a live object whatever is in flight, so ``bobber`` is the filter.
-    A recycled slot has had its fields reset by ``SetDefaults``, so a stale flag from a
-    previous projectile is not a case that arises.
+    **Both flags matter, and ``active`` is the one that is easy to forget.** The array
+    holds all 1001 objects forever; a finished projectile is marked inactive and its old
+    fields are left exactly where they were, ``bobber`` included. Filtering on ``bobber``
+    alone therefore reports a line still in the water minutes after it came out -- which
+    is what made a reeled-in bobber look "stuck" for fifteen seconds, and would have made
+    auto-catch refuse to cast because it believed the water was busy.
+
+    The game itself checks ``active`` first, in ``ItemCheck_PullFishingBobbers``. So does
+    this.
     """
     raw = mem.read(arr + ARRAY_DATA_OFF + slot * 4, 4)
     if len(raw) < 4:
         return None
     obj = struct.unpack("<I", raw)[0]
-    if not obj or mem.read(obj + BOBBER_OFF, 1) != b"\x01":
+    if not obj or mem.read(obj + ACTIVE_OFF, 1) != b"\x01":
+        return None
+    if mem.read(obj + BOBBER_OFF, 1) != b"\x01":
         return None
     ai = _float3(mem, obj, AI_OFF)
     local_ai = _float3(mem, obj, LOCALAI_OFF)
@@ -158,7 +167,9 @@ def find_bobbers(mem, arr: int) -> list[Bobber]:
     # loop tight enough to catch a bite window, and the per-slot version spent its time in
     # syscalls reading pointers that are almost all irrelevant.
     for slot, obj in enumerate(struct.unpack(f"<{ARRAY_LEN}I", raw)):
-        if not obj or mem.read(obj + BOBBER_OFF, 1) != b"\x01":
+        if not obj or mem.read(obj + ACTIVE_OFF, 1) != b"\x01":
+            continue
+        if mem.read(obj + BOBBER_OFF, 1) != b"\x01":
             continue
         b = read_bobber(mem, arr, slot)
         if b is not None:
