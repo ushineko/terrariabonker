@@ -1,7 +1,8 @@
 # Spec 045: Break up the over-long methods
 
-**Status**: INCOMPLETE — tier 1 done (characterization, then `extract_vein` and
-`catch_tick`). Tiers 2 and 3 are not started and still want a look before they are.
+**Status**: INCOMPLETE — tier 1 done, plus `arena` from tier 2 (the one where a mistake
+corrupts live code). The rest of tier 2 (`_enable_injection`, `set_item`) and all of tier 3
+are deliberately not started; see "What tier 1 turned up" for why they want re-arguing.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -129,8 +130,11 @@ field-copy sequence in `spawn_npc`. Marginal; may be left as-is.
       are named (`ARM_GRACE`/`BITE_GRACE` join `CAST_CONFIRM`/`CAST_SETTLE`); the
       gate-closes-on-unconfirmed-cast behaviour keeps its existing test and gained one
       asserting the two paths cannot both fire in one tick. *(79 → 47 lines.)*
-- [ ] `arena`'s springboard assemble/hook/poll/unhook block is a named method; the
+- [x] `arena`'s springboard assemble/hook/poll/unhook block is a named method; the
       `try/finally` restore is preserved exactly (a leaked hook is a live-code corruption).
+      *(73 → 39 lines + `_bootstrap_arena` 47. Four characterization tests added first,
+      against the unsplit method, because every existing test stubbed `arena()` wholesale
+      and the bootstrap body had no coverage at all.)*
 - [ ] `_enable_injection`'s three-mode body build and its site/cave resolution are separate
       methods; the idempotent-re-apply path (no re-resolve) still has its test.
 - [ ] `set_item`'s field writes go through one table, not eight branches; every field still
