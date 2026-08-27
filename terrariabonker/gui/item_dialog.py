@@ -56,6 +56,18 @@ class ItemEditDialog(QDialog):
         self.defense = self._spin(0, 9999, int(row.get("defense", 0)))
         self.prefix = QComboBox()
         self._fill_prefixes(row, empty)
+        # What the dialog opened with, so `_on_ok` can tell an edit from an echo.
+        self._initial = {
+            "stack": self.stack.value(),
+            "damage": self.damage.value(),
+            "auto_reuse": 1 if self.auto.isChecked() else 0,
+            "use_time": self.use_time.value(),
+            "use_anim": self.use_anim.value(),
+            "pick": self.pick.value(),
+            "tile_boost": self.tile.value(),
+            "defense": self.defense.value(),
+            "prefix": int(self.prefix.currentData() or 0),
+        }
 
         form.addRow("Stack", self.stack)
         form.addRow("Damage", self.damage)
@@ -134,7 +146,16 @@ class ItemEditDialog(QDialog):
             "defense": self.defense.value(),
             "prefix": int(self.prefix.currentData() or 0),
         }
+        #: Which fields the user actually touched. The dialog opens showing the item's
+        #: current stats, so submitting all of them sends the item's own values back as
+        #: explicit edits -- which overwrote whatever a modifier had just computed, and is
+        #: why assigning one appeared to work once and never again (spec 046).
+        self.changed = {k for k, v in self.resolved.items()
+                        if k != "type" and self._initial.get(k) != v}
         self.accept()
+
+    #: Set by `_on_ok`; empty until then.
+    changed: set = set()
 
     def _on_clear(self):
         self.cleared = True

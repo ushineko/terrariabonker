@@ -1380,25 +1380,33 @@ class MainWindow(QWidget):
         if dlg.cleared:
             self._write_slot(client.set_item_argv(slot, 0, expect_type=orig_type))
         elif dlg.resolved:
-            self._apply_item_edit(slot, dlg.resolved, orig_type)
+            self._apply_item_edit(slot, dlg.resolved, orig_type,
+                                  getattr(dlg, "changed", None))
         QTimer.singleShot(600, self.refresh_inventory)
 
-    def _apply_item_edit(self, slot: int, r: dict, orig_type: int):
+    def _apply_item_edit(self, slot: int, r: dict, orig_type: int, changed=None):
         """Apply the dialog result. A type change (incl. placing into an empty
         slot) sends only type + stack so the ContentSamples template supplies real
-        stats; a same-item edit sends the full field set. Either way the write
-        carries ``--expect-type``: the slot must still hold what the dialog was
-        opened on, or the CLI refuses it (see spec 029)."""
+        stats; a same-item edit sends **only the fields the user changed**. Either way the
+        write carries ``--expect-type``: the slot must still hold what the dialog was
+        opened on, or the CLI refuses it (see spec 029).
+
+        Sending only real edits matters beyond tidiness. The dialog opens showing the
+        item's current stats, so sending them all back means the item's own damage is
+        submitted as an explicit edit -- which lands after a modifier is applied and
+        overwrites what the modifier computed. That is why assigning a modifier looked
+        like it worked once and then never again (spec 046).
+        """
         t = r["type"]
         if t != orig_type:
             self._write_slot(client.set_item_argv(slot, t, stack=r["stack"],
                                                   expect_type=orig_type))
-        else:
-            self._write_slot(client.set_item_argv(
-                slot, t, stack=r["stack"], damage=r["damage"],
-                auto_reuse=r["auto_reuse"], use_time=r["use_time"],
-                use_anim=r["use_anim"], pick=r["pick"], tile_boost=r["tile_boost"],
-                defense=r["defense"], prefix=r["prefix"], expect_type=orig_type))
+            return
+        touched = r.keys() - {"type"} if changed is None else changed
+        if not touched:
+            return                      # nothing to write; do not disturb the slot
+        fields = {k: r[k] for k in touched}
+        self._write_slot(client.set_item_argv(slot, t, expect_type=orig_type, **fields))
 
     def _write_slot(self, sub_args: list[str]):
         """A slot write, which the stale-snapshot guard may refuse. On refusal the

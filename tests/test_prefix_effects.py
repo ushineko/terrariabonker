@@ -172,3 +172,65 @@ def test_the_table_comes_from_the_game_and_covers_the_real_modifiers():
     assert prefixes.stat_multipliers(LARGE) == {"scale": 1.12}
     assert prefixes.stat_multipliers(HARD) == {}, "accessory modifiers change the player"
     assert len(prefixes._STAT_MULTIPLIERS) > 70
+
+
+# --- the dialog must send edits, not echoes (the follow-up report) ------------
+
+def test_the_dialog_sends_only_what_was_changed(qt_app, monkeypatch):
+    """Reported: a modifier "only works the first time; afterwards it won't overwrite".
+
+    The dialog opens showing the item's current stats and submitted all of them, so the
+    item's own damage came back as an explicit edit -- which is applied AFTER the modifier
+    and overwrote what the modifier computed. Only the fields the dialog does not carry
+    (knockback, scale) ever survived, which is what made it look like a partial success.
+    """
+    from terrariabonker.gui.item_dialog import ItemEditDialog
+
+    # `flags` is what tells the dialog this is a summon weapon and so takes modifiers;
+    # without it the dropdown is (correctly) disabled and the test would prove nothing.
+    row = {"slot": 0, "type": SPIDER_STAFF, "stack": 1, "damage": 26, "use_time": 36,
+           "use_anim": 36, "pick": 0, "tile_boost": 0, "defense": 0, "prefix": 0,
+           "flags": {"summon": True}}
+    dlg = ItemEditDialog(None, row, [])
+    try:
+        dlg.prefix.setCurrentIndex(dlg.prefix.findData(GODLY))
+        dlg._on_ok()
+        assert dlg.changed == {"prefix"}, \
+            f"the dialog is still echoing untouched fields: {dlg.changed}"
+    finally:
+        dlg.deleteLater()
+
+
+def test_touching_a_field_still_sends_it(qt_app):
+    from terrariabonker.gui.item_dialog import ItemEditDialog
+
+    # `flags` is what tells the dialog this is a summon weapon and so takes modifiers;
+    # without it the dropdown is (correctly) disabled and the test would prove nothing.
+    row = {"slot": 0, "type": SPIDER_STAFF, "stack": 1, "damage": 26, "use_time": 36,
+           "use_anim": 36, "pick": 0, "tile_boost": 0, "defense": 0, "prefix": 0,
+           "flags": {"summon": True}}
+    dlg = ItemEditDialog(None, row, [])
+    try:
+        dlg.damage.setValue(500)
+        dlg.prefix.setCurrentIndex(dlg.prefix.findData(GODLY))
+        dlg._on_ok()
+        assert dlg.changed == {"damage", "prefix"}
+    finally:
+        dlg.deleteLater()
+
+
+def test_a_submission_that_changed_nothing_writes_nothing(qt_app, monkeypatch, gui_window):
+    """Opening the dialog and pressing OK must not rewrite the slot.
+
+    Harmless-looking, and it was not: every field the item already had was sent back as an
+    edit, which is the mechanism behind the reported bug.
+    """
+    w = gui_window()
+    try:
+        sent = []
+        monkeypatch.setattr(w, "_write_slot", lambda argv: sent.append(argv))
+        row = {"type": SPIDER_STAFF, "stack": 1, "damage": 26, "prefix": GODLY}
+        w._apply_item_edit(0, row, SPIDER_STAFF, changed=set())
+        assert sent == [], "an untouched dialog still wrote to the slot"
+    finally:
+        w.close()

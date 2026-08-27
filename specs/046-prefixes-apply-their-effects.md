@@ -87,7 +87,8 @@ read from the template object directly rather than from the copied block.
 
 - [ ] Assigning a modifier applies every field it multiplies, computed from the item's
       template base — verified in-game on the reported case: a Godly Spider Staff shows
-      raised damage and knockback in its tooltip.
+      raised damage and knockback in its tooltip. *(Second half fixed after a follow-up
+      report — see "only works the first time" below. Still needs an in-game look.)*
 - [x] Assigning the same modifier twice leaves identical stats (no compounding), and
       switching modifier A → B gives the same result as applying B to a pristine item.
       *(Every scaled field is written from base, not only the ones the new modifier
@@ -130,6 +131,25 @@ Also seen and **not explained**: a Molten Hamaxe reads `knockback 8.05` (its Leg
 bonus, applied) while its damage and use time read as base. A partially-bonused item does
 not fit either "editor set the byte only" or "reforged in the game", and guessing at it
 here would be inventing history. Worth a look if it recurs.
+
+## The follow-up report: "only works the first time"
+
+The first fix was right and still looked broken, because the bug had a second half in a
+place the spec had not looked: **the dialog submitted every field on every OK**, populated
+from the item's current stats.
+
+So the item's own damage came back as an *explicit edit*, which by this spec's own ordering
+lands after the modifier and overwrites what it computed. Only the fields the dialog does
+not carry — knockback, scale, shootSpeed, mana — ever survived, which is exactly the shape
+of "it worked, sort of, once": the visible bonuses that stuck were the ones nothing
+overwrote.
+
+The dialog now sends **only the fields the user changed**, and a submission that changed
+nothing writes nothing at all. That was worth fixing on its own: pressing OK on an untouched
+dialog rewrote every field of the item, which is a write to the save for no reason.
+
+The lesson for the ordering rule in Design: "explicit field edits win over the modifier"
+is correct, but only if *explicit* means the user typed it. An echo is not an edit.
 
 ## Risks & Assumptions
 
