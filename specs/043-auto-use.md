@@ -187,6 +187,49 @@ frame the burst spanned is its own press. This is exactly the failure this spec 
 from the bobber's mid-arc behaviour, now with a number on it. The capability is not in
 doubt; the count of presses is, and that is what the stub fixes.
 
+## The first run crashed the game — 2026-08-26
+
+Not the stub. The stub never ran. `enable("auto_use")` wrote it **over a live one**.
+
+Arena slots were indexed by `sorted(INJECTIONS)`, so `auto_use` — which sorts first — took
+slot 0. `inventory_accs` already held slot 0 in an arena left over from the running
+session, enabled, with the game jumping into it every frame. 58 bytes went over code that
+was executing. From then on `UpdateEquips` jumped into auto-use's stub, which ends by
+replaying auto-use's displaced bytes and jumping back into `Player.Update`; the game ran on
+with that control flow until a chum-bucket dictionary came back null a few frames later.
+The `NullReferenceException` in `OnPreUpdateAllProjectiles` was the symptom, and it names
+nothing that would lead an investigator back here.
+
+The state file made it unambiguous — both injections recorded the same cave address:
+
+```
+"auto_use":       cave 1744834560   (0x68001000)
+"inventory_accs": cave 1744834560   (0x68001000)
+```
+
+**The test suite caught this before the game did, and it was misread.** Adding the
+injection broke an unrelated patcher test with "no player found", because the same shift
+moved a stub onto the planted player in the synthetic image. That was fixed as a fixture
+overlap — true, and beside the point. The commit message even states the mechanism
+("arena slots are indexed by sorted injection name, so adding one moves every other slot")
+while treating it as an artifact of the test image. It is a live-code hazard: an arena
+outlives the trainer process that made it, and the stubs in it are running.
+
+**Fix, in two parts.** `_SLOT_ORDER` is now an explicit append-only tuple, so a slot's
+address is decided by position in a list nobody may reorder, and adding an injection cannot
+move an existing one. `ARENA_MAGIC` is bumped to `TBARENA2`, so an arena stamped by the old
+numbering is ignored rather than adopted — that costs 64 KB and avoids exactly this
+overwrite during the transition.
+
+Five regression tests cover it: every injection has a slot, slots never overlap, appending
+moves nothing, the tuple is not merely sorted (so re-tidying it into `sorted()` fails), and
+the stamp changed with the layout.
+
+**The rule this earns**, alongside spec 040's: *never write a stub into a slot without
+establishing what is in it.* Placing by index instead of searching for a cave was supposed
+to make placement safe, and it does — but only against caves, not against the previous
+version of yourself.
+
 ## Alternatives considered
 
 - *Keep the poller.* Rejected for the precision problem above, not the CPU one.

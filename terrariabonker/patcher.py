@@ -1082,6 +1082,19 @@ def _build_catalog() -> dict[str, PatchInfo]:
     return dict(sorted(out.items(), key=lambda kv: order.get(kv[0], len(order))))
 
 
+# Arena slot assignment, APPEND-ONLY. Never sort this, never reorder it, never remove a
+# name: a slot's address is decided by position here, and an arena outlives the trainer
+# process that made it. Slots were indexed by `sorted(INJECTIONS)` until 2026-08-26, when
+# adding an injection whose name sorted first shifted every other slot by 0x800 and the
+# new stub was written straight over a LIVE one -- inventory_accs, enabled, being jumped
+# into every frame. The game ran on with corrupted control flow and died a few frames
+# later somewhere unrelated. Appending is what makes adding an injection safe.
+_SLOT_ORDER: tuple[str, ...] = (
+    "inventory_accs", "loot", "ore_extract", "pickup", "smart_cursor",
+    "spawn_rate", "teleport", "tool_reach", "vanity_accs",
+    "auto_use",
+)
+
 PATCH_CATALOG: dict[str, PatchInfo] = _build_catalog()
 
 
@@ -1163,7 +1176,11 @@ class Patcher:
     # Stamped at the arena's tail so we can find it again. An arena outlives the process
     # that asked for it -- VirtualAlloc'd memory belongs to the game, not to us -- so
     # losing the state file must not cost the player another swing to re-bootstrap.
-    ARENA_MAGIC = b"TBARENA1"
+    # Bumped 2026-08-26 with the slot-order fix: an arena stamped TBARENA1 was laid out
+    # by the old sorted numbering, so adopting one would put today's stubs on top of
+    # yesterday's live ones. A new stamp means such an arena is ignored and a fresh one
+    # allocated, which costs 64 KB and avoids overwriting running code.
+    ARENA_MAGIC = b"TBARENA2"
     ARENA_MAGIC_OFF = 0x10000 - 16
 
     def _free_base(self, need: int) -> int:
@@ -1286,9 +1303,11 @@ class Patcher:
         time and two injections cannot be given overlapping space. Enabling, disabling and
         re-enabling all land on the same bytes.
         """
-        order = sorted(INJECTIONS)
+        order = _SLOT_ORDER
         if name not in order:
-            raise PatchError(f"no arena slot for unknown injection {name!r}")
+            raise PatchError(
+                f"{name!r} has no arena slot: append it to _SLOT_ORDER (never reorder "
+                "that tuple -- see the note there)")
         if not 0 <= site < self.ARENA_MAX_SITES:
             raise PatchError(f"{name}: site {site} is past ARENA_MAX_SITES")
         index = order.index(name) * self.ARENA_MAX_SITES + site

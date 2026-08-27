@@ -661,3 +661,59 @@ def test_auto_use_refuses_a_site_that_is_not_what_it_will_restore(game):
     m.write(site, b"\x90" * len(inj.overwrite))
     with pytest.raises(PatchError):
         p.enable("auto_use")
+
+
+# --- arena slot assignment (the 2026-08-26 crash) -------------------------------
+
+def test_every_injection_has_a_slot(game):
+    """A new injection must be given a slot deliberately, not by whatever sorts first."""
+    _, p = game
+    missing = set(P.INJECTIONS) - set(P._SLOT_ORDER)
+    assert not missing, f"{sorted(missing)} must be APPENDED to _SLOT_ORDER"
+
+
+def test_slots_never_overlap(game):
+    _, p = game
+    slots = [p.slot_for(n) for n in P.INJECTIONS]
+    assert len(set(slots)) == len(slots)
+    for a in slots:
+        for b in slots:
+            assert a == b or abs(a - b) >= p.ARENA_SLOT * p.ARENA_MAX_SITES
+
+
+def test_appending_an_injection_moves_no_existing_slot(game):
+    """The crash: slots were indexed by sorted() name, so adding `auto_use` -- which
+    sorts first -- shifted every other injection by 0x800. The new stub was written over
+    a LIVE one in an arena left from a running session, and the game died a few frames
+    later in unrelated code.
+
+    Appending must be inert for everyone already in the tuple.
+    """
+    _, p = game
+    order = P._SLOT_ORDER
+    before = {n: order.index(n) for n in order}
+    grown = order + ("a_new_cheat_that_sorts_first",)
+    after = {n: grown.index(n) for n in order}
+    assert before == after
+
+
+def test_slot_order_is_not_merely_sorted(game):
+    """A tuple that happens to be in sorted order would pass everything else here and
+    then break the moment someone 'tidied' it back into sorted(INJECTIONS)."""
+    assert list(P._SLOT_ORDER) != sorted(P._SLOT_ORDER)
+
+
+def test_unknown_injection_has_no_slot(game):
+    _, p = game
+    with pytest.raises(PatchError):
+        p.slot_for("not_an_injection")
+
+
+def test_arena_stamp_changed_with_the_layout(game):
+    """An arena laid out by the old numbering must not be adopted by this build.
+
+    The stamp is the only thing that distinguishes one, and reusing it would put today's
+    stubs on top of yesterday's live ones -- which is precisely what crashed the game.
+    """
+    _, p = game
+    assert p.ARENA_MAGIC != b"TBARENA1"
