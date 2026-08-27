@@ -20,7 +20,7 @@ def game(tmp_path, monkeypatch):
     from terrariabonker import profile
     monkeypatch.setattr(P, "_STATE", str(tmp_path / "patches.json"))
     monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))   # isolate profile
-    m = FakeMem(BASE, 0x8000)
+    m = FakeMem(BASE, 0x20000)
     # a player so value writes (mining/reach) have somewhere to go
     m.plant_mono_string(NAME_AT, "hero")
     m.plant_player(LIFE, [100, 100, 80, 20, 20, 20], NAME_AT)
@@ -34,8 +34,12 @@ def game(tmp_path, monkeypatch):
     # Stubs live in memory we allocate, so a synthetic game needs an arena too.
     # Stubbed rather than bootstrapped: allocating means making the game call
     # VirtualAlloc, which a fake process cannot do.
-    p._arena = BASE
-    p.arena = lambda *a, **k: BASE
+    # Clear of the planted player and code: a real arena is 0x10000 bytes of slots, and
+    # slots are indexed by sorted injection name, so adding an injection moves every
+    # other one. Overlapping the player made that shift look like "no player found".
+    ARENA = BASE + 0x10000
+    p._arena = ARENA
+    p.arena = lambda *a, **k: ARENA
     return m, p
 
 
@@ -46,7 +50,7 @@ def test_status_all_off_initially(game):
                           "loot": False, "teleport": False, "max_minions": False,
                           "vanity_accs": False, "inventory_accs": False,
                           "smart_cursor": False, "pylons": False,
-                          "ore_extract": False}
+                          "ore_extract": False, "auto_use": False}
 
 
 def test_tool_reach_injection_roundtrip(game):
@@ -578,3 +582,82 @@ def test_arena_slots_are_deterministic_and_cannot_overlap():
         p.slot_for("loot", P.Patcher.ARENA_MAX_SITES)      # past the reservation
     with pytest.raises(P.PatchError):
         p.slot_for("not_an_injection", 0)
+
+
+# --- auto-use (spec 043) -------------------------------------------------------
+
+def _plant_auto_use(m, p):
+    """Plant the borders_movement anchor and the bytes the stub will displace."""
+    m.write(CODE + 0x900, ANCHORS["borders_movement"].pattern.raw)
+    inj = P.INJECTIONS["auto_use"]
+    site = CODE + 0x900 + inj.inject_off
+    m.write(site, inj.overwrite)
+    return inj, site
+
+
+def test_auto_use_roundtrip(game):
+    m, p = game
+    inj, site = _plant_auto_use(m, p)
+    p.enable("auto_use")
+    assert m.read(site, 1) == b"\xe9"                  # jump to the stub installed
+    assert p.is_enabled("auto_use")
+    p.disable("auto_use")
+    assert m.read(site, len(inj.overwrite)) == inj.overwrite
+    assert not p.is_enabled("auto_use")
+
+
+def test_auto_use_ships_disarmed(game):
+    """Enabling the cheat must not press anything: the flag starts clear.
+
+    A cheat that can fire the player's weapons has to be inert until something arms it.
+    """
+    m, p = game
+    _plant_auto_use(m, p)
+    p.enable("auto_use")
+    armed = p.arena() + P.AUTO_USE_ARMED_OFF
+    assert m.read_i32(armed) == 0
+
+
+def test_auto_use_stub_consumes_the_flag_before_pressing(game):
+    """The `and [armed],0` must come before the write to the use byte.
+
+    Same ordering as the extractor: a stub that dies between the two presses nothing,
+    where the other order would press every frame forever.
+    """
+    m, p = game
+    _plant_auto_use(m, p)
+    p.enable("auto_use")
+    stub = m.read(p.slot_for("auto_use"), 96)
+    clear = stub.index(b"\x83\x25")                    # and dword [armed],0
+    press = stub.index(b"\xc6\x80")                    # mov byte [this+USE_ITEM_OFF],1
+    assert clear < press
+
+
+def test_auto_use_stub_targets_the_use_control(game):
+    """The offset written is the confirmed control, from the Player object base."""
+    m, p = game
+    _plant_auto_use(m, p)
+    p.enable("auto_use")
+    stub = m.read(p.slot_for("auto_use"), 96)
+    i = stub.index(b"\xc6\x80")
+    assert struct.unpack("<I", stub[i + 2:i + 6])[0] == P.USE_ITEM_OFF
+    assert stub[i + 6] == 1
+
+
+def test_auto_use_stub_replays_the_displaced_bytes(game):
+    """The stub ends with the site's own instructions; losing them corrupts the frame."""
+    m, p = game
+    inj, _ = _plant_auto_use(m, p)
+    p.enable("auto_use")
+    stub = m.read(p.slot_for("auto_use"), 96)
+    assert inj.overwrite in stub
+    assert stub.index(inj.overwrite) > stub.index(b"\xc6\x80")
+
+
+def test_auto_use_refuses_a_site_that_is_not_what_it_will_restore(game):
+    """_check_site's guard: wrong bytes at the site means both halves are wrong."""
+    m, p = game
+    inj, site = _plant_auto_use(m, p)
+    m.write(site, b"\x90" * len(inj.overwrite))
+    with pytest.raises(PatchError):
+        p.enable("auto_use")

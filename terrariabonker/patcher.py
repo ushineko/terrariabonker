@@ -234,6 +234,15 @@ _RAW_ANCHORS: dict[str, Pattern] = {
     # relative address, which is what makes them displaceable -- the call itself could not
     # be, its rel32 differs every session.
     # trailing five wildcarded: the extractor overwrites them (see "grabitems" above)
+    # Player.Update's call to BordersMovement (spec 043) -- the auto-use hook. The only
+    # call site of that method in Update, unconditional, and ~50 IL bytes before
+    # ItemCheckWrapped reads the use control, so a write here lands just before the read.
+    # The 13 bytes after the call are the patch site and are WILDCARDED; unlike
+    # "grabitems" this anchor stays unique that way, because the trailing fstp of
+    # slotsMinions and the Main.netMode compare carry the uniqueness on their own.
+    "borders_movement": _pat("E8 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? "
+                             "8B 45 08 D9 EE D9 98 ?? ?? ?? ?? 8B 05 ?? ?? ?? ?? "
+                             "3D 02 00 00 00"),
     "grabitems_call": _pat("0F B6 80 ?? ?? ?? ?? 85 C0 75 14 8B 45 08 8B 4D 0C "
                            "89 4C 24 04 ?? ?? ?? ?? ??"),
     "pick_tile": _pat("?? ?? ?? ?? ?? 56 83 EC 7C 8B 7D 08 8B 5D 0C B8 ?? ?? ?? ?? "
@@ -403,6 +412,11 @@ _VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
     # verified on the *current* build: the default is every build in _VERIFIED_BUILDS, so
     # an anchor that says nothing silently claims two 1.4.5.7 builds it has never run on.
     "grabitems_call": ("1.4.5.8+24893155",),
+    # 2026-08-26: Player.Update's call to BordersMovement, where auto-use hooks. Cut on
+    # 1.4.5.8 and verified unique there, but the stub has never been watched running in
+    # the game, so it claims NO build at all. An AOB that resolves is not an anchor that
+    # works; the empty set is the honest statement until a frame has gone through it.
+    "borders_movement": (),
 }
 
 ANCHORS: dict[str, Anchor] = {
@@ -572,6 +586,14 @@ ORE_QUEUE_BYTES = 4 + ORE_MAX_BATCH * 8
 ORE_PICK_POWER = 250
 
 
+# Auto-use (spec 043). Two dwords in the arena's reserved region, clear of every stub:
+# the arm flag the trainer sets, and a counter the stub bumps on each press so a test can
+# prove "armed N times -> pressed N times" without watching the game.
+AUTO_USE_ARMED_OFF = 0x500
+AUTO_USE_COUNT_OFF = 0x504
+USE_ITEM_OFF = 0x672             # Player.controlUseItem, from the Player object base
+
+
 def _ore_extract_body(patcher, inj) -> bytes:
     """Mine a batch of queued tiles **every frame**, from Player.Update.
 
@@ -657,6 +679,47 @@ def _ore_extract_body(patcher, inj) -> bytes:
             + empty + setup + tail_code
             + b"\x61"                                 # popad  <- skip lands here
             + inj.overwrite)                           # the displaced arg stores
+
+
+def _auto_use_body(patcher, inj) -> bytes:
+    """Press the use button once, on the next frame, when the trainer arms it.
+
+    The poller that proved this cheat works (spec 042) wins by volume: ~400,000 writes a
+    second, covering every frame many times over. That takes a fish, but it cannot promise
+    *one* of anything -- a 20 ms burst took the water from one bobber to three, catching
+    the fish and re-casting twice. A stub that runs once per frame is correct by
+    construction instead.
+
+    **Consume before acting.** The flag is cleared before the byte is written, the ordering
+    the extractor already uses: a stub that dies between the two presses nothing, where the
+    other order would press forever.
+
+    **`this` is free here.** The site's first displaced instruction is ``mov eax,[ebp+8]``
+    -- Player.Update's own argument -- so the Player pointer costs nothing and cannot be
+    stale. Update is never entered on a null ``this``, which is why there is no null guard
+    beyond the cheap test kept below.
+
+    **No calls, so no ABI.** Every crash in spec 040 came from a call: argument order,
+    frame alignment, or the cave the stub lived in. This one calls nothing, touches no
+    stack beyond pushad/pushfd, and writes two dwords of its own arena.
+
+    The counter exists for the first test: arm it N times, read N back, without any
+    claim about what the game did with the presses.
+    """
+    armed = patcher.arena() + AUTO_USE_ARMED_OFF
+    count = patcher.arena() + AUTO_USE_COUNT_OFF
+    press = (b"\x83\x25" + _u32(armed) + b"\x00"      # and [armed],0   (consume first)
+             + b"\x8b\x45\x08"                        # mov eax,[ebp+8] (this)
+             + b"\x85\xc0"                             # test eax,eax
+             + b"\x74\x0d"                             # je skip (never taken; cheap)
+             + b"\xc6\x80" + _u32(USE_ITEM_OFF) + b"\x01"   # mov byte [eax+0x672],1
+             + b"\xff\x05" + _u32(count))              # inc [count]
+    return (b"\x60\x9c"                                # pushad ; pushfd
+            + b"\x83\x3d" + _u32(armed) + b"\x00"     # cmp [armed],0
+            + b"\x74" + bytes([len(press)])             # je skip
+            + press
+            + b"\x9d\x61"                              # popfd ; popad   <- skip lands here
+            + inj.overwrite)                             # the displaced this-load and store
 
 
 def _clamp_vanity_slot(_value: int = 0) -> bytes:
@@ -922,6 +985,17 @@ INJECTIONS: dict[str, Injection] = {
         0x15, _b("89 04 24 8B C0"), None,
         build_body=_ore_extract_body, rerun_overwrite=False, arena=True,
         note="Mines the rest of an ore vein while you mine it. Whitelisted ores only."),
+    # Auto-use (spec 043): press the use button once per arm, from inside the frame.
+    # Hooked just after Player.Update's call to BordersMovement, which is ~50 IL bytes
+    # before ItemCheckWrapped reads the control -- so the write lands between the game
+    # taking real input and the game acting on it, which is the window a poller cannot aim
+    # at. 13 displaced bytes, none of them relative.
+    "auto_use": Injection(
+        "auto_use", "Auto-use (press the use button)", "borders_movement",
+        0x5, _b("8B 45 08 C7 80 FC 03 00 00 00 00 00 00"), None,
+        build_body=_auto_use_body, rerun_overwrite=False, arena=True, writes_cave=True,
+        note="Lets a cheat press your use button. Ships off; nothing presses it on its "
+             "own."),
     "teleport": Injection(
         "teleport", "Map-ping teleport (TriggerPing)", "trigger_ping",
         0x0, _b("8B 4D 08 89 4C 24 04"), None,
