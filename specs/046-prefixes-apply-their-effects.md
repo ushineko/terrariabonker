@@ -1,6 +1,8 @@
 # Spec 046: A modifier assigned in the editor gives its effects
 
-**Status**: INCOMPLETE — specified, not started.
+**Status**: INCOMPLETE — implemented and tested headless; awaiting in-game confirmation of
+the reported case, and a decision on repairing items that already carry a cosmetic
+modifier. `crit`/`armorPenetration`/`bonusTagDamage` remain unverified and unapplied.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -86,18 +88,48 @@ read from the template object directly rather than from the copied block.
 - [ ] Assigning a modifier applies every field it multiplies, computed from the item's
       template base — verified in-game on the reported case: a Godly Spider Staff shows
       raised damage and knockback in its tooltip.
-- [ ] Assigning the same modifier twice leaves identical stats (no compounding), and
+- [x] Assigning the same modifier twice leaves identical stats (no compounding), and
       switching modifier A → B gives the same result as applying B to a pristine item.
-- [ ] Clearing the modifier (prefix 0) returns the item to its base stats.
-- [ ] The multiplier table is generated from the game rather than hand-written, with the
+      *(Every scaled field is written from base, not only the ones the new modifier
+      touches — the first implementation left the old modifier's damage behind, which is
+      what the switching test caught.)*
+- [x] Clearing the modifier (prefix 0) returns the item to its base stats.
+- [x] The multiplier table is generated from the game rather than hand-written, with the
       generator kept in `tools/` and the provenance recorded.
-- [ ] `crit`, `armorPenetration` and `bonusTagDamage` are either verified and applied, or
-      **not applied and documented as not applied** — a modifier that silently drops its
-      crit bonus is the same class of bug as this report.
-- [ ] Explicit field edits in the same dialog submission win over the modifier's values.
-- [ ] Headless tests: the multipliers land on the right fields, applying twice is
-      idempotent, and prefix 0 restores base.
+      *(`tools/extract_prefix_stats.py` → `data/prefix_stats.json`, 78 modifiers.)*
+- [x] `crit`, `armorPenetration` and `bonusTagDamage` are either verified and applied, or
+      **not applied and documented as not applied**. *(Not applied. `apply_prefix_stats`
+      returns them in `skipped`, and a test asserts Godly reports `crit` as skipped rather
+      than dropping it quietly.)*
+- [x] Explicit field edits in the same dialog submission win over the modifier's values.
+- [x] Headless tests: the multipliers land on the right fields, applying twice is
+      idempotent, and prefix 0 restores base. *(10 tests; five mutations caught, including
+      the original bug and the compounding one.)*
 - [ ] `docs/item-fields.md` gains whatever offsets this derives, with the evidence for each.
+
+## Found on the first dry run: the maintainer's own Spider Staff
+
+Before writing anything, the fix was run in report-only mode against the reported item:
+
+```
+slot 7: Spider Staff [Godly]
+    damage     base 26   now 52   -> would become 29.9
+    knockback  base 3.0  now 3.0  -> would become 3.45
+```
+
+**`now 52` is a manual edit**, not a modifier. So repairing this item would *lower* its
+damage from 52 to 30, because the modifier is computed from the pristine 26. That is the
+"manual stat edits are lost" risk in Risks below, arriving immediately and on the very item
+that prompted the report.
+
+It argues against repairing existing items automatically. Re-assigning a modifier is the
+repair, and it should stay something the player chooses per item — with the dialog's own
+damage field (which wins over the modifier) as the way to keep a tuned number.
+
+Also seen and **not explained**: a Molten Hamaxe reads `knockback 8.05` (its Legendary
+bonus, applied) while its damage and use time read as base. A partially-bonused item does
+not fit either "editor set the byte only" or "reforged in the game", and guessing at it
+here would be inventing history. Worth a look if it recurs.
 
 ## Risks & Assumptions
 

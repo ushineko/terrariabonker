@@ -19,6 +19,7 @@ import json
 import os
 
 _DATA = os.path.join(os.path.dirname(__file__), "data", "prefixes.json")
+_STATS = os.path.join(os.path.dirname(__file__), "data", "prefix_stats.json")
 
 _NAMES: dict[int, str] = {}
 try:
@@ -26,6 +27,33 @@ try:
         _NAMES = {int(k): v for k, v in json.load(_f).items()}
 except (OSError, ValueError):
     _NAMES = {}
+
+# What each modifier does to the item's own fields, extracted from the game's IL by
+# tools/extract_prefix_stats.py. A modifier is not a display value: `Item.Prefix`
+# multiplies these into the item and stores the results, which is why assigning the prefix
+# byte alone gives the name and nothing else (spec 046).
+_STAT_MULTIPLIERS: dict[int, dict[str, float]] = {}
+try:
+    with open(_STATS) as _f:
+        _STAT_MULTIPLIERS = {int(k): v for k, v in json.load(_f).items()}
+except (OSError, ValueError):
+    _STAT_MULTIPLIERS = {}
+
+
+def stat_multipliers(prefix_id: int) -> dict[str, float]:
+    """What this modifier does to the item's fields. ``{}`` for one that does nothing.
+
+    Empty is a real answer, not a gap: the accessory modifiers (Hard, Warding, Menacing
+    and the rest of 62-80) change the *player* when the item is equipped -- the game reads
+    the prefix byte in `Player.GrantPrefixBenefits` -- so they need nothing written into
+    the item and already work.
+    """
+    return dict(_STAT_MULTIPLIERS.get(prefix_id, {}))
+
+
+#: Which of the above are added to the field rather than multiplied into it.
+ADDITIVE_STATS = frozenset({"crit", "tagdamage", "armorpen"})
+
 
 # Modifiers shared by every weapon (melee / ranged / magic / summon).
 _UNIVERSAL = set(range(36, 62))

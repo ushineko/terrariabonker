@@ -44,6 +44,16 @@ ITEM_PICK = 0x90        # pickaxe power %
 ITEM_AXE = 0x94         # axe power (x5 = displayed %)
 ITEM_HAMMER = 0x98      # hammer power %
 ITEM_DAMAGE = 0xAC      # weapon/tool damage (-1 for non-damaging items)
+# Fields a modifier scales (spec 046). All four are verified in docs/item-fields.md;
+# knockBack was re-confirmed against templates whose values the wiki publishes (Copper
+# Broadsword 5.5, Meowmere 6.5). `crit`, `armorPenetration` and `bonusTagDamage` are NOT
+# here on purpose: declaration order puts them at 0x150/0x154/0x158 and every template
+# reads 0 there, so nothing distinguishes them from padding. Writing an unverified offset
+# into an item is permanent, so they are left unapplied until they are verified.
+ITEM_KNOCKBACK = 0xB0   # float
+ITEM_SCALE = 0xCC       # float; size, which is also melee reach
+ITEM_SHOOTSPEED = 0x100  # float
+ITEM_MANA = 0x11C       # mana cost per use
 ITEM_DEFENSE = 0xD4     # defense the item grants (armor/some accessories; 0 otherwise)
 ITEM_CONSUMABLE = 0xBD  # byte bool; if set, the item is used up on use (careful!)
 ITEM_AUTOREUSE = 0xBE   # byte bool; auto-swing while the button is held
@@ -126,6 +136,18 @@ class Inventory:
         if arr is None:
             return None
         return self.mem.read_u32(arr + ARR_DATA_OFF + index * 4)
+
+    #: Where each modifier-scaled field lives, for reading an item's base stats out of a
+    #: ContentSamples template block.
+    PREFIX_BASE_FIELDS: dict[str, tuple] = {
+        "damage": (ITEM_DAMAGE, "i32"),
+        "knockback": (ITEM_KNOCKBACK, "f32"),
+        "useanim": (ITEM_USE_ANIM, "i32"),
+        "usetime": (ITEM_USE_TIME, "i32"),
+        "scale": (ITEM_SCALE, "f32"),
+        "shootspeed": (ITEM_SHOOTSPEED, "f32"),
+        "mana": (ITEM_MANA, "i32"),
+    }
 
     def read_slot(self, index: int) -> Slot | None:
         addr = self._item_addr(index)
@@ -301,9 +323,71 @@ class Inventory:
         return self.mem.write_i32(addr + ITEM_DEFENSE, value) if addr else False
 
     def set_prefix(self, index: int, value: int) -> bool:
-        """Set the item's modifier tier (a byte, e.g. Legendary/Warding)."""
+        """Set the item's modifier tier (a byte, e.g. Legendary/Warding).
+
+        The byte alone is only the name. Bonuses live in the item's own fields -- see
+        :meth:`apply_prefix_stats`, which the service calls with the item's base stats.
+        """
         addr = self._item_addr(index)
         return self.mem.write(addr + ITEM_PREFIX, bytes([value & 0xFF])) if addr else False
+
+    #: Modifier stat -> the fields it scales, as ``(base key, offset, kind)``.
+    #: One multiplier can drive several fields -- in the game `usetime` scales
+    #: useAnimation, useTime and reuseDelay -- and each scales from ITS OWN base, which is
+    #: why the base key is carried per field rather than per stat. useAnimation and useTime
+    #: are equal on most weapons and not on all, so sharing one base would quietly rewrite
+    #: one of them to the other's value. (reuseDelay is not here: its offset is unknown.)
+    _PREFIX_FIELDS: dict[str, tuple] = {
+        "damage": (("damage", ITEM_DAMAGE, "i32"),),
+        "knockback": (("knockback", ITEM_KNOCKBACK, "f32"),),
+        "usetime": (("useanim", ITEM_USE_ANIM, "i32"), ("usetime", ITEM_USE_TIME, "i32")),
+        "scale": (("scale", ITEM_SCALE, "f32"),),
+        "shootspeed": (("shootspeed", ITEM_SHOOTSPEED, "f32"),),
+        "mana": (("mana", ITEM_MANA, "i32"),),
+    }
+
+    def apply_prefix_stats(self, index: int, mults: dict, base: dict) -> dict:
+        """Scale the item's fields by a modifier's multipliers, from ``base``.
+
+        ``base`` is the field values of a *pristine* item of this type, so applying the
+        same modifier twice gives the same answer and switching modifiers cannot compound.
+        Scaling the item's current values instead would drift a little further every time.
+
+        Integer fields are rounded the way the game rounds them: .NET's `Math.Round` and
+        Python's `round` are both round-half-to-even, so a `.5` lands on the same number in
+        both.
+
+        **Every scaled field is written, not only the ones this modifier changes.** A
+        modifier the game applies always lands on a freshly reset item, so switching from
+        Godly to Large has to put damage back to base rather than leave Godly's behind, and
+        clearing the modifier has to restore everything. Fields this modifier does not
+        touch simply get a multiplier of 1.
+
+        Returns what it wrote, for the caller to report. Stats with no offset here (crit
+        and the two other additive ones) are skipped and named in the result, rather than
+        silently dropped -- a modifier that quietly loses its crit bonus is this bug again.
+        """
+        addr = self._item_addr(index)
+        if addr is None:
+            return {"written": {}, "skipped": sorted(mults)}
+        written, skipped = {}, []
+        for stat in mults:
+            if stat not in self._PREFIX_FIELDS:
+                skipped.append(stat)          # a bonus we have no verified offset for
+        for stat, fields in self._PREFIX_FIELDS.items():
+            mult = mults.get(stat, 1.0)
+            for key, off, kind in fields:
+                if key not in base:
+                    skipped.append(key)
+                    continue
+                value = base[key] * mult
+                if kind == "i32":
+                    self.mem.write_i32(addr + off, int(round(value)))
+                else:
+                    self.mem.write_f32(addr + off, value)
+                if mult != 1.0:
+                    written[key] = value
+        return {"written": written, "skipped": sorted(set(skipped))}
 
     def set_tile_boost(self, index: int, value: int) -> bool:
         """Set extra placement reach (tiles) for the item in this slot."""

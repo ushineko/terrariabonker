@@ -1,0 +1,325 @@
+{
+ "1": {
+  "scale": 1.12
+ },
+ "10": {
+  "damage": 0.85
+ },
+ "11": {
+  "knockback": 0.9,
+  "scale": 0.9,
+  "usetime": 1.1
+ },
+ "12": {
+  "damage": 1.05,
+  "knockback": 1.1,
+  "scale": 1.1,
+  "usetime": 1.15
+ },
+ "13": {
+  "damage": 0.9,
+  "knockback": 0.8,
+  "scale": 1.1
+ },
+ "14": {
+  "knockback": 1.15,
+  "usetime": 1.1
+ },
+ "15": {
+  "knockback": 0.9,
+  "usetime": 0.85
+ },
+ "16": {
+  "crit": 3.0,
+  "damage": 1.1
+ },
+ "17": {
+  "shootspeed": 1.1,
+  "usetime": 0.85
+ },
+ "18": {
+  "shootspeed": 1.15,
+  "usetime": 0.9
+ },
+ "19": {
+  "knockback": 1.15,
+  "shootspeed": 1.05
+ },
+ "2": {
+  "scale": 1.18
+ },
+ "20": {
+  "crit": 2.0,
+  "damage": 1.1,
+  "knockback": 1.05,
+  "shootspeed": 1.05,
+  "usetime": 0.95
+ },
+ "21": {
+  "damage": 1.1,
+  "knockback": 1.15
+ },
+ "22": {
+  "damage": 0.85,
+  "knockback": 0.9,
+  "shootspeed": 0.9
+ },
+ "23": {
+  "shootspeed": 0.9,
+  "usetime": 1.15
+ },
+ "24": {
+  "knockback": 0.8,
+  "usetime": 1.1
+ },
+ "25": {
+  "crit": 1.0,
+  "damage": 1.15,
+  "usetime": 1.1
+ },
+ "26": {
+  "damage": 1.1,
+  "mana": 0.85
+ },
+ "27": {
+  "mana": 0.85
+ },
+ "28": {
+  "damage": 1.15,
+  "knockback": 1.05,
+  "mana": 0.85
+ },
+ "29": {
+  "mana": 1.1
+ },
+ "3": {
+  "crit": 2.0,
+  "damage": 1.05,
+  "scale": 1.05
+ },
+ "30": {
+  "damage": 0.9,
+  "mana": 1.2
+ },
+ "31": {
+  "damage": 0.9,
+  "knockback": 0.9
+ },
+ "32": {
+  "damage": 1.1,
+  "mana": 1.15
+ },
+ "33": {
+  "knockback": 1.1,
+  "mana": 1.1,
+  "usetime": 0.9
+ },
+ "34": {
+  "damage": 1.1,
+  "knockback": 1.1,
+  "mana": 0.9,
+  "usetime": 1.1
+ },
+ "35": {
+  "damage": 1.15,
+  "knockback": 1.15,
+  "mana": 1.2
+ },
+ "36": {
+  "crit": 3.0
+ },
+ "37": {
+  "crit": 3.0,
+  "damage": 1.1,
+  "knockback": 1.1
+ },
+ "38": {
+  "knockback": 1.15
+ },
+ "39": {
+  "damage": 0.7,
+  "knockback": 0.8
+ },
+ "4": {
+  "damage": 1.1,
+  "knockback": 1.1,
+  "scale": 1.1
+ },
+ "40": {
+  "damage": 0.85
+ },
+ "41": {
+  "damage": 0.9,
+  "knockback": 0.85
+ },
+ "42": {
+  "usetime": 0.9
+ },
+ "43": {
+  "damage": 1.1,
+  "usetime": 0.9
+ },
+ "44": {
+  "crit": 3.0,
+  "usetime": 0.9
+ },
+ "45": {
+  "usetime": 0.95
+ },
+ "46": {
+  "crit": 3.0,
+  "damage": 1.07,
+  "usetime": 0.94
+ },
+ "47": {
+  "usetime": 1.15
+ },
+ "48": {
+  "usetime": 1.2
+ },
+ "49": {
+  "usetime": 1.08
+ },
+ "5": {
+  "damage": 1.15
+ },
+ "50": {
+  "damage": 0.8,
+  "usetime": 1.15
+ },
+ "51": {
+  "crit": 2.0,
+  "damage": 1.05,
+  "knockback": 0.9,
+  "usetime": 0.9
+ },
+ "52": {
+  "damage": 0.9,
+  "mana": 0.9,
+  "usetime": 0.9
+ },
+ "53": {
+  "damage": 1.1
+ },
+ "54": {
+  "knockback": 1.15
+ },
+ "55": {
+  "damage": 1.05,
+  "knockback": 1.15
+ },
+ "56": {
+  "knockback": 0.8
+ },
+ "57": {
+  "damage": 1.18,
+  "knockback": 0.9
+ },
+ "58": {
+  "damage": 0.85,
+  "usetime": 0.85
+ },
+ "59": {
+  "crit": 5.0,
+  "damage": 1.15,
+  "knockback": 1.15
+ },
+ "6": {
+  "damage": 1.1
+ },
+ "60": {
+  "crit": 5.0,
+  "damage": 1.15
+ },
+ "61": {
+  "crit": 5.0
+ },
+ "7": {
+  "scale": 0.82
+ },
+ "8": {
+  "damage": 0.85,
+  "knockback": 0.85,
+  "scale": 0.87
+ },
+ "81": {
+  "crit": 5.0,
+  "damage": 1.15,
+  "knockback": 1.15,
+  "scale": 1.1,
+  "usetime": 0.9
+ },
+ "82": {
+  "crit": 5.0,
+  "damage": 1.15,
+  "knockback": 1.15,
+  "shootspeed": 1.1,
+  "usetime": 0.9
+ },
+ "83": {
+  "crit": 5.0,
+  "damage": 1.15,
+  "knockback": 1.15,
+  "mana": 0.9,
+  "usetime": 0.9
+ },
+ "84": {
+  "crit": 8.0,
+  "damage": 1.17,
+  "knockback": 1.17
+ },
+ "85": {
+  "armorpen": 10.0,
+  "damage": 1.15,
+  "knockback": 1.15,
+  "tagdamage": 3.0
+ },
+ "86": {
+  "armorpen": 5.0,
+  "damage": 1.1,
+  "knockback": 1.05,
+  "tagdamage": 3.0
+ },
+ "87": {
+  "armorpen": 8.0,
+  "damage": 1.15
+ },
+ "88": {
+  "damage": 1.1,
+  "tagdamage": 3.0
+ },
+ "89": {
+  "damage": 0.95,
+  "tagdamage": 3.0
+ },
+ "9": {
+  "scale": 0.9
+ },
+ "90": {
+  "damage": 1.1,
+  "knockback": 0.9
+ },
+ "91": {
+  "armorpen": 10.0,
+  "damage": 0.95
+ },
+ "92": {
+  "damage": 0.7
+ },
+ "93": {
+  "knockback": 0.75
+ },
+ "94": {
+  "damage": 0.85,
+  "knockback": 0.9
+ },
+ "95": {
+  "armorpen": 25.0
+ },
+ "96": {
+  "tagdamage": 5.0
+ },
+ "97": {
+  "knockback": 1.25
+ }
+}

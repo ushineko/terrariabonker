@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from terrariabonker import names
+from terrariabonker import names, prefixes
 from terrariabonker import version as ver
 from terrariabonker.inventory import INVENTORY_SLOTS, ITEM_TYPE, Inventory, Slot
 from terrariabonker.locate import (find_localplayer_anchor, find_players, local_player_at,
@@ -280,6 +280,49 @@ class Service:
                     return block
         return None
 
+    def _prefix_base_stats(self, item_type: int) -> dict:
+        """A pristine item's values for every field a modifier scales.
+
+        Read from the ContentSamples template, which is what makes applying a modifier
+        idempotent: the same modifier twice gives the same stats, and switching from one to
+        another gives what that one would have given on a fresh item. Scaling the item's
+        current values instead would compound on every re-apply.
+        """
+        block = self._template_block(item_type)
+        if not block:
+            return {}
+        out = {}
+        for key, (off, kind) in Inventory.PREFIX_BASE_FIELDS.items():
+            i = off - ITEM_COPY_LO
+            if i < 0 or i + 4 > len(block):
+                continue
+            out[key] = struct.unpack_from("<i" if kind == "i32" else "<f", block, i)[0]
+        return out
+
+    def _apply_prefix(self, invs: list[Inventory], slot: int, item_type: int,
+                      prefix: int) -> dict:
+        """Give the item the modifier AND the bonuses that modifier confers.
+
+        The prefix byte is only the name the tooltip prints; `Item.Prefix` multiplies the
+        bonuses into the item's own fields, which is why setting the byte alone produced a
+        Godly weapon with nothing Godly about it (spec 046).
+
+        Accessory modifiers legitimately change nothing here: the game reads the byte in
+        `Player.GrantPrefixBenefits` when the item is equipped, so those already worked.
+        """
+        mults = prefixes.stat_multipliers(prefix)
+        result = {"prefix": prefix, "written": {}, "skipped": []}
+        base = self._prefix_base_stats(item_type)
+        if base:
+            # Called even for a modifier with no multipliers, and for clearing one: the
+            # scaled fields are reset to base either way, which is what makes switching
+            # modifiers and removing them behave like the game's own reforge.
+            for inv in invs:
+                result = {"prefix": prefix, **inv.apply_prefix_stats(slot, mults, base)}
+        for inv in invs:
+            inv.set_prefix(slot, prefix)
+        return result
+
     def _place_item(self, invs: list[Inventory], slot: int, item_type: int,
                     block: bytes | None) -> None:
         """Set a slot to an item type in every copy, using the template block if
@@ -374,6 +417,11 @@ class Service:
         block = self._template_block(item_type) if (changed and item_type) else None
         if changed:
             self._place_item(invs, slot, item_type, block)
+        # The modifier goes on BEFORE the explicit field edits, so a damage the caller
+        # typed wins over the one the modifier computed. It is applied from the item's
+        # pristine stats rather than its current ones -- see _apply_prefix.
+        if prefix is not None and item_type:
+            self._apply_prefix(invs, slot, item_type, prefix)
         for inv in invs:
             if stack is not None:
                 inv.set_stack(slot, stack)
@@ -389,8 +437,6 @@ class Service:
                 inv.set_tile_boost(slot, tile_boost)
             if defense is not None:
                 inv.set_defense(slot, defense)
-            if prefix is not None:
-                inv.set_prefix(slot, prefix)
 
     def give_item(self, item_type: int, stack: int = 1) -> int:
         """Put a fully-statted item in the first empty main-inventory slot."""
