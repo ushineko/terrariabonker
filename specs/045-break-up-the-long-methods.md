@@ -1,7 +1,7 @@
 # Spec 045: Break up the over-long methods
 
-**Status**: INCOMPLETE — proposed for review, not started. This is a plan to agree the
-seams before any code moves; nothing here has been implemented.
+**Status**: INCOMPLETE — tier 1 done (characterization, then `extract_vein` and
+`catch_tick`). Tiers 2 and 3 are not started and still want a look before they are.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -120,12 +120,15 @@ field-copy sequence in `spawn_npc`. Marginal; may be left as-is.
 
 ## Acceptance criteria
 
-- [ ] `extract_vein` is split so its body reads as flood → drain → report, with the
+- [x] `extract_vein` is split so its body reads as flood → drain → report, with the
       gravity re-find isolated and its stop-at-ground behaviour pinned by a test that fails
-      if the walk runs past the first foreign solid tile.
-- [ ] `catch_tick` is split into a bite path and a recast path; the four ad-hoc deadlines
-      are named; the gate-closes-on-unconfirmed-cast behaviour keeps its existing test and
-      gains one asserting the bite path and recast path cannot both fire in one tick.
+      if the walk runs past the first foreign solid tile. *(107 → 41/45/32 lines. The walk
+      already had an integration test from spec 040; re-checked by mutation after the
+      split, along with the disarm-in-finally.)*
+- [x] `catch_tick` is split into a bite path and a recast path; the four ad-hoc deadlines
+      are named (`ARM_GRACE`/`BITE_GRACE` join `CAST_CONFIRM`/`CAST_SETTLE`); the
+      gate-closes-on-unconfirmed-cast behaviour keeps its existing test and gained one
+      asserting the two paths cannot both fire in one tick. *(79 → 47 lines.)*
 - [ ] `arena`'s springboard assemble/hook/poll/unhook block is a named method; the
       `try/finally` restore is preserved exactly (a leaked hook is a live-code corruption).
 - [ ] `_enable_injection`'s three-mode body build and its site/cave resolution are separate
@@ -140,6 +143,30 @@ field-copy sequence in `spawn_npc`. Marginal; may be left as-is.
       why it must.
 - [ ] No behaviour verified in-game (spec 040 vein mining, spec 043 catch, the arena
       bootstrap) changed — argued from the unchanged tests, not re-run, and stated as such.
+
+## What tier 1 turned up
+
+**A behaviour change the suite could not see.** In the original `catch_tick`, the `break`
+sits *inside* the recast guard, so a failed rod-or-settle check keeps polling for a bite
+through the rest of the budget. Folding those guards into the cast helper turned "not yet"
+into "stop looking" — and all 579 tests passed. It was caught by reading the diff, not by
+the net.
+
+That is the risk this spec named ("treat any test that needed changing during a
+behaviour-preserving split as a red flag") arriving from the other direction: the danger
+was a test that *didn't* need changing. `_ready_to_recast` is a separate predicate for this
+reason, its docstring says why it cannot be collapsed into `_try_recast`, and a test now
+fails if it is.
+
+**The characterization step earned its place.** Seven tests went in first, and the two that
+mattered — the stop-at-ground walk and the disarm-in-`finally` — were re-run as mutations
+*after* the split rather than trusted because the suite was green.
+
+**Tier 2 and 3 should be re-scoped before starting.** `extract_vein` and `catch_tick` were
+the two that clearly justified the risk. `set_item` (50 lines) is mostly one flat run of
+`if x is not None` and is more annoying than dangerous; `spawn_npc` and `_patches_group`
+are ~45–49 lines and may be worth leaving. The argument for tier 2 is weaker than tier 1's
+and should be made again rather than assumed.
 
 ## Risks & Assumptions
 
