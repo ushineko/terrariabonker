@@ -5,14 +5,10 @@ An AOB is derived against one exact build, so an update means one of three thing
 pattern still matches, some do, or none do — and the user could not tell which.
 """
 
-import os
 
 import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from PyQt6.QtWidgets import QApplication                       # noqa: E402
 
 from terrariabonker import builds                              # noqa: E402
 from terrariabonker.gui import buildgate                       # noqa: E402
@@ -26,38 +22,33 @@ SOME_DEAD = {"build": "1.4.5.8+24893155", "recognised": False, "failed": ["loot"
                         "loot": {"resolved": False, "reason": "matched nothing"}}}
 
 
-@pytest.fixture
-def app():
-    yield QApplication.instance() or QApplication([])
-
-
-def test_all_clear_offers_one_click_accept(app):
+def test_all_clear_offers_one_click_accept(gui_window):
     dlg = buildgate.BuildGateDialog(None, ALL_OK, "1.4.5.7+24825745")
     assert "Accept" in dlg.btn_ok.text()
     dlg.btn_ok.click()
     assert dlg.result_decision == buildgate.ACCEPT
 
 
-def test_a_dead_cheat_is_named_and_continuing_is_the_default(app):
+def test_a_dead_cheat_is_named_and_continuing_is_the_default(gui_window):
     dlg = buildgate.BuildGateDialog(None, SOME_DEAD, "1.4.5.7+24825745")
     assert "1" in dlg.btn_ok.text(), "the count of dead cheats belongs on the button"
     dlg.btn_ok.click()
     assert dlg.result_decision == buildgate.CONTINUE
 
 
-def test_exit_is_always_offered(app):
+def test_exit_is_always_offered(gui_window):
     dlg = buildgate.BuildGateDialog(None, SOME_DEAD, "1.4.5.7+24825745")
     dlg.btn_exit.click()
     assert dlg.result_decision == buildgate.EXIT
 
 
-def test_closing_the_window_is_not_consent(app):
+def test_closing_the_window_is_not_consent(gui_window):
     """Dismissing the dialog must not silently accept a build."""
     dlg = buildgate.BuildGateDialog(None, ALL_OK, "1.4.5.7+24825745")
     assert dlg.result_decision == buildgate.EXIT
 
 
-def test_the_dialog_names_both_builds_and_the_dead_cheat(app):
+def test_the_dialog_names_both_builds_and_the_dead_cheat(gui_window):
     from PyQt6.QtWidgets import QLabel
 
     def words(check):
@@ -108,21 +99,18 @@ def test_a_corrupt_file_is_not_fatal(tmp_path, monkeypatch):
 
 # --- the panel's side of it ---------------------------------------------------
 
-def _window(monkeypatch):
+def _window(gui_window):
+    """The module, a window, and the argv calls it made -- see conftest's gui_window."""
     from terrariabonker.gui import main_window as mw
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-    calls = []
-    monkeypatch.setattr(mw.MainWindow, "_call",
-                        lambda self, argv, on_output=None: calls.append((argv, on_output)))
-    return mw, mw.MainWindow(), calls
+
+    w, calls = gui_window(record_calls=True)
+    return mw, w, calls
 
 
-def test_an_unknown_build_is_only_asked_about_once(app, monkeypatch):
+def test_an_unknown_build_is_only_asked_about_once(gui_window, monkeypatch):
     """The gate keys on the build, not on startup, so it fires when the game restarts
     into an update — but it must not nag on every status refresh."""
-    mw, w, calls = _window(monkeypatch)
+    mw, w, calls = _window(gui_window)
     try:
         calls.clear()
         w._maybe_gate_build("1.4.5.8+24893155")
@@ -144,8 +132,8 @@ def test_an_unknown_build_is_only_asked_about_once(app, monkeypatch):
         w.close()
 
 
-def test_a_recognised_build_asks_nothing(app, monkeypatch):
-    mw, w, calls = _window(monkeypatch)
+def test_a_recognised_build_asks_nothing(gui_window, monkeypatch):
+    mw, w, calls = _window(gui_window)
     try:
         shown = []
         monkeypatch.setattr(mw.buildgate, "BuildGateDialog",
@@ -157,8 +145,8 @@ def test_a_recognised_build_asks_nothing(app, monkeypatch):
         w.close()
 
 
-def test_continuing_disables_exactly_the_dead_cheats(app, monkeypatch):
-    mw, w, calls = _window(monkeypatch)
+def test_continuing_disables_exactly_the_dead_cheats(gui_window, monkeypatch):
+    mw, w, calls = _window(gui_window)
     try:
         class Dlg:
             result_decision = buildgate.CONTINUE
@@ -177,8 +165,8 @@ def test_continuing_disables_exactly_the_dead_cheats(app, monkeypatch):
         w.close()
 
 
-def test_an_unreadable_check_is_asked_again_rather_than_assumed_fine(app, monkeypatch):
-    mw, w, calls = _window(monkeypatch)
+def test_an_unreadable_check_is_asked_again_rather_than_assumed_fine(gui_window, monkeypatch):
+    mw, w, calls = _window(gui_window)
     try:
         calls.clear()
         w._maybe_gate_build("1.4.5.8+24893155")
@@ -189,11 +177,11 @@ def test_an_unreadable_check_is_asked_again_rather_than_assumed_fine(app, monkey
         w.close()
 
 
-def test_the_gate_waits_for_a_player_to_be_in_world(app, monkeypatch):
+def test_the_gate_waits_for_a_player_to_be_in_world(gui_window, monkeypatch):
     """Several cheats hook methods mono compiles lazily, so a scan at the main menu
     reports them unmatched. Saying a cheat is dead when it is merely not compiled yet is
     worse than saying nothing."""
-    mw, w, calls = _window(monkeypatch)
+    mw, w, calls = _window(gui_window)
     try:
         calls.clear()
         w._maybe_gate_build("1.4.5.8+24893155", {"pid": 1, "name": None})

@@ -5,14 +5,12 @@ these tests are really about: a misclick in a 6,958-row list must not be able to
 character, and a cancel must actually cancel.
 """
 
-import os
 
 import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton   # noqa: E402
+from PyQt6.QtWidgets import QMessageBox, QPushButton                 # noqa: E402
 
 from terrariabonker.gui import compendium                            # noqa: E402
 
@@ -23,12 +21,7 @@ BOSS = {"id": 4, "name": "Eye of Cthulhu", "kind": "Boss", "npc": True,
 
 
 @pytest.fixture
-def app():
-    yield QApplication.instance() or QApplication([])
-
-
-@pytest.fixture
-def tab(app):
+def tab(qt_app):
     spawned = []
     t = compendium.CompendiumTab(None, lambda cb, refresh=False: None, lambda _i: None,
                                  lambda _i: None, lambda _m: None,
@@ -89,7 +82,7 @@ def test_a_second_boss_request_replaces_the_first_countdown(tab, monkeypatch):
     assert tab.spawned == [(4, 40)], "only the most recent request should fire"
 
 
-def test_the_spawn_button_is_offered_for_npcs_only(app):
+def test_the_spawn_button_is_offered_for_npcs_only(qt_app):
     def buttons(entry):
         dlg = compendium.EntryDialog(None, entry, None, lambda _i: None,
                                      lambda _e, _d: None)

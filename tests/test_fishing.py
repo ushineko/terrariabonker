@@ -16,13 +16,6 @@ ITEMS = BASE + 0x1000
 GOLDEN_ROD, MASTER_BAIT, FIREFLY, DIRT = 2294, 2676, 1992, 2
 
 
-@pytest.fixture
-def qt_app():
-    from PyQt6.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication([])
-
-
 def _mem(items):
     """items: {slot: (type, stack, fishingPole, bait)}."""
     from conftest import FakeMem

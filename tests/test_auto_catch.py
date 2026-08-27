@@ -185,30 +185,13 @@ def test_stop_forgets_the_located_array_and_drops_a_pending_press(monkeypatch):
 
 # --- the panel switch ---------------------------------------------------------
 
-@pytest.fixture
-def qt_app():
-    from PyQt6.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication([])
-
-
-def _window(monkeypatch):
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-    return mw.MainWindow()
-
-
-def test_panel_switch_starts_and_stops_the_watch(qt_app, monkeypatch):
+def test_panel_switch_starts_and_stops_the_watch(gui_window, monkeypatch):
     """Unticking stops the arming and touches nothing else.
 
     Auto-use is a separate cheat on the Patches tab; this switch decides *when* to arm
     it, so switching off must not reach into the game and change what the player set.
     """
-    w = _window(monkeypatch)
+    w = gui_window()
     try:
         sent = []
         w.helper.available = True
@@ -224,12 +207,12 @@ def test_panel_switch_starts_and_stops_the_watch(qt_app, monkeypatch):
         w.close()
 
 
-def test_panel_unticks_itself_when_auto_use_is_off(qt_app, monkeypatch):
+def test_panel_unticks_itself_when_auto_use_is_off(gui_window, monkeypatch):
     """The commonest mistake: ticking this without the cheat that presses the button.
 
     Say it once and untick, rather than logging the same error every 50 ms.
     """
-    w = _window(monkeypatch)
+    w = gui_window()
     try:
         w.helper.available = True
         monkeypatch.setattr(
@@ -244,8 +227,8 @@ def test_panel_unticks_itself_when_auto_use_is_off(qt_app, monkeypatch):
         w.close()
 
 
-def test_panel_logs_what_was_caught(qt_app, monkeypatch):
-    w = _window(monkeypatch)
+def test_panel_logs_what_was_caught(gui_window, monkeypatch):
+    w = gui_window()
     try:
         w.helper.available = True
         monkeypatch.setattr(
@@ -272,9 +255,9 @@ def test_a_cast_is_not_attempted_straight_after_a_reel(monkeypatch):
     assert p.arms == 0 and got["events"] == []
 
 
-def test_the_cast_box_is_dead_until_reeling_is_on(qt_app, monkeypatch):
+def test_the_cast_box_is_dead_until_reeling_is_on(gui_window, monkeypatch):
     """"and cast" does nothing on its own — it is a modifier on the watch, not a cheat."""
-    w = _window(monkeypatch)
+    w = gui_window()
     try:
         assert not w.cb_recast.isEnabled()
         w.cb_catch.setChecked(True)
@@ -285,8 +268,8 @@ def test_the_cast_box_is_dead_until_reeling_is_on(qt_app, monkeypatch):
         w.close()
 
 
-def test_the_cast_box_reaches_the_worker(qt_app, monkeypatch):
-    w = _window(monkeypatch)
+def test_the_cast_box_reaches_the_worker(gui_window, monkeypatch):
+    w = gui_window()
     try:
         sent = []
         w.helper.available = True
@@ -302,8 +285,8 @@ def test_the_cast_box_reaches_the_worker(qt_app, monkeypatch):
         w.close()
 
 
-def test_the_panel_logs_a_cast_only_when_the_line_went_out(qt_app, monkeypatch):
-    w = _window(monkeypatch)
+def test_the_panel_logs_a_cast_only_when_the_line_went_out(gui_window, monkeypatch):
+    w = gui_window()
     try:
         w.helper.available = True
         monkeypatch.setattr(

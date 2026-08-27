@@ -240,6 +240,12 @@ subcommand list with the same exposure.
 0.9 s of real spinning to assert that a gate never arms. Fifteen further sites pass
 `budget=0.05`. One file spends well over 1.5 s sleeping to test synchronous logic.
 
+> **Update, same day:** §4 item 4 is done — one `qt_app` fixture and one `gui_window`
+> factory now live in `conftest.py`, replacing seven fixture copies (under two names) and
+> four `_window` helpers plus nine inlined repeats; 203 lines of test scaffolding deleted
+> for 134 added. Headless setup moved there too, and all seven GUI test modules now pass
+> when run alone rather than only inside a full collection.
+>
 > **Update, same day:** the three bugs in §1 are fixed (`8db0e0c`..), with regression
 > tests for the two that have observable behaviour. §1.3 is a code deletion with no
 > behavioural surface, so it has no test — noted rather than papered over with a

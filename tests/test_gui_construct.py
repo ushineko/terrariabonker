@@ -6,31 +6,17 @@ constructed earlier in _build() slipped through and stopped the GUI starting. Th
 the real MainWindow with the privileged paths stubbed out, so nothing is spawned.
 """
 
-import os
 
 import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
-@pytest.fixture
-def app():
-    from PyQt6.QtWidgets import QApplication
-    inst = QApplication.instance() or QApplication([])
-    yield inst
-
-
-def test_main_window_builds_with_every_tab(app, monkeypatch):
-    from terrariabonker.gui import main_window as mw
+def test_main_window_builds_with_every_tab(gui_window, monkeypatch):
 
     # no sudo probe, no worker, no subprocesses: this test is about widget wiring
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
 
-    w = mw.MainWindow()
+    w = gui_window()
     try:
         titles = [w.tabs.tabText(i) for i in range(w.tabs.count())]
         assert titles == ["Player", "Effects", "Patches", "Inventory", "Recipes",
@@ -44,35 +30,21 @@ def test_main_window_builds_with_every_tab(app, monkeypatch):
         w.close()
 
 
-def test_every_cheat_has_a_checkbox(app, monkeypatch):
+def test_every_cheat_has_a_checkbox(gui_window, monkeypatch):
     """The patch list is generated from the catalog, so a new cheat must appear."""
-    from terrariabonker.gui import main_window as mw
     from terrariabonker.patcher import PATCH_CATALOG
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    w = mw.MainWindow()
+    w = gui_window()
     try:
         assert set(w._patch_cbs) == set(PATCH_CATALOG)
     finally:
         w.close()
 
 
-def test_code_patches_are_split_into_section_tabs(app, monkeypatch):
+def test_code_patches_are_split_into_section_tabs(gui_window, monkeypatch):
     """One long list did not scale: tabs keep the Trainer tab a fixed height as patches
     are added."""
-    from terrariabonker.gui import main_window as mw
     from terrariabonker.patcher import SECTIONS
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    w = mw.MainWindow()
+    w = gui_window()
     try:
         pages = [w.patch_pages.tabText(i) for i in range(w.patch_pages.count())]
         assert pages == [name for name, _members in SECTIONS]
@@ -80,21 +52,19 @@ def test_code_patches_are_split_into_section_tabs(app, monkeypatch):
         w.close()
 
 
-def test_extraction_reports_through_a_progress_bar(app, monkeypatch):
+def test_extraction_reports_through_a_progress_bar(gui_window, monkeypatch):
     """The status text used to go to the Recipes tab's label, which is invisible when the
     Compendium tab is what triggered the extraction."""
     from terrariabonker.gui import main_window as mw
 
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
+    w = gui_window()
     captured = {}
+    # After the window is built, not before: the shared fixture stubs _spawn_user itself,
+    # so a capture installed first would simply be overwritten by it.
     monkeypatch.setattr(
         mw.MainWindow, "_spawn_user",
         lambda self, argv, on_output=None, on_progress=None: captured.update(
             on_progress=on_progress, on_output=on_output))
-
-    w = mw.MainWindow()
     try:
         _check_progress(w, captured)
     finally:
@@ -114,21 +84,19 @@ def _check_progress(w, captured):
     assert w.progress.isHidden(), "progress bar left on screen after extraction"
 
 
-def _window(monkeypatch):
+def _window(gui_window):
+    """The module plus a window, since several tests monkeypatch module-level names."""
     from terrariabonker.gui import main_window as mw
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-    return mw, mw.MainWindow()
+
+    return mw, gui_window()
 
 
-def test_auto_restore_retries_a_refusal_instead_of_giving_up(app, monkeypatch):
+def test_auto_restore_retries_a_refusal_instead_of_giving_up(gui_window, monkeypatch):
     """The refusal that actually happens is a startup race — the version is scanned out
     of live memory, and for a moment after launch the game's own string is not there yet.
     Giving up on the first error killed auto-restore for the whole session over a
     condition that clears itself in seconds."""
-    mw, w = _window(monkeypatch)
+    mw, w = _window(gui_window)
     try:
         scheduled = []
         monkeypatch.setattr(mw.QTimer, "singleShot",
@@ -156,7 +124,7 @@ def test_auto_restore_retries_a_refusal_instead_of_giving_up(app, monkeypatch):
         w.close()
 
 
-def test_the_vein_watcher_follows_the_extractor_checkbox(app, monkeypatch):
+def test_the_vein_watcher_follows_the_extractor_checkbox(gui_window, monkeypatch):
     """The ore extractor is the one cheat that is not just a patch. Enabling it puts a
     stub in the game, but something has to notice the player breaking an ore and hand the
     rest of the vein over — and that loop cannot run on the Qt thread. It is driven from a
@@ -165,13 +133,8 @@ def test_the_vein_watcher_follows_the_extractor_checkbox(app, monkeypatch):
     Switching it off must also tell the worker to drop its watcher, not merely stop the
     timer: a queue left armed is re-mined every frame.
     """
-    from terrariabonker.gui import main_window as mw
 
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-    w = mw.MainWindow()
+    w = gui_window()
     try:
         sent = []
         w.helper.available = True
@@ -199,7 +162,7 @@ def test_the_vein_watcher_follows_the_extractor_checkbox(app, monkeypatch):
         w.close()
 
 
-def test_the_gems_choice_actually_reaches_the_watcher(app, monkeypatch):
+def test_the_gems_choice_actually_reaches_the_watcher(gui_window, monkeypatch):
     """`--gems` existed on the CLI from the start, but the panel never sent it — so for
     anyone not editing the source, "gems are opt-in" was untrue. The choice has to be
     reachable *and* has to arrive at the worker."""
@@ -209,7 +172,7 @@ def test_the_gems_choice_actually_reaches_the_watcher(app, monkeypatch):
     monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
     for n in ("_call", "_spawn", "_spawn_user"):
         monkeypatch.setattr(mw.MainWindow, n, lambda self, *a, **k: None)
-    w = mw.MainWindow()
+    w = gui_window()
     try:
         combo = w._patch_vals.get("ore_extract")
         assert isinstance(combo, QComboBox), "no way to choose from the panel"
@@ -232,20 +195,16 @@ def test_the_gems_choice_actually_reaches_the_watcher(app, monkeypatch):
         w.close()
 
 
-def test_selecting_a_tab_dispatches_by_widget_not_by_position(app, monkeypatch):
+def test_selecting_a_tab_dispatches_by_widget_not_by_position(gui_window, monkeypatch):
     """Reordering the tab strip used to break this silently. The handler keyed off a
     hardcoded index, so promoting Patches to its own tab made the compendium load when
     Inventory was clicked and never when Compendium was -- no error, just a tab that
     stayed empty."""
     from terrariabonker.gui import main_window as mw
 
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
     monkeypatch.setattr(mw.sprites, "is_cached", lambda: True)   # no extraction here
 
-    w = mw.MainWindow()
+    w = gui_window()
     try:
         fired = []
         monkeypatch.setattr(w.compendium, "ensure_loaded", lambda: fired.append("comp"))
@@ -267,18 +226,11 @@ def test_selecting_a_tab_dispatches_by_widget_not_by_position(app, monkeypatch):
         w.close()
 
 
-def test_the_potions_checkbox_drives_the_renewal_timer(app, monkeypatch):
+def test_the_potions_checkbox_drives_the_renewal_timer(gui_window, monkeypatch):
     """The checkbox is the whole interface to passive potions. Wired to nothing, it looks
     exactly like a working cheat that grants no buffs."""
     from terrariabonker import buffs
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    w = mw.MainWindow()
+    w = gui_window()
     try:
         assert not w._potion_timer.isActive(), "renewing before being asked to"
         w.cb_potions.setChecked(True)
@@ -292,19 +244,12 @@ def test_the_potions_checkbox_drives_the_renewal_timer(app, monkeypatch):
         w.close()
 
 
-def test_the_inventory_grid_does_not_set_the_window_minimum_height(app, monkeypatch):
+def test_the_inventory_grid_does_not_set_the_window_minimum_height(gui_window, monkeypatch):
     """A tab strip is as tall as its tallest page. Pinning the grid's full height as a
     minimum therefore set the floor for the whole window, and the short tabs sat above
     several hundred pixels of nothing. The width pin stays — that is what keeps all ten
     columns visible without a horizontal scrollbar."""
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    w = mw.MainWindow()
+    w = gui_window()
     try:
         page = w.tab_inventory
         assert page.minimumSizeHint().height() < page.sizeHint().height() / 2, (
@@ -316,7 +261,7 @@ def test_the_inventory_grid_does_not_set_the_window_minimum_height(app, monkeypa
         w.close()
 
 
-def test_the_grid_syncs_only_while_the_grid_is_showing(app, monkeypatch):
+def test_the_grid_syncs_only_while_the_grid_is_showing(gui_window, monkeypatch):
     """The 1 Hz sync ran on the wrong tab entirely.
 
     `_inventory_visible` compared `currentIndex()` to `indexOf(widget(1))`, which is 1 by
@@ -325,7 +270,7 @@ def test_the_grid_syncs_only_while_the_grid_is_showing(app, monkeypatch):
     fixed to dispatch on the widget; this one had not, which is why the tab strip carries
     a note saying never to key off an index.
     """
-    mw, w = _window(monkeypatch)
+    mw, w = _window(gui_window)
     try:
         by_title = {w.tabs.tabText(i): i for i in range(w.tabs.count())}
         w.tabs.setCurrentIndex(by_title["Inventory"])

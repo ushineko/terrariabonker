@@ -6,15 +6,13 @@ nested event loop, so the second signal is delivered after the dialog closes, wh
 has already been cleared. Only one signal may be connected.
 """
 
-import os
 
 import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtGui import QIcon                              # noqa: E402
-from PyQt6.QtWidgets import QApplication, QPushButton      # noqa: E402
+from PyQt6.QtWidgets import QPushButton                    # noqa: E402
 
 from terrariabonker.gui import compendium                   # noqa: E402
 
@@ -27,12 +25,7 @@ CATALOG = {
 
 
 @pytest.fixture
-def app():
-    yield QApplication.instance() or QApplication([])
-
-
-@pytest.fixture
-def tab(app, monkeypatch):
+def tab(qt_app, monkeypatch):
     opened = []
     monkeypatch.setattr(compendium, "EntryDialog",
                         lambda *a, **k: type("D", (), {"exec": lambda self: opened.append(1)})())
@@ -81,7 +74,7 @@ def test_the_id_column_sorts_numerically(tab):
     assert first == "4", f"expected the numerically smallest id first, got {first}"
 
 
-def test_stat_columns_are_blank_for_absent_values_but_still_sort(app, monkeypatch):
+def test_stat_columns_are_blank_for_absent_values_but_still_sort(qt_app, monkeypatch):
     """A weapon and a blockless NPC must not both read '-1'; blanks still need an order."""
     from PyQt6.QtCore import Qt
     monkeypatch.setattr(compendium, "EntryDialog", lambda *a, **k: None)
@@ -114,7 +107,7 @@ def test_numeric_headers_are_right_aligned_like_their_values(tab):
         assert align & Qt.AlignmentFlag.AlignRight, compendium.COLUMNS[col]
 
 
-def test_give_is_offered_for_items_and_withheld_from_npcs(app):
+def test_give_is_offered_for_items_and_withheld_from_npcs(qt_app):
     """The NPC test must not key on the kind string: real kinds are Boss/Monster/…"""
     from terrariabonker.gui.compendium import EntryDialog
 
@@ -130,7 +123,7 @@ def test_give_is_offered_for_items_and_withheld_from_npcs(app):
     assert "Give" not in buttons(npc), "an NPC cannot be put in the inventory"
 
 
-def test_the_kind_dropdown_widens_for_kinds_added_after_it_is_shown(app):
+def test_the_kind_dropdown_widens_for_kinds_added_after_it_is_shown(qt_app):
     """The catalog loads lazily, so Qt's adjust-on-first-show left every kind truncated."""
     tab = compendium.CompendiumTab(None, lambda cb, refresh=False: None, lambda _i: None,
                                    lambda _i: QIcon(), lambda _m: None)
@@ -140,7 +133,7 @@ def test_the_kind_dropdown_widens_for_kinds_added_after_it_is_shown(app):
     assert tab.kind.sizeHint().width() > narrow, "the dropdown did not grow to fit"
 
 
-def test_an_npc_variant_takes_its_sprite_from_its_type_not_its_id(app):
+def test_an_npc_variant_takes_its_sprite_from_its_type_not_its_id(qt_app):
     """Every coloured slime and every Hornet is a separate netID sharing one base type,
     and the game ships one sheet per type. Asking by id would request NPC_-65.xnb."""
     asked = []
@@ -155,7 +148,7 @@ def test_an_npc_variant_takes_its_sprite_from_its_type_not_its_id(app):
     assert asked == [(235, -65)], "the base type must drive the sheet, the netID the tint"
 
 
-def test_an_item_row_still_uses_the_item_icon(app):
+def test_an_item_row_still_uses_the_item_icon(qt_app):
     asked = []
     tab = compendium.CompendiumTab(None, lambda cb, refresh=False: None, lambda _i: None,
                                    lambda i: (asked.append(i), QIcon())[1],
@@ -165,7 +158,7 @@ def test_an_item_row_still_uses_the_item_icon(app):
     assert asked == [3507]
 
 
-def test_loading_reports_progress_from_fetch_through_to_the_last_row(app):
+def test_loading_reports_progress_from_fetch_through_to_the_last_row(qt_app):
     """The wait is the privileged catalog read plus ~7,000 rows of widgets, and neither
     was covered: the only progress bar tracked sprite extraction, which is usually
     already cached and so never appeared at all."""
@@ -192,7 +185,7 @@ def test_loading_reports_progress_from_fetch_through_to_the_last_row(app):
     assert tab._model.rowCount() == 1200
 
 
-def test_a_failed_fetch_takes_the_progress_bar_down(app):
+def test_a_failed_fetch_takes_the_progress_bar_down(qt_app):
     calls = []
     fetches = []
     tab = compendium.CompendiumTab(None,
@@ -207,7 +200,7 @@ def test_a_failed_fetch_takes_the_progress_bar_down(app):
     assert calls[-1][0] is None, "bar stuck on screen after the catalog failed to load"
 
 
-def test_the_rescan_button_clears_the_catalog_and_asks_for_a_fresh_read(app):
+def test_the_rescan_button_clears_the_catalog_and_asks_for_a_fresh_read(qt_app):
     """Recipes has had 'Re-extract from game' since v0.9; the Compendium's catalog is
     cached per build the same way and needs the same escape hatch."""
     seen = []

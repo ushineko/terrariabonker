@@ -117,26 +117,9 @@ def test_a_watch_interval_that_would_let_it_lapse_is_refused(game):
 
 # --- the panel switches -------------------------------------------------------
 
-@pytest.fixture
-def qt_app():
-    from PyQt6.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication([])
-
-
-def _window(monkeypatch):
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-    return mw.MainWindow()
-
-
-def test_the_boxes_run_independently_of_the_fishing_cheat(qt_app, monkeypatch):
+def test_the_boxes_run_independently_of_the_fishing_cheat(gui_window, monkeypatch):
     """They are separate effects, so they must not need the rod-and-bait cheat on."""
-    w = _window(monkeypatch)
+    w = gui_window()
     try:
         assert not w._buff_timer.isActive()
         w.cb_buff_sonar.setChecked(True)
@@ -146,8 +129,8 @@ def test_the_boxes_run_independently_of_the_fishing_cheat(qt_app, monkeypatch):
         w.close()
 
 
-def test_the_watch_stops_only_when_all_three_are_clear(qt_app, monkeypatch):
-    w = _window(monkeypatch)
+def test_the_watch_stops_only_when_all_three_are_clear(gui_window, monkeypatch):
+    w = gui_window()
     try:
         w.cb_buff_power.setChecked(True)
         w.cb_buff_crate.setChecked(True)
@@ -159,8 +142,8 @@ def test_the_watch_stops_only_when_all_three_are_clear(qt_app, monkeypatch):
         w.close()
 
 
-def test_the_ticked_boxes_reach_the_worker(qt_app, monkeypatch):
-    w = _window(monkeypatch)
+def test_the_ticked_boxes_reach_the_worker(gui_window, monkeypatch):
+    w = gui_window()
     try:
         sent = []
         w.helper.available = True
@@ -175,10 +158,10 @@ def test_the_ticked_boxes_reach_the_worker(qt_app, monkeypatch):
         w.close()
 
 
-def test_a_deferral_is_logged_once_not_every_second(qt_app, monkeypatch):
+def test_a_deferral_is_logged_once_not_every_second(gui_window, monkeypatch):
     """It defers on every round for as long as the potion runs -- eight minutes of it
     would bury the panel, which is the bug spec 042 already fixed once for bait."""
-    w = _window(monkeypatch)
+    w = gui_window()
     try:
         w.helper.available = True
         reply = ('{"held": [], "deferred": [{"effect": "power", "buff": 121, '
