@@ -1079,6 +1079,88 @@ class Service:
     #: without this every catch cost a wasted press: the log read "tried to cast and no
     #: line went out" followed by "cast the line", once per fish.
     CAST_SETTLE = 0.45
+    #: Grace past the tick's own budget for the two waits inside a reel: long enough for
+    #: the stub to consume the arm flag, and for the pull to register a frame later. Named
+    #: rather than added inline at the call site, so a test can shorten them and the four
+    #: deadlines in this round are all findable in one place.
+    ARM_GRACE = 0.2
+    BITE_GRACE = 0.5
+
+    def _projectile_array(self):
+        """``Main.projectile``, located once and kept. Raises if it cannot be found."""
+        from terrariabonker import locate
+        from terrariabonker import projectiles as P
+
+        if self._proj_arr is None:
+            base = locate.main_static_base(self.mem)
+            self._proj_arr = base and P.projectile_array(self.mem, base)
+            if not self._proj_arr:
+                raise ServiceError("could not locate Main.projectile")
+        return self._proj_arr
+
+    def _take_bite(self, arr, bite, end: float) -> dict:
+        """Reel one fish in: arm the stub once, then wait the bite out.
+
+        Waiting matters as much as the arming. The pull sets ``ai[0]`` a frame later, so
+        the bite still reads as live immediately afterwards -- without the wait the same
+        fish is armed for again and again, which is the poller behaviour the stub exists
+        to replace.
+        """
+        import time
+
+        from terrariabonker import projectiles as P
+
+        p = self.patcher()
+        if not p.auto_use.arm():
+            return {}
+        while p.auto_use.armed() and time.time() < end + self.ARM_GRACE:
+            time.sleep(0.002)
+        self._last_reel = time.time()
+        while P.find_bite(self.mem, arr) and time.time() < end + self.BITE_GRACE:
+            time.sleep(0.01)
+        return {"what": "reel", "catch": bite.catch, "slot": bite.slot}
+
+    def _ready_to_recast(self) -> bool:
+        """Is casting wanted right now? Two guards, each earned.
+
+        The last reel must have settled -- the rod is still in its use animation for a few
+        frames after a pull and the game drops the press, which cost one wasted press per
+        fish before it was waited out. And the rod must be in hand: the use button is not
+        fishing-specific, so casting against a sword swings the sword.
+
+        Separate from :meth:`_try_recast` because the answer decides *control flow*, not
+        just the outcome. When it is False the tick keeps polling for a bite rather than
+        ending -- collapsing the two would quietly turn "not yet" into "stop looking",
+        which is a behaviour change no test in this suite catches.
+        """
+        import time
+
+        return (time.time() - self._last_reel > self.CAST_SETTLE
+                and self._live_inventory().holding_rod())
+
+    def _try_recast(self, arr) -> dict:
+        """Put the line back out. Only called once :meth:`_ready_to_recast` says so.
+
+        A cast is only reported when a bobber actually appears -- arming is not casting,
+        and an earlier version took credit for the player's own casts by reporting the arm.
+        When nothing goes out, the gate closes: the commonest reason is a swap to
+        something that is not a rod, and a cheat that keeps arming then swings that thing
+        once a tick. One stray press is a bug; a stream of them is a different program.
+        The player's next real cast reopens the gate.
+        """
+        import time
+
+        from terrariabonker import projectiles as P
+
+        if not self.patcher().auto_use.arm():
+            return {}
+        deadline = time.time() + self.CAST_CONFIRM
+        while time.time() < deadline:
+            if P.find_bobbers(self.mem, arr):
+                return {"what": "cast", "confirmed": True}
+            time.sleep(0.01)
+        self._seen_cast = False
+        return {"what": "cast", "confirmed": False}
 
     def catch_tick(self, *, recast: bool = False, budget: float = 0.30) -> dict:
         """Take any fish that is on the line, for up to ``budget`` seconds. One slice.
@@ -1088,38 +1170,26 @@ class Service:
         it in transit. The GUI drives this from a timer, exactly as vein watching does.
 
         A bite is the game's own pull condition (see :mod:`terrariabonker.projectiles`),
-        and taking it is one arm of the auto-use stub -- one press, one reel. The poller
-        this replaces caught the fish and re-cast twice on the same burst.
+        and taking it is one arm of the auto-use stub -- one press, one reel.
 
-        ``recast`` also arms when the water is empty, which turns "take the fish" into
-        "keep fishing". It is off by default, and **gated here rather than by the caller**:
-        nothing is cast until a line has been seen in the water, so the cheat follows a
-        player who is fishing and does nothing at all to one standing at a lake holding a
-        rod. The gate lives in the round because both callers need it -- the CLI loops on
+        **One tick presses at most once**: either the bite is taken or a cast is tried,
+        never both, and the loop ends as soon as either happens.
+
+        ``recast`` is off by default and **gated here rather than by the caller**: nothing
+        is cast until a line has been seen in the water, so the cheat follows a player who
+        is fishing and does nothing at all to one standing at a lake holding a rod. The
+        gate lives in the round because both callers need it -- the CLI loops on
         :meth:`watch_catch`, the panel drives this from a timer, and a gate in only one of
         them is a cheat that behaves differently depending on which you use.
-
-        A cast is only reported when a bobber actually appears: arming is not casting, and
-        an earlier version took credit for the player's own casts by reporting the arm.
-
-        **Nothing is pressed unless a rod is in the player's hand.** The use button is not
-        fishing-specific, so "cast again" against a sword is "swing your sword" -- which is
-        what this did when it could see the water but not the hand.
         """
         import time
 
-        from terrariabonker import locate
         from terrariabonker import projectiles as P
 
         p = self.patcher()
         if not p.is_enabled("auto_use"):
             raise ServiceError("the auto-use cheat is not enabled")
-        if self._proj_arr is None:
-            base = locate.main_static_base(self.mem)
-            self._proj_arr = base and P.projectile_array(self.mem, base)
-            if not self._proj_arr:
-                raise ServiceError("could not locate Main.projectile")
-        arr = self._proj_arr
+        arr = self._projectile_array()
         end = time.time() + budget
         events: list[dict] = []
         while time.time() < end:
@@ -1127,35 +1197,15 @@ class Service:
                 self._seen_cast = True          # the player has cast; recast may follow
             bite = P.find_bite(self.mem, arr)
             if bite is not None:
-                if p.auto_use.arm():
-                    while p.auto_use.armed() and time.time() < end + 0.2:
-                        time.sleep(0.002)
-                    events.append({"what": "reel", "catch": bite.catch,
-                                   "slot": bite.slot})
-                    self._last_reel = time.time()
-                    # Wait out the window rather than arming again on the same fish: the
-                    # pull sets ai[0] and the bite reads as over a frame later.
-                    while P.find_bite(self.mem, arr) and time.time() < end + 0.5:
-                        time.sleep(0.01)
+                event = self._take_bite(arr, bite, end)
+                if event:
+                    events.append(event)
                 break
             if (recast and self._seen_cast and not P.find_bobbers(self.mem, arr)
-                    and time.time() - self._last_reel > self.CAST_SETTLE
-                    and self._live_inventory().holding_rod()):
-                if p.auto_use.arm():
-                    deadline = time.time() + self.CAST_CONFIRM
-                    while time.time() < deadline:
-                        if P.find_bobbers(self.mem, arr):
-                            events.append({"what": "cast", "confirmed": True})
-                            break
-                        time.sleep(0.01)
-                    else:
-                        # Nothing went into the water, so stop pressing. The commonest
-                        # reason is that the player has swapped to something that is not
-                        # a rod, and a cheat that keeps arming then swings their sword
-                        # once a tick. One stray press is a bug; a stream of them is a
-                        # different program. The player's next real cast reopens the gate.
-                        self._seen_cast = False
-                        events.append({"what": "cast", "confirmed": False})
+                    and self._ready_to_recast()):
+                event = self._try_recast(arr)
+                if event:
+                    events.append(event)
                 break
             time.sleep(1 / 120)
         return {"events": events, "presses": p.auto_use.presses()}

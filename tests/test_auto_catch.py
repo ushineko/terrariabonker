@@ -409,3 +409,33 @@ def test_a_tick_with_nothing_happening_reports_no_events(monkeypatch):
     svc = _service(monkeypatch, [], p)
     got = svc.catch_tick(budget=0.02)
     assert got == {"events": [], "presses": 0}
+
+
+def test_a_tick_keeps_looking_for_a_bite_when_casting_is_not_ready_yet(monkeypatch):
+    """"Not yet" must not become "stop looking".
+
+    The recast guards (rod in hand, last reel settled) decide control flow, not just an
+    outcome: when they fail the tick keeps polling, so a bite arriving mid-tick is still
+    taken. A refactor that folded them into the cast helper turned the guard into an
+    early return, and every one of the 579 tests still passed -- so it is pinned here.
+    """
+    p = FakePatcher()
+    water: list = []
+    svc = _service(monkeypatch, water, p)
+    svc._live_inventory = lambda: FakeInventory(holding=False)   # no rod: not ready
+
+    polls = {"n": 0}
+    real_find = P.find_bite
+
+    def bite_on_the_third_look(mem, arr):
+        polls["n"] += 1
+        if polls["n"] >= 3:
+            water.append(_bobber(biting=True))
+            return water[-1]
+        return None
+
+    monkeypatch.setattr(P, "find_bite", bite_on_the_third_look)
+    got = svc.catch_tick(recast=True, budget=0.30)
+    assert [e["what"] for e in got["events"]] == ["reel"], \
+        "the tick gave up instead of waiting for the bite"
+    assert real_find is not None
