@@ -921,3 +921,83 @@ def test_an_arena_view_without_an_arena_does_nothing(game):
     ore = arena_state.OreQueue(None, None)
     assert ore.address is None and ore.armed() is False
     assert ore.arm([(1, 2)]) == 0 and ore.disarm() is False
+
+
+# --- the arena bootstrap (spec 045 characterization) --------------------------
+# Every other test stubs `arena` wholesale, so the bootstrap body itself -- the one that
+# hangs a jump on live code and must always take it back off -- had no coverage at all.
+
+def _bootstrap_ready(m, p, monkeypatch, mapped=None):
+    """A patcher that can run the bootstrap against synthetic memory.
+
+    VirtualAlloc cannot actually run in a fake process, so `_mapped` decides what the
+    bootstrap believes it got: None models the game never advancing a frame.
+    """
+    m.write(CODE + 0x900, ANCHORS["borders_movement"].pattern.raw)
+    _, off, expect = P.Patcher.SPRINGBOARDS[0]
+    m.write(CODE + 0x900 + off, expect)
+    monkeypatch.setattr(P, "resolve_export", lambda mem, mod, fn: 0x77001000)
+    monkeypatch.setattr(P.Patcher, "_free_base", lambda self, need: BASE + 0x18000)
+    monkeypatch.setattr(P.Patcher, "_mapped", lambda self, addr: mapped)
+    # A fake process has no /proc maps to search for an arena we made earlier.
+    monkeypatch.setattr(P.Patcher, "_find_arena", lambda self: None)
+    p._arena = None
+    return CODE + 0x900 + off, expect
+
+
+def test_the_bootstrap_always_takes_its_hook_back_off(game, monkeypatch):
+    """A springboard left hooked is a jump into scrubbed bytes on the next frame.
+
+    The unhook lives in a `finally` for that reason: this drives the failure path, where
+    VirtualAlloc never runs because the game is not advancing frames.
+    """
+    m, p = game
+    site, expect = _bootstrap_ready(m, p, monkeypatch, mapped=None)
+    p.arena = P.Patcher.arena.__get__(p)          # the real one, not the fixture's stub
+
+    with pytest.raises(PatchError, match="not advancing frames"):
+        p.arena(timeout=0.05)
+
+    assert m.read(site, len(expect)) == expect, "the springboard was left hooked"
+
+
+def test_the_bootstrap_scrubs_its_springboard_cave(game, monkeypatch):
+    """The cave is borrowed padding; leaving a half-live stub in it is somebody else's
+    problem later. It is filled with 0xCC, which is also what the cave scan prefers."""
+    m, p = game
+    _bootstrap_ready(m, p, monkeypatch, mapped=None)
+    p.arena = P.Patcher.arena.__get__(p)
+    caves = []
+    real_find = P.Patcher._find_cave
+    monkeypatch.setattr(P.Patcher, "_find_cave",
+                        lambda self, size, claimed=None, writable=False:
+                        caves.append(real_find(self, size, claimed, writable)) or caves[-1])
+
+    with pytest.raises(PatchError):
+        p.arena(timeout=0.05)
+
+    assert caves, "the bootstrap never looked for a cave"
+    assert set(m.read(caves[0], 8)) == {0xCC}, "the springboard stub was left in the cave"
+
+
+def test_the_bootstrap_says_the_game_is_paused_rather_than_hanging(game, monkeypatch):
+    """The diagnostic is the whole value of the failure path: "VirtualAlloc did not run"
+    on its own sends someone hunting a broken offset instead of focusing the window."""
+    m, p = game
+    _bootstrap_ready(m, p, monkeypatch, mapped=None)
+    p.arena = P.Patcher.arena.__get__(p)
+    with pytest.raises(PatchError) as e:
+        p.arena(timeout=0.05)
+    assert "loses focus" in str(e.value) and "Focus the game" in str(e.value)
+
+
+def test_the_bootstrap_reports_once_that_it_is_waiting(game, monkeypatch):
+    """`on_wait` exists so a caller can say "waiting for a frame" instead of appearing to
+    hang. Called once, after the hook is in place -- earlier would be a lie."""
+    m, p = game
+    _bootstrap_ready(m, p, monkeypatch, mapped=None)
+    p.arena = P.Patcher.arena.__get__(p)
+    said = []
+    with pytest.raises(PatchError):
+        p.arena(on_wait=lambda: said.append(1), timeout=0.05)
+    assert said == [1], f"on_wait called {len(said)} times"

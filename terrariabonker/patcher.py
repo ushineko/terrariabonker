@@ -1245,40 +1245,27 @@ class Patcher:
                     return ln.strip()
         return None
 
-    def arena(self, on_wait=None, timeout: float = 20.0) -> int:
-        """Memory of our own inside the game: RWX, ours alone, ``ARENA_SIZE`` bytes.
+    def _bootstrap_arena(self, base: int, on_wait, timeout: float) -> None:
+        """Make the game allocate ``base`` for us, then take the hook back off.
 
-        Code caves are *borrowed* padding inside somebody else's read-execute mapping, and
-        this project has now hit every limit of that: a stub too big for a gap, a stub that
-        needed to write (which faulted, because the cave was a code section of
-        CUESDK_2015.dll), and a queue that will not fit in any gap at all. This is the
-        graduation ``_find_cave`` has always pointed at.
+        We cannot allocate into another process directly, so the game allocates for
+        itself: a ~36-byte springboard in a cave calls ``kernel32!VirtualAlloc`` at a
+        **fixed** base. Fixed, because a stub in a read-execute cave has nowhere to report
+        a return value *to* -- so instead of reading the result we choose the address and
+        look for it in /proc/pid/maps.
 
-        We cannot allocate into another process directly, so the game allocates for itself:
-        a ~36-byte springboard in a cave calls ``kernel32!VirtualAlloc`` at a **fixed**
-        base. Fixed, because a stub in a read-execute cave has nowhere to report a return
-        value *to* -- so instead of reading the result we choose the address and look for
-        it in /proc/pid/maps.
+        The springboard hangs on a per-frame site (see :meth:`_springboard`), so it fires
+        within a frame. **The unhook is in a `finally` and must stay there**: a springboard
+        left hooked is a jump into bytes this method scrubs on its way out, which is a
+        crash on the next frame rather than a failed allocation.
 
-        The springboard is hooked on the extractor's own site, which is a per-frame call in
-        ``Player.Update``, so it fires within a frame and unhooks itself the moment the
-        region appears. It does need the game to be *running*: Terraria pauses in
-        single-player when its window loses focus, and a paused game runs no frames.
-        ``on_wait`` is called once when we start waiting, so a caller can say so rather
-        than appearing to hang.
+        Returns nothing -- whether the region appeared is the caller's question, answered
+        by looking at the map. ``on_wait`` is called once, after the hook is in place, so a
+        caller can say it is waiting rather than appearing to hang.
         """
         import time
 
-        if self._arena and self._arena_ok(self._arena):
-            return self._arena
-        found = self._find_arena()               # ours from earlier in this process?
-        if found is not None:
-            self._arena = found
-            self._save_state()
-            return found
-
         va = resolve_export(self.mem, "kernel32", "VirtualAlloc")
-        base = self._free_base(self.ARENA_SIZE)
         site, overwrite = self._springboard()
         body = (b"\x60"                                  # pushad
                 + b"\x6a\x40"                            # push PAGE_EXECUTE_READWRITE
@@ -1305,6 +1292,33 @@ class Patcher:
         finally:
             self.mem.write(site, overwrite)          # unhook first, always
             self.mem.write(cave, b"\xcc" * stub_len)
+
+    def arena(self, on_wait=None, timeout: float = 20.0) -> int:
+        """Memory of our own inside the game: RWX, ours alone, ``ARENA_SIZE`` bytes.
+
+        Adopt one we already made, or have the game allocate a fresh one, then verify and
+        stamp it. The allocation itself is :meth:`_bootstrap_arena`.
+
+        Code caves are *borrowed* padding inside somebody else's read-execute mapping, and
+        this project has now hit every limit of that: a stub too big for a gap, a stub that
+        needed to write (which faulted, because the cave was a code section of
+        CUESDK_2015.dll), and a queue that will not fit in any gap at all. This is the
+        graduation ``_find_cave`` has always pointed at.
+
+        It does need the game to be *running*: Terraria pauses in single-player when its
+        window loses focus, and a paused game runs no frames.
+        """
+        if self._arena and self._arena_ok(self._arena):
+            return self._arena
+        found = self._find_arena()               # ours from earlier in this process?
+        if found is not None:
+            self._arena = found
+            self._save_state()
+            return found
+
+        base = self._free_base(self.ARENA_SIZE)
+        self._bootstrap_arena(base, on_wait, timeout)
+
         row = self._mapped(base)
         if not row:
             raise PatchError(
