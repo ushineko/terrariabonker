@@ -142,14 +142,36 @@ between polls, so a slot never looks new and almost nothing gets patched: 60 sec
 sustained fire produced three detections. Writing the desired value to every active
 projectile on every pass is both simpler and correct — a full pass costs 2.7 ms.
 
+### The open question, and how to answer it
+
+`tileCollide` is the right field at the right offset, the write persists, and
+`HandleMovement` reads it — yet 437 skulls forced to `1` still passed through blocks. That
+is unresolved. It is not the offset and not the write; the candidates are that the value is
+consumed at spawn, or that `aiStyle 1` reaches the tile check by a path the flag does not
+gate.
+
+`tools/projectile_probe.py` answers it without anyone watching a clock:
+
+    sudo python3 tools/projectile_probe.py --type 837 --set tileCollide=1 --ab
+
+It enforces the value on every pass, leaves odd-numbered slots as a control, and reports
+what fraction of each group is standing inside a solid tile according to the tile map. If
+the patched skulls stay out of blocks and the control does not, the flag works live and the
+editor idea is proven; if both sit inside blocks equally, it does not.
+
 ### A note on measuring this at all
 
 Several conclusions in this file were nearly drawn from windows in which nothing was fired,
 including one that was written down and retracted the same hour. A probe that says "fire
-now" cannot be followed by someone who only sees its output afterwards. Any further work
-here wants a probe the player starts and stops themselves, or one that runs long enough
-that the timing does not matter — the same lesson the fishing recon recorded about liveness
-controls, arriving from a different direction.
+now" cannot be followed by someone who only sees its output afterwards. Four separate attempts to co-ordinate "fire now" with a probe window produced four windows
+containing something other than what was asked for — twice nothing at all, twice only
+summoned minions — and one of those silences was briefly read as a result about the game.
+A seven-minute background run fared no better.
+
+The fix is not a longer window. It is that the probe belongs to the player:
+`tools/projectile_probe.py` is run by whoever is holding the mouse, which removes the
+co-ordination entirely. The same lesson the fishing recon recorded about liveness controls,
+arriving from a different direction.
 
 ## Tier 3: accessories — there is no data
 
