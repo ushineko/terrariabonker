@@ -1666,8 +1666,44 @@ class MainWindow(QWidget):
 
         self._spawn_user(client.extract_sprites_argv(force), on_output=done, on_progress=prog)
 
+    #: The Effects switches and the numbers beside them, saved between sessions.
+    #: Checkboxes are restored by ticking them, which runs the same handler a click does --
+    #: so a restored session starts its timers exactly as a clicked one would, and there is
+    #: no second code path to keep in step.
+    _EFFECT_BOXES = ("cb_god", "cb_mana", "cb_fishing", "cb_catch", "cb_recast",
+                     "cb_buff_power", "cb_buff_sonar", "cb_buff_crate", "cb_potions")
+    _EFFECT_SPINS = ("sp_bait", "sp_power", "sp_potion_stack")
+
+    def _effects_state(self) -> dict:
+        state = {n: getattr(self, n).isChecked() for n in self._EFFECT_BOXES}
+        state.update({n: getattr(self, n).value() for n in self._EFFECT_SPINS})
+        return state
+
+    def _restore_effects(self) -> None:
+        """Put the Effects panel back the way it was left.
+
+        Numbers first, then the switches: a switch starts a watcher that reads the number
+        beside it on its first round, so ticking before restoring the value would run one
+        round at the default.
+
+        The freezes are restored too. They spawn a privileged process rather than a timer,
+        which is a louder thing to do at startup -- but leaving godmode ticked and finding
+        it off is the bug being fixed, and the patches on the other tab already come back
+        this way.
+        """
+        saved = uistate.load_effects()
+        if not saved:
+            return
+        for name in self._EFFECT_SPINS:
+            if isinstance(saved.get(name), int):
+                getattr(self, name).setValue(saved[name])
+        for name in self._EFFECT_BOXES:
+            if saved.get(name):
+                getattr(self, name).setChecked(True)
+
     def closeEvent(self, event):
         uistate.save_size(self.width(), self.height())
+        uistate.save_effects(self._effects_state())
         self._status_timer.stop()
         self._inv_timer.stop()
         self.helper.stop()
@@ -1704,4 +1740,7 @@ def run() -> int:
     saved = uistate.load_size()
     w.resize(QSize(*saved) if saved else w.sizeHint())
     w.show()
+    # After show(), so a watcher that logs into the panel has somewhere to log to, and so
+    # the window is up before anything starts talking to the worker.
+    w._restore_effects()
     return app.exec()

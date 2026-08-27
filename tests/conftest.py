@@ -110,3 +110,28 @@ def gui_window(qt_app, monkeypatch):
     yield make
     for w in made:
         w.close()
+
+
+# --- keep the suite out of the user's real state ------------------------------
+
+@pytest.fixture(autouse=True)
+def _isolate_user_state(tmp_path, monkeypatch):
+    """Point every on-disk state file at a tmp copy, for every test.
+
+    The suite writes to these without meaning to: any test that builds a MainWindow and
+    closes it runs `closeEvent`, which saves the window size and the Effects panel. That
+    was overwriting the developer's own `~/.cache/terrariabonker/window.json` -- with the
+    window at whatever size the test happened to make it and every effect switched off.
+
+    A test that wants to drive one of these still monkeypatches it itself; this only makes
+    the default harmless. `~/.config` is worse than untidy: it can be root-owned from sudo
+    memory commands, so a stray write there fails in a way that has nothing to do with the
+    test that caused it (which is how one build-ledger test came to fail with
+    PermissionError).
+    """
+    from terrariabonker import builds, profile
+    from terrariabonker.gui import uistate
+
+    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
+    monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
+    monkeypatch.setattr(builds, "_PATH", str(tmp_path / "accepted-builds.json"))

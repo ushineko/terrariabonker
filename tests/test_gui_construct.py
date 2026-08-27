@@ -281,3 +281,66 @@ def test_the_grid_syncs_only_while_the_grid_is_showing(gui_window, monkeypatch):
             assert w._inventory_visible() is False, f"it thinks the grid shows on {other}"
     finally:
         w.close()
+
+
+# --- the Effects panel is remembered between sessions (reported bug) ----------
+
+def test_closing_records_every_effect_switch_and_number(gui_window, monkeypatch, tmp_path):
+    """Reported: "effects aren't saved". Nothing wrote them anywhere -- only the window
+    size was kept, and the profile they might have gone in is root-owned."""
+    from terrariabonker.gui import main_window as mw
+    from terrariabonker.gui import uistate
+
+    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
+    w = gui_window()
+    w.cb_fishing.setChecked(True)
+    w.cb_buff_sonar.setChecked(True)
+    w.sp_bait.setValue(77)
+    w.close()
+
+    saved = uistate.load_effects()
+    assert saved["cb_fishing"] is True and saved["cb_buff_sonar"] is True
+    assert saved["sp_bait"] == 77
+    assert saved["cb_potions"] is False, "an untouched switch must record as off, not vanish"
+    assert set(mw.MainWindow._EFFECT_BOXES) <= set(saved), "a switch is not being saved"
+
+
+def test_reopening_puts_the_switches_back(gui_window, monkeypatch, tmp_path):
+    from terrariabonker.gui import uistate
+
+    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
+    uistate.save_effects({"cb_potions": True, "sp_potion_stack": 42, "cb_fishing": False})
+    w = gui_window()
+    assert not w.cb_potions.isChecked(), "premise: it starts off"
+    w._restore_effects()
+    assert w.cb_potions.isChecked()
+    assert w.sp_potion_stack.value() == 42
+    assert not w.cb_fishing.isChecked(), "an off switch must not come back on"
+
+
+def test_the_number_is_restored_before_the_switch_that_reads_it(
+        gui_window, monkeypatch, tmp_path):
+    """A switch starts a watcher that reads the number beside it on its first round.
+
+    Restoring the tick first would run one round at the default -- topping bait to 30 when
+    the user had set 77, once, at every launch.
+    """
+    from terrariabonker.gui import uistate
+
+    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
+    uistate.save_effects({"cb_fishing": True, "sp_bait": 77})
+    w = gui_window()
+    seen = []
+    w.cb_fishing.toggled.connect(lambda on: seen.append(w.sp_bait.value()))
+    w._restore_effects()
+    assert seen == [77], f"the switch fired while the number was still {seen}"
+
+
+def test_nothing_is_restored_when_nothing_was_saved(gui_window, monkeypatch, tmp_path):
+    """A first run must not tick anything on."""
+    from terrariabonker.gui import uistate
+
+    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
+    w = gui_window()
+    w._restore_effects()
+    assert not any(getattr(w, n).isChecked() for n in w._EFFECT_BOXES)
