@@ -253,3 +253,38 @@ def test_a_submission_that_changed_nothing_writes_nothing(qt_app, monkeypatch, g
         assert sent == [], "an untouched dialog still wrote to the slot"
     finally:
         w.close()
+
+
+def test_the_offsets_are_the_ones_the_game_showed_us():
+    """Pin the literal offsets, because no other test can.
+
+    Every other test here reads the offset from the same constant the code writes through,
+    so it cannot tell 0x150 from 0x154 -- a mutation moving `crit` one field along passed
+    the whole suite. These numbers came from the game and a wrong one corrupts a real item
+    permanently, so they are asserted as values, with their evidence:
+
+    * `crit` 0x150 -- reforging a Minishark to Sighted moved it 0 -> 3 (Sighted is +3), and
+      again to Demonic 3 -> 5 (+5 from base, not added to the 3).
+    * `knockBack` 0x0B0 -- Copper Broadsword 5.5 and Meowmere 6.5, matching the wiki.
+    * `scale`/`shootSpeed`/`mana` -- verified in docs/item-fields.md.
+    * `damage`/`useAnimation`/`useTime` -- long in use by the editor.
+    """
+    from terrariabonker import inventory as inv
+
+    assert (inv.ITEM_CRIT, inv.ITEM_KNOCKBACK) == (0x150, 0x0B0)
+    assert (inv.ITEM_SCALE, inv.ITEM_SHOOTSPEED, inv.ITEM_MANA) == (0x0CC, 0x100, 0x11C)
+    assert (inv.ITEM_DAMAGE, inv.ITEM_USE_ANIM, inv.ITEM_USE_TIME) == (0x0AC, 0x080, 0x084)
+    assert inv.ITEM_PREFIX == 0x15C
+
+
+def test_the_unverified_offsets_are_not_written():
+    """armorPenetration and bonusTagDamage were never observed changing in game.
+
+    Predicted by declaration order at 0x154/0x158, which is how `crit` was predicted too --
+    and `crit` turned out right. That is an argument for trying them, not for writing them:
+    an unverified offset written into an item cannot be undone.
+    """
+    from terrariabonker.inventory import Inventory
+
+    written = {key for fields in Inventory._PREFIX_FIELDS.values() for key, _, _ in fields}
+    assert "armorpen" not in written and "tagdamage" not in written
