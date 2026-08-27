@@ -31,13 +31,16 @@ The poller wins by volume. A stub is correct by construction.
 
 ## Acceptance criteria
 
-- [ ] Arming the stub causes exactly **one** use, on the next frame, and then disarms
+- [x] Arming the stub causes exactly **one** use, on the next frame, and then disarms
       itself — verified by a counter the stub increments, not by watching the game.
-- [ ] Arming it N times causes N uses. No burst, no repeats, no missed presses.
+      *(Armed once: counter 0 → 1, flag self-cleared. Idle 1 s disarmed: no movement.)*
+- [x] Arming it N times causes N uses. No burst, no repeats, no missed presses.
+      *(20 arms → counter 1 → 21.)*
 - [ ] While disarmed, the player's own clicking is completely unaffected — a cheat that
       makes the mouse feel wrong is worse than one that does nothing.
-- [ ] Disabling restores the displaced bytes with the game still running, and the game
-      keeps running.
+- [x] Disabling restores the displaced bytes with the game still running, and the game
+      keeps running. *(Enable, test, disable, and the extractor put back after — all in
+      one session with the game live.)*
 - [ ] The stub does not run when no player is loaded (a title-screen frame must not write
       through a null player).
 - [ ] CPU cost is indistinguishable from the cheat being off, measured rather than assumed.
@@ -229,6 +232,49 @@ the stamp changed with the layout.
 establishing what is in it.* Placing by index instead of searching for a cave was supposed
 to make placement safe, and it does — but only against caves, not against the previous
 version of yourself.
+
+## First run of the stub — 2026-08-26
+
+**Exactly one press per arm.**
+
+```
+idle 1 s while disarmed: counter 0 -> 0
+armed once:              counter 0 -> 1, flag self-cleared
+armed 20 times:          counter 1 -> 21   (delta 20)
+```
+
+**And exactly one fish per bite**, which is what the poller could not do:
+
+```
+bite 1: It's Scragglin' Time   stack 0 -> 1 (+1)   bobbers 1 -> 1
+bite 2: Neon Tetra             stack 0 -> 1 (+1)   bobbers 1 -> 1
+presses used: 2 for 2 bites
+```
+
+The bobber count never moved. The poller's 20 ms burst took the water from one bobber to
+three, catching the fish and re-casting twice; the stub reels once and stops.
+
+### The arena bootstrap cannot run while the extractor is on
+
+Found immediately, and it is not the stub's fault. `Patcher.arena()` springboards
+`VirtualAlloc` off **`ore_extract`'s own injection site**, so when that cheat is enabled the
+site holds a `jmp` and `_check_site` refuses — correctly. It had never surfaced before
+because an arena always already existed to adopt; bumping the stamp to `TBARENA2` forced a
+fresh allocation into a session whose cheats had been auto-restored on launch.
+
+Worked around for the test by disabling the extractor, bootstrapping, and putting it back.
+That is not a fix, and it should not be one: **the bootstrap needs a springboard site that
+is not also a cheat's hook site**, or it must pick a free per-frame site at bootstrap time.
+Any user with the extractor on and no adoptable arena hits this today.
+
+### What auto-catch still needs before it is a cheat
+
+Only two bites arrived in 90 seconds of the run above, because **a catch reels the line
+in** — the player then has to cast again, and the probe sat waiting on empty water. So a
+shipped auto-catch is two presses, not one: arm on a detected bite, and arm again when the
+player has a rod selected and no bobber in the water. The second half is the same
+mechanism and needs its own guard, or it will re-cast while the player is trying to walk
+away.
 
 ## Alternatives considered
 

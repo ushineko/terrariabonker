@@ -412,11 +412,10 @@ _VERIFIED_INSTEAD: dict[str, tuple[str, ...]] = {
     # verified on the *current* build: the default is every build in _VERIFIED_BUILDS, so
     # an anchor that says nothing silently claims two 1.4.5.7 builds it has never run on.
     "grabitems_call": ("1.4.5.8+24893155",),
-    # 2026-08-26: Player.Update's call to BordersMovement, where auto-use hooks. Cut on
-    # 1.4.5.8 and verified unique there, but the stub has never been watched running in
-    # the game, so it claims NO build at all. An AOB that resolves is not an anchor that
-    # works; the empty set is the honest statement until a frame has gone through it.
-    "borders_movement": (),
+    # 2026-08-26: Player.Update's call to BordersMovement, where auto-use hooks. Derived
+    # and confirmed on 1.4.5.8 only -- 20 arms produced 20 presses through this site, and
+    # two bites produced two fish. It claims nothing about 1.4.5.7.
+    "borders_movement": ("1.4.5.8+24893155",),
 }
 
 ANCHORS: dict[str, Anchor] = {
@@ -1555,6 +1554,28 @@ class Patcher:
         player_base = blk.life_addr - STATLIFE_FROM_OBJ
         return _teleport_body(player_base, target)
 
+    def _check_slot(self, cave: int, length: int, what: str) -> None:
+        """Refuse to write a stub into an arena slot that already holds one.
+
+        A free slot is zeros (a fresh arena from VirtualAlloc) or 0xCC (scrubbed by
+        ``_disable_injection``). Anything else is somebody's live code, and writing over it
+        redirects their site's jump into ours -- which does not fault, it just runs the
+        wrong instructions and returns to the wrong method. The game dies later, somewhere
+        unrelated, with a stack that names nothing to do with the trainer.
+
+        That is not hypothetical: on 2026-08-26 the auto-use stub went over a running
+        ``inventory_accs`` stub because slots were indexed by sorted name and a new
+        injection sorted first. ``_SLOT_ORDER`` makes that particular mistake impossible;
+        this check is what refuses the *next* way of arriving at the same place.
+        """
+        got = self.mem.read(cave, length)
+        if len(got) < length:
+            raise PatchError(f"{what}: arena slot at {cave:#x} is not readable")
+        if set(got) - {0x00, 0xCC}:
+            raise PatchError(
+                f"{what}: arena slot at {cave:#x} already holds code "
+                f"({got[:8].hex()}...). Refusing to write over a stub that may be live.")
+
     def _check_site(self, site: int, expect: bytes, what: str) -> None:
         """Refuse to write a jump over bytes that are not what we will put back.
 
@@ -1616,6 +1637,8 @@ class Patcher:
             # displaced bytes live in the stub by then, not at the site.
             if not prev_sites:
                 self._check_site(inject, inj.overwrite, f"enable {inj.name}")
+                if inj.arena:
+                    self._check_slot(cave, stub_len, f"enable {inj.name}")
             self.mem.write(cave, stub)
             self.mem.write(inject, b"\xe9" + self._rel32(inject + 5, cave))
             sites.append({"inject": inject, "cave": cave})

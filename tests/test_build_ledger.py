@@ -59,10 +59,11 @@ def test_build_key_survives_missing_pieces():
 LATER_ANCHORS = {"equip_apply", "equip_benefits", "inventory_scan", "smart_cursor"}
 # Derived but never yet watched working in-game, so they claim no build at all. The panel
 # reports these as unproven, which is the truth — an empty set is a statement, not a gap.
-UNPROVEN_ANCHORS: set[str] = {"borders_movement"}
+UNPROVEN_ANCHORS: set[str] = set()
 # Derived on 1.4.5.8 and confirmed only there — they never existed on the older builds,
 # so they claim neither the derivation build nor the 2026-08-23 rebuild.
-NEWEST_ANCHORS = {"pylon_place", "pick_tile", "grabitems_call"}
+NEWEST_ANCHORS = {"pylon_place", "pick_tile", "grabitems_call",
+                  "borders_movement"}
 # Derived against the original build and re-confirmed on every rebuild since, so they
 # legitimately inherit the default verification set. Listed so that adding an anchor
 # fails the classification test rather than silently joining them.

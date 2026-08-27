@@ -717,3 +717,26 @@ def test_arena_stamp_changed_with_the_layout(game):
     """
     _, p = game
     assert p.ARENA_MAGIC != b"TBARENA1"
+
+
+def test_refuses_a_slot_that_already_holds_code(game):
+    """The check that would have stopped the 2026-08-26 crash before it reached the game.
+
+    A slot holding anything but padding belongs to someone, and writing over a live stub
+    redirects their jump into ours -- no fault, just the wrong instructions and a return
+    into the wrong method.
+    """
+    m, p = game
+    _plant_auto_use(m, p)
+    m.write(p.slot_for("auto_use"), b"\x55\x8b\xec\x90\x90\x90\x90\x90")   # someone's stub
+    with pytest.raises(PatchError, match="already holds code"):
+        p.enable("auto_use")
+
+
+def test_accepts_a_scrubbed_slot(game):
+    """0xCC is what _disable_injection leaves behind; re-enabling must still work."""
+    m, p = game
+    _plant_auto_use(m, p)
+    m.write(p.slot_for("auto_use"), b"\xcc" * 96)
+    p.enable("auto_use")
+    assert p.is_enabled("auto_use")
