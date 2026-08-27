@@ -44,8 +44,11 @@ The poller wins by volume. A stub is correct by construction.
 - [ ] The stub does not run when no player is loaded (a title-screen frame must not write
       through a null player).
 - [ ] CPU cost is indistinguishable from the cheat being off, measured rather than assumed.
-- [ ] Fishing auto-catch is built on it and takes exactly one fish per bite.
-- [ ] Works from the CLI and the panel, sharing one implementation.
+- [x] Fishing auto-catch is built on it and takes exactly one fish per bite. *(Confirmed
+      through the shipped CLI: 8 fish including a Golden Crate, the bobber count never
+      moving.)*
+- [x] Works from the CLI and the panel, sharing one implementation. *(`catch` blocks for
+      the CLI, `catch-tick` serves the panel timer, both on one service round.)*
 - [ ] Verified in-game on the current build, and the anchor recorded in the build ledger
       (unlike specs 041 and 042, this one patches code, so the ledger applies).
 
@@ -275,6 +278,37 @@ shipped auto-catch is two presses, not one: arm on a detected bite, and arm agai
 player has a rod selected and no bobber in the water. The second half is the same
 mechanism and needs its own guard, or it will re-cast while the player is trying to walk
 away.
+
+## The cheat cannot cast, only reel — measured 2026-08-26
+
+`--recast` shipped for one commit and was wrong. It armed the stub on empty water and
+reported "cast the line" on the strength of having armed, which the maintainer caught: they
+were the one casting.
+
+Tested directly, rod selected, hands off the mouse, six arms on empty water:
+
+```
+arm 1..6: pressed (1 each, by the stub's own counter) -> NO line went out
+0 casts, 6 misses out of 6 arms
+```
+
+**The presses are real and the game ignores them.** Reeling works because
+`Player.ItemCheck_PullFishingBobbers` runs off `controlUseItem` alone. Casting goes through
+the full item-use path, which for an item that is not auto-reuse needs a *fresh press* —
+`controlUseItem` **and** `releaseUseItem` — and the stub writes only the first. Spec 042
+recorded that distinction ("a held flag is not a press") and this was built anyway without
+checking it applied. The old poller looked like it cast because at ~400,000 writes/second
+it eventually landed on a frame where both were true; that is the same accident, not a
+capability.
+
+So `--recast` is removed rather than shipped as a flag that does nothing. **The player
+casts; the cheat takes the fish**, and the CLI says so.
+
+**To make casting work**, the stub needs `releaseUseItem` as well — likely adjacent to
+`+0x672`, since the control flags sit together, but its offset is not known and must be
+derived and confirmed the same way `controlUseItem` was: a byte that an input control
+rewrites every frame, verified with a liveness gate. That is the next piece of recon, and
+it would unlock auto-fire and auto-place as much as auto-cast.
 
 ## Alternatives considered
 

@@ -831,8 +831,7 @@ class MainWindow(QWidget):
                     what = e.get("catch", 0)
                     name = names.name(what) if what > 0 else f"NPC {-what}"
                     self.log.appendPlainText(
-                        f"[catch] reeled in {name}" if e["what"] == "reel"
-                        else "[catch] cast the line")
+                        f"[catch] reeled in {name}")
 
         if not self.helper.request(client.catch_argv(), done):
             self._catch_inflight = False

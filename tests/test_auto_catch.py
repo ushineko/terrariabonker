@@ -68,43 +68,18 @@ def test_a_climbing_counter_is_not_a_bite(monkeypatch):
     assert p.arms == 0 and got["events"] == []
 
 
-def test_empty_water_is_left_alone_by_default(monkeypatch):
-    """Without --recast the cheat never casts: it takes fish, it does not fish."""
+def test_empty_water_is_left_alone(monkeypatch):
+    """The cheat never casts. It takes fish; it does not fish.
+
+    Casting needs a fresh press -- controlUseItem together with releaseUseItem -- and the
+    stub only writes the first. An earlier version armed on empty water and reported
+    "cast the line", which was measured to be false: six arms, six presses by the stub's
+    own counter, and not one line in the water. The player casts.
+    """
     p = FakePatcher()
     svc = _service(monkeypatch, [], p)
     got = svc.catch_tick(budget=0.05)
     assert p.arms == 0 and got["events"] == []
-
-
-def test_recast_arms_on_empty_water(monkeypatch):
-    p = FakePatcher()
-    svc = _service(monkeypatch, [], p)
-    got = svc.catch_tick(recast=True, budget=0.05)
-    assert p.arms == 1 and got["events"] == [{"what": "cast"}]
-
-
-def test_recast_waits_until_the_player_has_cast_once(monkeypatch):
-    """The gate that stops the cheat following a player away from the lake.
-
-    Standing at the water holding a rod, having cast nothing, must produce nothing --
-    the game gives no signal for "I meant to stop", so the loop earns the right to cast
-    by seeing the player cast first.
-    """
-    p = FakePatcher()
-    svc = _service(monkeypatch, [], p)
-    got = svc.watch_catch(recast=True, rounds=3)
-    assert p.arms == 0 and got["cast"] == 0
-
-
-def test_recast_starts_once_a_bobber_has_been_seen(monkeypatch):
-    p = FakePatcher()
-    water = [_bobber(biting=False)]
-    svc = _service(monkeypatch, water, p)
-    svc.watch_catch(recast=True, rounds=1)        # sees the bobber, arms nothing
-    assert p.arms == 0
-    water.clear()                                  # the player reeled in
-    got = svc.watch_catch(recast=True, rounds=1)
-    assert got["cast"] == 0                        # a fresh watch has not seen one yet
 
 
 def test_the_cheat_must_be_on(monkeypatch):
