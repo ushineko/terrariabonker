@@ -218,6 +218,10 @@ class MainWindow(QWidget):
         self._fishing_inflight = False
         self._fishing_kit_done = False
         self._fishing_said: set = set()     # slots already reported, so the log is not spam
+        self._buff_timer = QTimer(self)
+        self._buff_timer.timeout.connect(self._tick_fishing_buffs)
+        self._buff_inflight = False
+        self._buff_said: set = set()       # deferrals already reported, so it says it once
         self._catch_timer = QTimer(self)
         self._catch_timer.timeout.connect(self._tick_catch)
         self._catch_inflight = False
@@ -420,7 +424,25 @@ class MainWindow(QWidget):
             "bite quickly — at 255 they bite about once a second."))
         fb2.addWidget(self.sp_power)
         fb2.addStretch()
+        buff_box = QGroupBox("Fishing potion effects")
+        fb3 = QHBoxLayout(buff_box)
+        self.cb_buff_power = QCheckBox("Fishing power")
+        self.cb_buff_power.setToolTip(uitext.wrap(
+            "A Fishing Potion's effect without the potion: +15 fishing power while it is "
+            "ticked."))
+        self.cb_buff_sonar = QCheckBox("Sonar")
+        self.cb_buff_sonar.setToolTip(uitext.wrap(
+            "A Sonar Potion's effect without the potion: what is biting is named before "
+            "you reel it in."))
+        self.cb_buff_crate = QCheckBox("Crates")
+        self.cb_buff_crate.setToolTip(uitext.wrap(
+            "A Crate Potion's effect without the potion: crates come up more often."))
+        for cb in (self.cb_buff_power, self.cb_buff_sonar, self.cb_buff_crate):
+            cb.toggled.connect(self._set_fishing_buff_watch)
+            fb3.addWidget(cb)
+        fb3.addStretch(1)
         col.addWidget(fishing_box)
+        col.addWidget(buff_box)
 
         potion_box = QGroupBox("Passive potions")
         pb = QHBoxLayout(potion_box)
@@ -810,6 +832,55 @@ class MainWindow(QWidget):
         argv = client.fishing_argv(self.sp_bait.value(), kit=want_kit)
         if not self.helper.request(argv, done):
             self._fishing_inflight = False
+
+    def _tick_fishing_buffs(self):
+        """One round of holding the fishing potion effects up."""
+        if not self.helper.available or self._buff_inflight:
+            return
+        self._buff_inflight = True
+
+        def done(raw: str):
+            self._buff_inflight = False
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.startswith("[ERROR]"):
+                    self.log.appendPlainText(f"[fishing] {line[len('[ERROR]'):].strip()}")
+                    return
+                if not line.startswith("{"):
+                    continue
+                try:
+                    got = json.loads(line)
+                except ValueError:
+                    continue
+                # Say a deferral once per effect. It happens on every round while the
+                # potion runs, and eight minutes of it would bury the panel.
+                for d in got.get("deferred", []):
+                    if d["effect"] not in self._buff_said:
+                        self._buff_said.add(d["effect"])
+                        self.log.appendPlainText(
+                            f"[fishing] leaving {d['name']} alone — you already have it")
+
+        argv = client.fishing_buffs_argv(self.cb_buff_power.isChecked(),
+                                         self.cb_buff_sonar.isChecked(),
+                                         self.cb_buff_crate.isChecked())
+        if not self.helper.request(argv, done):
+            self._buff_inflight = False
+
+    def _set_fishing_buff_watch(self, _on: bool):
+        """Run while any of the three is ticked; stop when none is.
+
+        Nothing is switched off in the game: a buff whose time stops being renewed lapses
+        on its own in a couple of seconds, which is how a campfire behaves. Untick and it
+        fades; anything a potion is running is untouched because this never shortens a buff.
+        """
+        want = any(cb.isChecked() for cb in
+                   (self.cb_buff_power, self.cb_buff_sonar, self.cb_buff_crate))
+        if want and not self._buff_timer.isActive():
+            self._buff_said.clear()
+            self._buff_timer.start(1000)
+        elif not want and self._buff_timer.isActive():
+            self._buff_timer.stop()
+            self._buff_inflight = False
 
     def _tick_catch(self):
         """One slice of auto-catch. Skipped while a request is out, like vein watching."""

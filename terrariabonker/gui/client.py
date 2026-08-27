@@ -152,6 +152,16 @@ def fishing_argv(keep: int = 30, kit: bool = True) -> list[str]:
     return argv
 
 
+def fishing_buffs_argv(power: bool, sonar: bool, crate: bool) -> list[str]:
+    """One round of holding the fishing potion effects up. Never ``--watch``: the worker
+    must not block, so the GUI owns the cadence, as it does for bait and vein watching."""
+    argv = ["fishing-buffs", "--json"]
+    for on, flag in ((power, "--power"), (sonar, "--sonar"), (crate, "--crate")):
+        if on:
+            argv.append(flag)
+    return argv
+
+
 def catch_argv(recast: bool = False) -> list[str]:
     """One slice of auto-catch. Never the blocking ``catch`` loop, for the same reason as
     the bait round: the worker must not block, so the GUI owns the cadence."""

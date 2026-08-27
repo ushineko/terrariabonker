@@ -161,7 +161,7 @@ SERVE_OPS = frozenset({
     "set-max-mana", "set-stack", "set-item", "give", "patch", "restore",
     "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
     "accept-build", "vein", "extract", "extract-tick", "extract-stop",
-    "potions", "fishing", "catch", "catch-tick", "catch-stop",
+    "potions", "fishing", "fishing-buffs", "catch", "catch-tick", "catch-stop",
 })
 
 
@@ -436,6 +436,40 @@ def cmd_extract_stop(args) -> int:
     """Drop the watcher and disarm; the cheat was switched off."""
     svc = _svc(guard=True, force=args.force)
     print(json.dumps(svc.watch_stop()) if args.json else "[extract] watcher stopped")
+    return 0
+
+
+def _buff_line(r: dict) -> str:
+    held = ", ".join(f"{d['name']} ({d['what']})" for d in r["held"])
+    deferred = ", ".join(d["name"] for d in r["deferred"])
+    parts = []
+    if held:
+        parts.append("holding " + held)
+    if deferred:
+        parts.append(f"left {deferred} alone — a potion is already running it")
+    return "[fishing] " + ("; ".join(parts) if parts else "nothing to hold")
+
+
+def cmd_fishing_buffs(args) -> int:
+    """Hold the fishing potions' effects up without the potions."""
+    svc = _svc(guard=True, force=args.force)
+    if not (args.power or args.sonar or args.crate):
+        print("[fishing] pick at least one of --power, --sonar, --crate")
+        return 1
+    if args.watch:
+        print("[fishing] holding the fishing potion effects up. Ctrl-C to stop.")
+        try:
+            got = svc.watch_fishing_buffs(power=args.power, sonar=args.sonar,
+                                          crate=args.crate, interval=args.interval,
+                                          rounds=args.rounds,
+                                          on_event=lambda r: print(_buff_line(r), flush=True))
+        except KeyboardInterrupt:
+            print("\n[fishing] stopped — the effects lapse in a couple of seconds")
+            return 0
+        print(json.dumps(got) if args.json else f"[fishing] {got['rounds']} rounds")
+        return 0
+    got = svc.fishing_buff_tick(power=args.power, sonar=args.sonar, crate=args.crate)
+    print(json.dumps(got) if args.json else _buff_line(got))
     return 0
 
 
@@ -863,6 +897,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.add_argument("--force", action="store_true", help="run on an unverified build")
     p.set_defaults(func=cmd_extract_stop)
+
+    p = sub.add_parser("fishing-buffs",
+                       help="fishing potion effects without the potions")
+    p.add_argument("--power", action="store_true", help="Fishing Potion (fishing power +15)")
+    p.add_argument("--sonar", action="store_true", help="Sonar Potion (see what is biting)")
+    p.add_argument("--crate", action="store_true", help="Crate Potion (more crates)")
+    p.add_argument("--watch", action="store_true",
+                   help="keep them up (otherwise a single round)")
+    p.add_argument("--interval", type=float, default=1.0, help="seconds between rounds")
+    p.add_argument("--rounds", type=int, help="with --watch, stop after this many rounds")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_fishing_buffs)
 
     p = sub.add_parser("catch",
                        help="reel in every bite for you (needs the auto-use cheat on)")

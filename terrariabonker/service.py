@@ -985,6 +985,74 @@ class Service:
         return {"keep": keep, "topped": topped,
                 "baits": len(inv.fishing_gear()["baits"])}
 
+    #: The three fishing potions, and the buffs they grant. Read out of the game's own
+    #: item templates (ContentSamples) rather than guessed: item 2354/2355/2356 carry
+    #: buffType 121/122/123. Holding these is the whole cheat -- a buff is a (type, ticks)
+    #: pair the game counts down, so renewing one is exactly what drinking a potion does.
+    FISHING_BUFFS = {
+        "power": (121, "Fishing Potion", "fishing power +15"),
+        "sonar": (122, "Sonar Potion", "see what is biting"),
+        "crate": (123, "Crate Potion", "more crates"),
+    }
+
+    def fishing_buff_tick(self, *, power: bool = False, sonar: bool = False,
+                          crate: bool = False, ticks: int | None = None) -> dict:
+        """Hold the chosen fishing-potion effects up, without the potions. One round.
+
+        Stateless, like the bait and potion rounds, and for the same reason: the CLI runs
+        it in a fresh process each time.
+
+        **Anything already running for longer is left completely alone.** That is what
+        makes a real potion, and the passive-potions cheat, take precedence over this:
+        :meth:`buffs.Buffs.renew` refuses to shorten a buff, so a player who drank an
+        eight-minute Fishing Potion keeps eight minutes rather than being cut to the two
+        seconds this renews on. This cheat never removes a buff either, so switching it
+        off drops only what it was holding up.
+        """
+        from terrariabonker import buffs as B
+
+        want = {k for k, on in (("power", power), ("sonar", sonar), ("crate", crate)) if on}
+        if not want:
+            return {"held": [], "deferred": []}
+        bar = B.Buffs(self.mem, self.live_block().life_addr)
+        ticks = ticks or B.DEFAULT_TICKS
+        held, deferred = [], []
+        for key in ("power", "sonar", "crate"):
+            if key not in want:
+                continue
+            buff, name, _ = self.FISHING_BUFFS[key]
+            # Read the clock BEFORE renewing. `renew` returns "kept" both when something
+            # else owns the buff and when our own renewal from a moment ago has not run
+            # out yet, and those are different things to tell the player: the first is
+            # deferring to a potion, the second is the loop doing its job. Only a buff
+            # running LONGER than we would ever set belongs to somebody else.
+            before = bar.time_of(buff)
+            what = bar.renew(buff, ticks)
+            row = {"effect": key, "buff": buff, "name": name, "what": what}
+            (deferred if before > ticks else held).append(row)
+        return {"held": held, "deferred": deferred}
+
+    def watch_fishing_buffs(self, *, power: bool = False, sonar: bool = False,
+                            crate: bool = False, interval: float = 1.0,
+                            rounds: int | None = None, on_event=None) -> dict:
+        """Keep them up. Blocking; the GUI drives :meth:`fishing_buff_tick` from a timer."""
+        import time
+
+        from terrariabonker import buffs as B
+
+        if interval >= B.DEFAULT_TICKS / 60:
+            raise ServiceError(
+                f"a {interval}s interval cannot hold a {B.DEFAULT_TICKS}-tick buff up — "
+                f"the buff would lapse between rounds")
+        n = 0
+        while rounds is None or n < rounds:
+            n += 1
+            r = self.fishing_buff_tick(power=power, sonar=sonar, crate=crate)
+            if on_event:
+                on_event(r)
+            time.sleep(interval)
+        return {"rounds": n}
+
     # --- auto-catch (spec 043) --------------------------------------------
 
     #: How long to wait for a bobber after arming a cast before calling it a miss. A cast

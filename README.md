@@ -83,6 +83,7 @@ holds no state.*
 | Accessories from inventory | accessories work without being equipped |
 | [Passive potions](#passive-potions) | favorite a potion and its effect stays up |
 | [Fishing](#fishing) | a rod, bait that lasts, and fish that bite at once |
+| [Fishing potion effects](#fishing) | fishing power, sonar and crates without the potions |
 | [Auto-catch](#fishing) | it reels in for you, and casts again |
 | [Auto-use](#auto-use) | lets a cheat press your use button |
 
@@ -114,6 +115,16 @@ up either way.
 put back to what it was when you switch the cheat off — including after a crash, because
 the original is written down rather than remembered. Power is also what makes fish bite:
 at 255 they bite roughly once a second, where a starting rod can leave you waiting.
+
+**The fishing potions, without the potions.** Three switches beside the cheat — **Fishing
+power**, **Sonar** and **Crates** — hold what those potions grant for as long as they are
+ticked. Sonar names what is biting before you reel it in; Crates brings up more crates;
+Fishing power adds 15 on top of whatever your rod has.
+
+If you have actually drunk the potion, or you are holding it up with the passive-potions
+cheat, that wins: your eight minutes are left alone rather than being cut down to what this
+renews on. Untick a switch and the effect fades a couple of seconds later on its own,
+exactly as walking away from a campfire does.
 
 **Fish in a lake, not a puddle.** Water smaller than about 300 tiles cuts your fishing
 power sharply, and a tiny pond costs you most of it — that is the game's own rule, not
@@ -250,6 +261,8 @@ terrariabonker patch enable ore_extract
 terrariabonker vein                # DRY RUN: what would be mined, writes nothing
 terrariabonker extract             # mine the vein at your tile (CHANGES YOUR WORLD)
 terrariabonker extract --watch     # break one ore and its vein follows
+
+terrariabonker fishing-buffs --power --sonar --crate --watch
 
 terrariabonker patch enable auto_use
 terrariabonker catch               # reel in every bite; you cast
