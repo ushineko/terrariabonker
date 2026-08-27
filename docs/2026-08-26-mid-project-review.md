@@ -293,6 +293,13 @@ Ordered by (harm × cheapness), not by section:
 
 ## 5. Candidates to lift into project policy
 
+> **Lifted into `AGENTS.md` on 2026-08-27**, placed in the sections they belong to rather
+> than appended as a block: the offset rule with the other offset guidance, the arena and
+> probe rules in a new "Writing to a live game" section, the import rule with the coding
+> standards, and the four test rules under Testing. Each carries the scar that produced it.
+> One number was corrected on the way in — `service.py` has 59 deferred imports, not the
+> ~25 estimated below.
+
 These are conventions the project has already learned the hard way and currently keeps only
 in commit messages and specs. `AGENTS.md` is where they belong.
 

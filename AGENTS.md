@@ -42,6 +42,39 @@ reverse-engineering credit for those hooks belongs to the ReGrind authors.
 - **Offsets are build-specific (1.4.5.7).** Locate by AOB/signature; never hardcode a JIT
   address. Re-derive with the `ce/poc_*.lua` recon scripts after a game update. A moved
   layout must fail safe ("anchor not found"/no match), never mis-write.
+- **An offset is declared once and imported.** `terrariabonker/layout.py` owns the mono
+  szarray shape and `Main`'s static offsets; item field offsets live in `inventory.py`. A
+  module that needs another's offset imports it. Never re-spell a constant in a second
+  module — a game update is the routine event here, and re-deriving one number should be one
+  edit, not a hunt for every spelling of it. (It was five spellings under four names once.)
+
+---
+
+## Writing to a live game (patches, stubs, probes)
+
+These are rules the project learned by breaking something. Each one has a scar.
+
+- **The arena is shared memory: read it before you write it.** Stub slots are assigned by
+  position in an append-only registry (`_SLOT_ORDER`), never by sorted name — appending must
+  not move an existing slot. Never write a stub into a slot without establishing what is
+  already there (`_check_slot`), and never write a jump over bytes that are not what will be
+  restored (`_check_site`). Data offsets must be checked against the extents of every other
+  allocation, with a test that computes them rather than trusting a comment.
+  *Two collisions came from skipping this: a stub written over a live one crashed the game,
+  and an overlapping arm word made mining press the player's use button.*
+- **A probe carries its own liveness control.** Terraria pauses in single-player when its
+  window loses focus, and a paused game rewrites nothing — so a probe that samples one gets a
+  clean, confident, meaningless result. Every probe verifies the game is advancing frames
+  before it reports anything, and says "aborting: the game is paused" rather than reporting a
+  measurement it did not take.
+- **Report what you observed, not what you requested.** A successful write is not a
+  successful action: arming a stub is not a press, and a press is not a cast. Confirm the
+  effect (a bobber appeared, a tile is gone, the region is mapped) before reporting success.
+  *Auto-catch logged "cast the line" on the strength of having armed the stub; the maintainer
+  was the one casting.*
+- **Locate by identity on every access, never by a cached address.** mono's GC moves objects,
+  and a stale pointer writes into whatever now lives there. Treat an unexpected pre-value as a
+  reason to abort, not a value to record.
 
 ---
 
@@ -55,6 +88,11 @@ reverse-engineering credit for those hooks belongs to the ReGrind authors.
   codebase. Keep changes surgical — edit only what the task needs; do not reformat unrelated
   code or remove pre-existing (unrelated) dead code.
 - Lint with `flake8` before committing changed files.
+- **Imports go at the top of the module.** Defer one into a function only to break an import
+  cycle or to keep an optional/expensive dependency out of a fast path — and say which in a
+  comment. Without a stated rule they accumulate: `service.py` currently has 10 top-level
+  imports and **59** deferred ones, some duplicating a top-level import of the same module.
+  New code follows the rule; the existing 59 are not a licence to add the 60th.
 
 **Bash / shell**
 - `set -euo pipefail` in scripts; quote expansions; prefer explicit argv over shell strings.
@@ -83,6 +121,25 @@ CLIs (`pactl --format=json`) next; human-readable CLI output only as a documente
   than asserting on mocks.
 - Live verification against a running game is fine for the maintainer, but every change must
   also be covered by a headless test.
+- **Never assert on source text.** No `inspect.getsource` and no substring checks against a
+  module's own code: they pass when the line sits in a branch that never runs, and fail on a
+  rename that changes nothing. Test behaviour. Where an *architectural* rule genuinely needs
+  enforcing (no threads in the GUI transport, no JSON parsing outside `client.py`), read it
+  from the AST — `test_view_parity.py` and `test_gui_helper.py` show the technique.
+- **Mutation-check a new test: break the thing it guards and watch it fail.** A test written
+  after the fix routinely passes against the bug it was meant to catch. When a mutation
+  survives, say whether the test was weak or the mutant was *equivalent* — an equivalent
+  mutant is a finding about the code (something is redundant or unreachable), not a pass.
+  Both outcomes are worth recording in the validation report.
+- **Shared scaffolding lives in `tests/conftest.py`.** `qt_app` and `gui_window` are there;
+  so is `FakeMem`. A fixture copied into a third file belonged in conftest two files ago —
+  and the copies drift: seven `QApplication` fixtures under two names is how three GUI test
+  modules ended up passing only because another module's import ran first.
+- **Refactors are pinned before they start.** Before restructuring a path that writes to the
+  game, add characterization tests for whatever is only covered incidentally, then re-run
+  them as mutations *after* the split. A green suite following a "behaviour-preserving"
+  change is a question, not an answer: a `catch_tick` split once moved a `break` out of a
+  guard, changing when the loop gave up, and all 579 tests still passed.
 
 ## Security (non-negotiable minimums)
 
