@@ -704,64 +704,28 @@ class Service:
     # tile including ones we have not identified.
     FALL_SEARCH_READS = 40000
 
-    def extract_vein(self, x: int, y: int, *, gems: bool = False,
-                     limit: int | None = None, timeout: float = 20.0) -> dict:
-        """Mine the vein at ``(x, y)`` through the game's own ``PickTile`` (spec 040).
+    def _vein_regrowth(self, tm, first, tid):
+        """A finder for "where has this vein settled?", given the tiles it first held.
 
-        Tiles are handed over a batch at a time -- the stub mines a whole queue per frame,
-        so a typical 10-30 tile vein goes at once. The batch is capped
-        (``ORE_MAX_BATCH``) because draining a 400-tile vein in a single frame would run
-        400 PickTiles in one frame, each spawning dust, drops and light updates.
+        Silt, slush and sand fall when the tile under them goes, so between batches the
+        coordinates from the first flood are stale: the blocks are still there, lower down.
+        Gravity is vertical, so a falling tile stays in its OWN column and can only move
+        down -- searching a box instead finds unrelated deposits of the same ore below the
+        vein and mines those too, which is ore the player never asked for.
 
-        **The vein is re-found between batches rather than remembered.** Silt, slush and
-        sand fall when the tile under them goes, so for a deposit bigger than one batch
-        the coordinates from the first flood are stale by the second: the blocks are still
-        there, just lower down. Re-flooding from whatever tile of the same id is still
-        standing near where the vein was follows them down. Ores do not move, so for them
-        this is the same list twice and costs one extra flood (~2ms).
-
-        The stub only runs while the game is updating, so this waits for tiles to actually
-        be **gone** rather than for the stub to acknowledge anything -- it only reads the
-        queue. Waiting on the tiles is the better test regardless: it is the success
-        condition rather than a proxy for it.
+        The returned callable walks each column the vein occupied, downwards from the
+        vein's topmost tile there, and **stops at the first solid tile that is not ours**:
+        a falling pile rests on top of the ground it lands on, so anything under that
+        ground is a different deposit. Without that stop the search runs to the world floor
+        and happily mines an unrelated patch a long way below -- which is what "it mines
+        non-contiguous sections across the screen" turned out to be.
         """
-        import time
-
-        from terrariabonker import tiles as T
-        from terrariabonker.patcher import ORE_MAX_BATCH
-
-        p = self.patcher()
-        if not p.is_enabled("ore_extract"):
-            raise ServiceError("the ore extractor cheat is not enabled")
-        tm = self.tilemap()
-        want = T.whitelist(gems)
-        cap = limit or T.DEFAULT_LIMIT
-        first = T.flood(tm, x, y, want, cap)
-        if not first:
-            return {"at": [x, y], "queued": 0, "mined": 0, "left": 0, "batches": 0,
-                    "waits": [], "median_wait": None, "reason": "not a whitelisted tile"}
-        tid = tm.solid_type_at(x, y)
-
-        # Where the rest of it can be later. Gravity is vertical, so a falling tile stays
-        # in its OWN column and can only move down -- searching a box instead finds
-        # unrelated deposits of the same ore below the vein and mines those too, which is
-        # ore the player never asked for. Per column: from the vein's topmost tile there,
-        # downwards, on a shared read budget.
         top: dict[int, int] = {}
         for qx, qy in first:
             top[qx] = min(top.get(qx, qy), qy)
         rows = max(8, self.FALL_SEARCH_READS // max(1, len(top)))
 
         def still_standing():
-            """A live tile of this vein, wherever in its own columns it has settled.
-
-            Walks down each column the vein occupied and **stops at the first solid tile
-            that is not ours**: a falling pile rests on top of the ground it lands on, so
-            anything under that ground is a different deposit. Without this the search
-            runs to the world floor and happily mines an unrelated patch of the same ore
-            a long way below -- which is what "it mines non-contiguous sections across
-            the screen" turned out to be.
-            """
             for xx, y_from in top.items():
                 for yy in range(max(0, y_from), min(tm.max_y, y_from + rows)):
                     t = tm.solid_type_at(xx, yy)
@@ -771,12 +735,24 @@ class Service:
                         break                 # ground: the pile cannot be below this
             return None
 
+        return still_standing
+
+    def _drain_vein(self, tm, still_standing, tid, budget, timeout):
+        """Hand the vein to the stub a batch at a time until it is gone or stops going.
+
+        Returns ``(mined, batches, waits, stalled)``. The stub only runs while the game is
+        updating, so each batch waits for tiles to actually be **gone** rather than for the
+        stub to acknowledge anything -- it only reads the queue. Waiting on the tiles is
+        the better test regardless: it is the success condition rather than a proxy for it.
+        """
+        import time
+
+        from terrariabonker import tiles as T
+        from terrariabonker.patcher import ORE_MAX_BATCH
+
+        p = self.patcher()
         mined, batches, stalled = 0, 0, ""
-        waits = []
-        # A vein cannot grow. Whatever the re-scan turns up, never take more tiles than
-        # the vein we were asked for held -- that is the backstop against following one
-        # deposit into another.
-        budget = min(cap, len(first))
+        waits: list[float] = []
         try:
             while mined < budget:
                 seed = still_standing()
@@ -805,6 +781,43 @@ class Service:
                     break
         finally:
             p.ore.disarm()          # a queue left armed is re-mined every frame
+        return mined, batches, waits, stalled
+
+    def extract_vein(self, x: int, y: int, *, gems: bool = False,
+                     limit: int | None = None, timeout: float = 20.0) -> dict:
+        """Mine the vein at ``(x, y)`` through the game's own ``PickTile`` (spec 040).
+
+        Flood for what is there, drain it a batch at a time, report what happened.
+
+        Tiles are handed over a batch at a time -- the stub mines a whole queue per frame,
+        so a typical 10-30 tile vein goes at once. The batch is capped
+        (``ORE_MAX_BATCH``) because draining a 400-tile vein in a single frame would run
+        400 PickTiles in one frame, each spawning dust, drops and light updates.
+
+        **The vein is re-found between batches rather than remembered** -- see
+        :meth:`_vein_regrowth`. Ores do not move, so for them this is the same list twice
+        and costs one extra flood (~2ms).
+        """
+        from terrariabonker import tiles as T
+
+        p = self.patcher()
+        if not p.is_enabled("ore_extract"):
+            raise ServiceError("the ore extractor cheat is not enabled")
+        tm = self.tilemap()
+        cap = limit or T.DEFAULT_LIMIT
+        first = T.flood(tm, x, y, T.whitelist(gems), cap)
+        if not first:
+            return {"at": [x, y], "queued": 0, "mined": 0, "left": 0, "batches": 0,
+                    "waits": [], "median_wait": None, "reason": "not a whitelisted tile"}
+
+        tid = tm.solid_type_at(x, y)
+        still_standing = self._vein_regrowth(tm, first, tid)
+        # A vein cannot grow. Whatever the re-scan turns up, never take more tiles than
+        # the vein we were asked for held -- that is the backstop against following one
+        # deposit into another.
+        mined, batches, waits, stalled = self._drain_vein(
+            tm, still_standing, tid, min(cap, len(first)), timeout)
+
         left = still_standing() is not None
         return {"at": [x, y], "queued": len(first), "mined": mined,
                 "left": len(first) - mined if not left else -1,
