@@ -57,6 +57,23 @@ moment after the first claimed a potion was running Sonar when the only thing ru
 was the round before. The clock is now read *before* renewing, and only a buff running
 longer than this cheat would ever set counts as somebody else's.
 
+## Alternatives considered
+
+- **Stop renewing when a rod is not held**, so the effects lapse outside fishing.
+  Considered and rejected. The gain is cosmetic — a tidier buff bar, and the icons already
+  say what each effect is — while the cost is a real failure mode: the catch counter reads
+  `FinalFishingLevel` every tick the bobber is out, not once at the cast, so a player who
+  casts and then switches to a torch for a moment would silently lose fishing power
+  mid-cycle. That reads as "fishing is worse sometimes", which nobody would attribute to
+  the trainer.
+
+  The asymmetry with auto-catch's rod gate is the point: that one exists because an
+  ungated press swings the player's sword, which is harm. A buff cannot do anything to
+  anyone, so gating it for consistency would inherit a risk to fix an appearance.
+
+  If it is ever wanted, the condition must be *rod held **or** bobber in the water*, never
+  rod alone — both halves already exist (`Inventory.holding_rod`, `projectiles.find_bobbers`).
+
 ## Risks & Assumptions
 
 - **Buff ids are content, not offsets.** They come from the game's own item templates, so
