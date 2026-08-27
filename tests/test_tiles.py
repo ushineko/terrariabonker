@@ -953,3 +953,52 @@ def test_the_queue_is_disarmed_even_when_a_dig_raises():
     finally:
         T.whitelist = real
     assert disarms, "the queue was left armed when the dig blew up"
+
+
+# --- pick power vs. what the whitelist can queue ------------------------------
+
+#: How `Player.GetPickaxeDamage` credits pick power, per tile id, read from the game's IL
+#: on 1.4.5.8+24893155. Anything not listed is credited in full (÷1). A tile breaks at 100
+#: accumulated damage, and the extractor passes cap = -1, which skips the per-hit clamp --
+#: so "can one hit break this?" is exactly `power // divisor >= 100`.
+PICK_DIVISORS = {
+    107: 2, 221: 2,          # cobalt, palladium
+    58: 2, 25: 2, 203: 2,    # hellstone, ebonstone, crimstone
+    108: 3, 222: 3,          # mythril, orichalcum
+    111: 4, 223: 4, 226: 4,  # adamantite, titanium, lihzahrd brick
+    211: 5,                  # chlorophyte
+}
+#: Tiles that award nothing at all below a minimum power, same source.
+PICK_MINIMUMS = {211: 200, 37: 50, 22: 55, 204: 55, 25: 65, 203: 65, 117: 65, 77: 65}
+TILE_BREAKS_AT = 100
+
+
+def test_the_pick_power_one_hits_everything_the_whitelist_can_queue():
+    """Reported from the game: orichalcum and every tier above it were never mined.
+
+    The stub queues each tile once and the count is consumed whether or not the tile
+    broke, so a tile that survives its hit is never hit again -- it poofs, stays put, and
+    still needs mining by hand. 250 cleared the halved tiles (which is why hellstone read
+    as fixed) and left orichalcum at 250÷3 = 83, under the 100 a tile breaks at.
+
+    Asserted against the game's credit rule rather than against the number, so raising the
+    constant cannot quietly stop covering a tier.
+    """
+    from terrariabonker.patcher import ORE_PICK_POWER
+
+    short = {}
+    for tile in T.whitelist(gems=True):
+        got = ORE_PICK_POWER // PICK_DIVISORS.get(tile, 1)
+        if got < TILE_BREAKS_AT:
+            short[T.ORES.get(tile) or T.GEMS.get(tile) or tile] = got
+    assert not short, f"one hit does not break these: {short} (need {TILE_BREAKS_AT})"
+
+
+def test_the_pick_power_clears_every_minimum_the_game_imposes():
+    """Some tiles award zero damage below a threshold, whatever the division would give.
+    Chlorophyte's is 200, which 100 never met either."""
+    from terrariabonker.patcher import ORE_PICK_POWER
+
+    unmet = {t: need for t, need in PICK_MINIMUMS.items()
+             if t in T.whitelist(gems=True) and ORE_PICK_POWER < need}
+    assert not unmet, f"below the game's minimum for {unmet}"

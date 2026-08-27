@@ -578,13 +578,25 @@ def _teleport_body(player_base: int, call_target: int) -> bytes:
 ORE_MAX_BATCH = arena_state.ORE_MAX_BATCH
 ORE_QUEUE_OFF = arena_state.ORE_QUEUE_OFF
 ORE_QUEUE_BYTES = 4 + ORE_MAX_BATCH * 8
-# The pick power handed to PickTile. It was 100, and 100 is not enough: a tile breaks on
-# accumulated damage, and the game credits a short list of tile types -- hellstone among
-# them -- at a reduced rate, so those took the hit and survived it. In game that looks
-# exactly like what was reported: the block poofs, stays put, and still needs mining one
-# swing at a time. 250 leaves room for that reduction and also clears the stiffest pick
-# requirement in the game (lihzahrd brick, 210), which 100 never met either.
-ORE_PICK_POWER = 250
+# The pick power handed to PickTile. A tile breaks at 100 accumulated damage, and
+# `Player.GetPickaxeDamage` credits the harder tiles at a fraction of the power given --
+# so the number here is not "how strong", it is "enough that one hit still clears 100
+# after the worst division". The stub queues each tile once and the count is consumed
+# whether or not the tile broke, so a tile that survives its hit is never hit again: in
+# game that is the block poofing, staying put, and still needing mining by hand.
+#
+# From the game's own IL (Player::GetPickaxeDamage), for what the whitelist can queue:
+#
+#     ÷2  cobalt 107, palladium 221, hellstone 58, ebonstone 25, crimstone 203, dungeon
+#     ÷3  mythril 108, orichalcum 222
+#     ÷4  adamantite 111, titanium 223, lihzahrd brick 226
+#     ÷5  chlorophyte 211   (and 0 damage outright below power 200)
+#
+# 100 broke nothing halved. 250 cleared ÷2 and was reported as fixed, which it was for
+# hellstone -- and left every hardmode ore from orichalcum up silently unmineable, because
+# 250÷3 is 83. The floor is 500 (chlorophyte, ÷5); 1000 is that with headroom, and nothing
+# scales with the value beyond the one tile being hit.
+ORE_PICK_POWER = 1000
 
 
 # Auto-use (spec 043). Two dwords in the arena's reserved region, clear of every stub:
