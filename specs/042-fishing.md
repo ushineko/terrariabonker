@@ -188,9 +188,9 @@ the premise has not been established.
   above disappears, and the byte cap on the tunable goes with it. **Check this before
   building the record-and-restore path**, because it would be work done to solve a problem
   that need not exist. The item edit is the fallback, not the first choice.
-- **Whether the catch is worth influencing separately.** Fishing power decides quality;
-  insta-fishing decides speed. If they turn out to be the same field in practice, the two
-  toggles should be merged rather than shipped as a distinction that is not real.
+- ~~**Whether the catch is worth influencing separately.**~~ Settled: they are the same
+  lever, the toggles were merged, and speed is now bounded by how fast a bite can be taken
+  rather than by clicking — see spec 043.
 - ~~**`Main.projectile`'s address.**~~ Done. `terrariabonker/projectiles.py` reads it from
   Main statics `+0x9BC`, validates what it finds (length 1001, elements sharing one
   vtable) and falls back to the structural scan that found it originally, so a game update
@@ -206,9 +206,13 @@ consumer. What remains fishing's own problem is confirming the bite signal below
 
 ## Auto-catch — the recon that led to spec 043
 
-Reeling in is still a manual act: the cheat makes fish bite constantly, and the player
-clicks. Automating that is a separate question and is **not ruled out** — it has simply not
-been investigated. It splits in two, and only one half is hard.
+> **Superseded.** Auto-catch shipped in spec 043 and the reeling below is no longer manual.
+> This section is kept because it is the recon that got there, including the parts that
+> were wrong; where a conclusion here was later disproved it is marked rather than deleted.
+
+Reeling in was a manual act when this was written: the cheat makes fish bite constantly,
+and the player clicked. Automating it splits in two, and only one half turned out to be
+hard.
 
 **Detecting a bite was inferred from a four-field cycle**, and that inference is now
 superseded. While sampling the bobber, `+0x078` dropped 1 → 0 and `+0x0B4` 59 → 0 with
@@ -395,5 +399,8 @@ Two instrument flaws, recorded rather than buried:
 - **Rollback**: no patching, so nothing to restore in the game's code. Given items and an
   edited rod are the exceptions, per the point above.
 - ~~**Assumption**: bait is consumed by decrementing the stack.~~ Measured; see above.
-- **A catch is a manual act.** The player casts and reels in. Any wording that suggests
-  fish arrive on their own would oversell what this can do, in the README and in the UI.
+- ~~**A catch is a manual act.**~~ True of this spec, and no longer true of the trainer:
+  spec 043 reels for the player and casts again between catches. The caution behind it
+  still stands and now cuts the other way — the README must not suggest the player is
+  free of the rod either, because auto-catch needs them to cast the first line and stops
+  the moment they hold something else.

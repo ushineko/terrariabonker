@@ -83,6 +83,8 @@ holds no state.*
 | Accessories from inventory | accessories work without being equipped |
 | [Passive potions](#passive-potions) | favorite a potion and its effect stays up |
 | [Fishing](#fishing) | a rod, bait that lasts, and fish that bite at once |
+| [Auto-catch](#fishing) | it reels in for you, and casts again |
+| [Auto-use](#auto-use) | lets a cheat press your use button |
 
 ### Passive potions
 
@@ -118,7 +120,32 @@ power sharply, and a tiny pond costs you most of it — that is the game's own r
 something the trainer can help with. A big lake catches far more than a small one whatever
 gear you carry.
 
-Under **Effects**, or `terrariabonker fishing --watch`.
+**It can fish for you.** Tick **Reel in for me** and every bite is taken the moment it
+happens — you cast, it reels. Tick **and cast** as well and it casts again after each catch,
+so a single cast from you turns into a session: twenty-odd fish while you do something else.
+
+It stops on its own the moment you put the rod away. Switch to a pickaxe and it will not
+press anything; pick the rod back up and cast, and it carries on. There is no toggle to
+remember.
+
+Auto-catch needs **Auto-use** switched on under Patches — that is the part that presses the
+button, and it ships off. Reeling for you also means the fish, crates and the occasional
+angry NPC all arrive faster than you might expect.
+
+Under **Effects**, or `terrariabonker fishing --watch` and `terrariabonker catch --recast`.
+
+### Auto-use
+
+Presses your use button — the same thing a mouse click does — once, on a frame the trainer
+picks. On its own it does nothing at all: nothing presses it until another cheat asks, and
+today the only one that asks is auto-catch.
+
+It ships switched off, and it is worth saying plainly why: "use the held item" is whatever
+you are holding. With a rod it fishes. With a sword it swings, and with a pickaxe it mines.
+Auto-catch will not press unless a rod is in your hand, but the switch itself is not
+fishing-specific.
+
+Your own clicking is untouched while nothing is arming it.
 
 ### Ore extractor (vein mining)
 
@@ -224,13 +251,18 @@ terrariabonker vein                # DRY RUN: what would be mined, writes nothin
 terrariabonker extract             # mine the vein at your tile (CHANGES YOUR WORLD)
 terrariabonker extract --watch     # break one ore and its vein follows
 
+terrariabonker patch enable auto_use
+terrariabonker catch               # reel in every bite; you cast
+terrariabonker catch --recast      # and cast again after each one
+
 terrariabonker restore             # re-apply your saved cheats and item edits
 terrariabonker extract-recipes     # rebuild the recipe database after a game update
 terrariabonker extract-sprites     # rebuild the icon cache after a game update
 ```
 
-`--value` overrides the default. `fast_place`, `teleport`, `pylons` and `ore_extract` are
-on/off only. `vein` only reads — use it to see what `extract` would take before letting it
+`--value` overrides the default. `fast_place`, `teleport`, `pylons`, `ore_extract` and
+`auto_use` are on/off only. `catch` needs `auto_use` enabled and stops pressing as soon as
+you are not holding a rod. `vein` only reads — use it to see what `extract` would take before letting it
 loose on a world you care about.
 
 ## Usage (GUI)
