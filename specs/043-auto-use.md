@@ -80,9 +80,66 @@ This stub calls nothing.
   and a written 1 wiped by the game in 4.9–20.6 ms across five trials — one frame at
   60 fps. The liveness gate was run first and passed, so this is not spec 042's
   paused-game result.
-- The hook site. `ore_extract` already occupies the `GrabItems` call inside `Player.Update`,
-  and two jumps at one site is the thing to avoid, so this needs its own per-frame site
-  where the Player is reachable.
+- ~~The hook site.~~ **Cut 2026-08-26: `Player.Update`'s call to `BordersMovement`.**
+  Details below.
+
+## The hook site and its AOB — 2026-08-26
+
+`Player.Update`'s call to `Player.BordersMovement`, at IL_8E19. Chosen because it is the
+only call site of that method in the whole of `Update`, it is unconditional (the `netMode`
+and shimmer branches above it merge first), and it sits ~50 IL bytes before
+`ItemCheckWrapped` — the call that reads the use control. The write lands immediately
+before the read, every frame. `ore_extract` owns `GrabItems` at IL_6B2E, which is a
+different call much earlier in the same method.
+
+Found by bounding the search rather than sweeping memory: the extractor's `grabitems_call`
+anchor is itself inside `Player.Update`, so it served as a landmark and the scan ran
+forward from it. The site is `+0x64EA` past it, which is the right direction and distance
+for IL_6B2E → IL_8E19. One match in `±0x40000`.
+
+```
+anchor    E8 34 5C 24 0A                          call BordersMovement
+inject    (anchor + 5)
+displace  8B 45 08                                mov eax,[ebp+8]      <- this
+          C7 80 FC 03 00 00 00 00 00 00           mov [eax+0x3FC],0    <- numMinions
+after     8B 45 08 D9 EE D9 98 00 04 00 00        fstp [eax+0x400]     <- slotsMinions
+          8B 05 ?? ?? ?? ?? 3D 02 00 00 00        cmp Main.netMode,2
+```
+
+Field offsets fall out of the match and corroborate it: `numMinions` at `this+0x3FC` and
+`slotsMinions` at `this+0x400`, adjacent, the second stored with `fstp` exactly as the
+IL's `ldc.r4 0` predicts.
+
+**The AOB, with the patch site wildcarded — 1 live site:**
+
+```
+E8 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ??
+8B 45 08 D9 EE D9 98 ?? ?? ?? ?? 8B 05 ?? ?? ?? ?? 3D 02 00 00 00
+```
+
+Three variants were tested and all resolve to exactly one site: fully literal, patch-site
+wildcarded, and no-call-at-all. The wildcarded one is what ships — it is the rule specs
+032-034 and 037 each learned the hard way, and unlike `grabitems` this anchor does not have
+to break it to stay unique, because the trailing `fstp`/`netMode` context carries the
+uniqueness on its own.
+
+**13 displaced bytes, and none of them relative** — `mov eax,[ebp+8]` and a
+`mov dword [reg+disp32], imm32`. Both relocate into the stub verbatim; a 5-byte jump plus
+8 bytes of padding covers them. The call itself is deliberately *not* displaced, for the
+reason recorded on `grabitems_call`: its rel32 differs every session.
+
+**The site hands the stub `this` for free**, which simplifies the design above. `[ebp+8]`
+is `Player.Update`'s own argument and it is already being loaded by the first displaced
+instruction, so the stub does not have to source the Player pointer from anywhere — and
+the null-player guard in the sketch becomes moot, since `Update` is never entered on a null
+`this`. The acceptance criterion about a title-screen frame still needs a test; it is now
+expected to pass by construction rather than by the check.
+
+**Unverified, and it must be before anything is written:** the call target
+(`0x247bd4a0` this session) is identified by shape and position, not by name — nothing here
+read mono's metadata to confirm it *is* `BordersMovement`. That does not affect the hook,
+which only needs a per-frame site with `this` in the frame, but it must not be written down
+as though the symbol were confirmed.
 
 ## Risks & Assumptions
 
