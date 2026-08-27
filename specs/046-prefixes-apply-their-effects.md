@@ -1,8 +1,9 @@
 # Spec 046: A modifier assigned in the editor gives its effects
 
-**Status**: INCOMPLETE — implemented and tested headless; awaiting in-game confirmation of
-the reported case, and a decision on repairing items that already carry a cosmetic
-modifier. `crit`/`armorPenetration`/`bonusTagDamage` remain unverified and unapplied.
+**Status**: COMPLETE — confirmed working in-game by the maintainer, with `crit` verified
+against two reforges and applied. `armorPenetration` and `bonusTagDamage` stay unwritten:
+neither modifier rolled granted one, so neither offset was ever observed, and they are
+reported as skipped rather than dropped.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -85,10 +86,10 @@ read from the template object directly rather than from the copied block.
 
 ## Acceptance criteria
 
-- [ ] Assigning a modifier applies every field it multiplies, computed from the item's
-      template base — verified in-game on the reported case: a Godly Spider Staff shows
-      raised damage and knockback in its tooltip. *(Second half fixed after a follow-up
-      report — see "only works the first time" below. Still needs an in-game look.)*
+- [x] Assigning a modifier applies every field it multiplies, computed from the item's
+      template base — verified in-game. *(The fix had two halves: the stats were never
+      written, and then the dialog echoed the item's own stats back over them. Confirmed
+      working by the maintainer after both.)*
 - [x] Assigning the same modifier twice leaves identical stats (no compounding), and
       switching modifier A → B gives the same result as applying B to a pristine item.
       *(Every scaled field is written from base, not only the ones the new modifier
@@ -106,7 +107,9 @@ read from the template object directly rather than from the copied block.
 - [x] Headless tests: the multipliers land on the right fields, applying twice is
       idempotent, and prefix 0 restores base. *(10 tests; five mutations caught, including
       the original bug and the compounding one.)*
-- [ ] `docs/item-fields.md` gains whatever offsets this derives, with the evidence for each.
+- [x] `docs/item-fields.md` gains whatever offsets this derives, with the evidence for
+      each. *(`crit` at `0x150`, pinned by reforging a Minishark twice and diffing the
+      item, plus what those reforges revealed about when the game resets an item to base.)*
 
 ## Found on the first dry run: the maintainer's own Spider Staff
 
