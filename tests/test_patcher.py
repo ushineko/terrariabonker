@@ -851,3 +851,38 @@ def test_slot_addresses_come_from_the_declared_order(game):
             continue
         want = p.arena() + p.ARENA_STUBS_OFF + i * p.ARENA_MAX_SITES * p.ARENA_SLOT
         assert p.slot_for(name) == want, name
+
+
+def test_the_cave_path_still_works_for_a_non_arena_injection(game):
+    """Every shipped injection uses the arena, so nothing exercises the cave fallback.
+
+    That fallback is a deliberate legacy path, not an accident -- but unexercised code in
+    the module that writes machine code into a live process is its own hazard, and its
+    `claimed`/`writable` arguments had no coverage at all. This drives it with a synthetic
+    injection so the branch is live rather than merely present.
+    """
+    m, p = game
+    m.write(CODE + 0x900, ANCHORS["borders_movement"].pattern.raw)
+    inj = P.Injection(
+        "cave_probe", "cave probe", "borders_movement",
+        0x5, _b_test("8B 45 08 C7 80 FC 03 00 00 00 00 00 00"),
+        lambda _v=0: b"\x90\x90",
+        arena=False, writes_cave=True)
+    site = CODE + 0x900 + inj.inject_off
+    m.write(site, inj.overwrite)
+    monkey = dict(P.INJECTIONS)
+    monkey["cave_probe"] = inj
+    try:
+        P.INJECTIONS.update({"cave_probe": inj})
+        p._enable_injection(inj, 0)
+        rec = p._inj["cave_probe"]
+        cave = rec["sites"][0]["cave"]
+        assert cave and cave != p.arena(), "the cave path handed back an arena slot"
+        assert m.read(site, 1) == b"\xe9", "no jump was installed at the site"
+        assert inj.overwrite in m.read(cave, rec["stub_len"]), "displaced bytes not replayed"
+    finally:
+        P.INJECTIONS.pop("cave_probe", None)
+
+
+def _b_test(hexstr: str) -> bytes:
+    return bytes(int(x, 16) for x in hexstr.split())

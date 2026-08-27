@@ -926,6 +926,10 @@ class Injection:
     # True if the stub belongs in memory we allocate rather than borrowed padding. Set it
     # when the stub is too big for a gap, needs to write, or carries a buffer -- see
     # Patcher.arena. The 5-byte site jump still reaches it (rel32 spans +-2GB).
+    #
+    # Every shipped injection sets this, so `writes_cave` above currently has no effect on
+    # any of them: it is read only on the cave path. Both are kept because the cave path is
+    # a deliberate fallback, and it now has a test driving it (see test_patcher).
     arena: bool = False
 
 
