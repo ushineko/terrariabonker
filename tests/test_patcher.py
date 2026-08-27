@@ -780,3 +780,18 @@ def test_disarm_drops_a_press_that_has_not_landed(game):
     assert p.auto_use_armed()
     p.auto_use_disarm()
     assert not p.auto_use_armed()
+
+
+def test_slot_addresses_come_from_the_declared_order(game):
+    """The tuple is only protection if slot_for actually reads it.
+
+    A mutation that reverted slot_for to `sorted(INJECTIONS)` while leaving _SLOT_ORDER in
+    place survived the whole suite: the tests checked the tuple's shape and never that the
+    addresses followed it.
+    """
+    _, p = game
+    for i, name in enumerate(P._SLOT_ORDER):
+        if name not in P.INJECTIONS:
+            continue
+        want = p.arena() + p.ARENA_STUBS_OFF + i * p.ARENA_MAX_SITES * p.ARENA_SLOT
+        assert p.slot_for(name) == want, name
