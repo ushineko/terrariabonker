@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from terrariabonker import locate, proc, tiles                     # noqa: E402
 from terrariabonker import projectiles as P                        # noqa: E402
 
-ACTIVE, POSX, PTYPE = 0x03C, 0x00C, 0x094
+ACTIVE, POSX, VELX, PTYPE = 0x03C, 0x00C, 0x014, 0x094
 
 #: name -> (offset, kind). Solved against the game's own SetDefaults, except where noted.
 FIELDS = {
@@ -93,7 +93,11 @@ def main() -> int:
               f"{'' if args.type is None else f' of type {args.type}'}", flush=True)
     print(flush=True)
 
-    stat = collections.defaultdict(lambda: [0, 0])
+    # [inside a solid tile, in open space, samples, summed speed] per group.
+    # Speed is the honest half of this: "inside a block" reads backwards, because a
+    # projectile that COLLIDES stops at the wall it hit and is then sampled there
+    # repeatedly, while one that passes through spends its life in open air.
+    stat = collections.defaultdict(lambda: [0, 0, 0, 0.0])
     t0 = said = time.time()
     while time.time() - t0 < args.seconds:
         for slot, obj in enumerate(struct.unpack("<1001I", mem.read(arr + 0x10, 4004))):
@@ -114,22 +118,29 @@ def main() -> int:
             if not (0 < x < 1e7 and 0 < y < 1e7):
                 continue
             solid = tm.solid_type_at(int(x // 16), int(y // 16)) is not None
-            stat[(ptype, patched)][0 if solid else 1] += 1
+            vx, vy = struct.unpack("<ff", mem.read(obj + VELX, 8))
+            row = stat[(ptype, patched)]
+            row[0 if solid else 1] += 1
+            row[2] += 1
+            row[3] += (vx * vx + vy * vy) ** 0.5
         if time.time() - said > 10:                    # a heartbeat, so it is visibly alive
             said = time.time()
-            live = sum(i + o for i, o in stat.values())
+            live = sum(r[2] for r in stat.values())
             print(f"  [{time.time() - t0:5.0f}s] {live} projectile samples so far", flush=True)
         time.sleep(1 / 120)
 
     if not stat:
         print("nothing was flying. Fire something while this runs.")
         return 0
-    print(f"{'type':>6} {'patched':>8} {'in blocks':>10} {'in open':>9} {'% in blocks':>12}")
-    for (ptype, patched), (ins, outs) in sorted(stat.items()):
+    print(f"{'type':>6} {'patched':>8} {'in blocks':>10} {'in open':>9} {'% blocks':>9} "
+          f"{'mean speed':>11}")
+    for (ptype, patched), (ins, outs, n, spd) in sorted(stat.items()):
         total = ins + outs
         print(f"{ptype:>6} {('yes' if patched else 'control'):>8} {ins:>10} {outs:>9} "
-              f"{100 * ins / total:>11.1f}%")
-    print("\nA projectile that respects tileCollide is essentially never inside a solid tile.")
+              f"{100 * ins / total:>8.1f}% {spd / max(n, 1):>11.2f}")
+    print("\nA projectile that collides STOPS at the wall it hits, so it is sampled inside")
+    print("terrain repeatedly and its mean speed collapses. One that passes through keeps")
+    print("moving and is mostly sampled in open air. Speed is the clearer of the two.")
     return 0
 
 
