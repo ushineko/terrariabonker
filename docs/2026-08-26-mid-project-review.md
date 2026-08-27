@@ -253,6 +253,24 @@ subcommand list with the same exposure.
 
 ## 4. Suggested order of work
 
+> **All eight worked through, same day.** What each turned into:
+>
+> | # | Outcome |
+> |---|---|
+> | 1 | Three bugs fixed; two had regressions added, the third has no behavioural surface |
+> | 2 | `COMMANDS` now derived; 40 samples cover all 28 argv builders; a test fails if a builder has no sample |
+> | 3 | `layout.py` holds the szarray and Main offsets; `recipes` stops re-declaring Item offsets |
+> | 4 | One `qt_app` and one `gui_window` in conftest; 203 lines of scaffolding deleted; headless setup fixed |
+> | 5 | `client.replies()` / `client.error_in()`; `main_window` no longer imports `json` |
+> | 6 | **Partly rejected** — `unique`/`variants`/`_ALSO_VERIFIED` are tested capability, not dead. The cave path was genuinely uncovered and now has a test |
+> | 7 | Three source-grepping tests replaced with behaviour or AST; `getsource` is gone from the suite |
+> | 8 | Per-cheat arena protocol split into `arena_state.py`. `Service` and `MainWindow` deliberately untouched |
+>
+> Tests went 546 → 572. Four of the fixes needed a second or third attempt because the
+> first test passed against the bug — recorded in the commits, and the reason item 7 of
+> §5 (mutation-check new tests) is proposed as policy rather than left as habit.
+
+
 Ordered by (harm × cheapness), not by section:
 
 1. **Fix the three bugs in §1.** All small, all currently wrong.
