@@ -95,6 +95,7 @@ class Service:
         self._watch = None                   # live _VeinWatch, driven by watch_tick()
         self._proj_arr = None                # Main.projectile, kept once located (043)
         self._last_reel = 0.0                # when auto-catch last pulled a bobber in
+        self._seen_cast = False              # has a line been in the water this session?
 
     def invalidate(self) -> None:
         """Drop cached locate results; the next call rescans from scratch."""
@@ -1007,11 +1008,15 @@ class Service:
         this replaces caught the fish and re-cast twice on the same burst.
 
         ``recast`` also arms when the water is empty, which turns "take the fish" into
-        "keep fishing". It is off by default and gated by the caller (see
-        :meth:`watch_catch`): the game gives no signal for "the player meant to stop", so
-        an ungated recast follows them away from the lake. A cast is only reported when a
-        bobber actually appears -- arming is not casting, and an earlier version took
-        credit for the player's own casts by reporting the arm.
+        "keep fishing". It is off by default, and **gated here rather than by the caller**:
+        nothing is cast until a line has been seen in the water, so the cheat follows a
+        player who is fishing and does nothing at all to one standing at a lake holding a
+        rod. The gate lives in the round because both callers need it -- the CLI loops on
+        :meth:`watch_catch`, the panel drives this from a timer, and a gate in only one of
+        them is a cheat that behaves differently depending on which you use.
+
+        A cast is only reported when a bobber actually appears: arming is not casting, and
+        an earlier version took credit for the player's own casts by reporting the arm.
         """
         import time
 
@@ -1030,6 +1035,8 @@ class Service:
         end = time.time() + budget
         events: list[dict] = []
         while time.time() < end:
+            if not self._seen_cast and P.find_bobbers(self.mem, arr):
+                self._seen_cast = True          # the player has cast; recast may follow
             bite = P.find_bite(self.mem, arr)
             if bite is not None:
                 if p.auto_use_arm():
@@ -1043,7 +1050,7 @@ class Service:
                     while P.find_bite(self.mem, arr) and time.time() < end + 0.5:
                         time.sleep(0.01)
                 break
-            if (recast and not P.find_bobbers(self.mem, arr)
+            if (recast and self._seen_cast and not P.find_bobbers(self.mem, arr)
                     and time.time() - self._last_reel > self.CAST_SETTLE):
                 if p.auto_use_arm():
                     deadline = time.time() + self.CAST_CONFIRM
@@ -1059,31 +1066,31 @@ class Service:
         return {"events": events, "presses": p.auto_use_presses()}
 
     def catch_stop(self) -> dict:
-        """Forget the located projectile array. Called when the cheat goes off."""
+        """Forget the located array and the cast gate. Called when the cheat goes off.
+
+        The gate is deliberately reset: switching the cheat off and on again is the
+        player saying "start over", and a remembered "they have cast once" would have the
+        next session casting before they touched the rod.
+        """
         had, self._proj_arr = self._proj_arr is not None, None
+        self._seen_cast = False
         return {"stopped": had}
 
     def watch_catch(self, *, recast: bool = False, interval: float = 0.0,
                     rounds: int | None = None, on_event=None) -> dict:
         """Keep fishing. Blocking; the GUI drives :meth:`catch_tick` from a timer.
 
-        ``recast`` is gated here rather than in the tick: nothing is cast until the player
-        has cast once themselves. That way the loop follows a player who is fishing and
-        does nothing at all to one standing at a lake holding a rod.
+        The recast gate lives in :meth:`catch_tick`, so this and the panel behave the
+        same way.
         """
         import time
 
-        from terrariabonker import projectiles as P
-
-        n, caught, cast, missed, seen = 0, 0, 0, 0, False
+        n, caught, cast, missed = 0, 0, 0, 0
         while rounds is None or n < rounds:
             n += 1
-            if recast and not seen and self._proj_arr:
-                seen = bool(P.find_bobbers(self.mem, self._proj_arr))
-            for e in self.catch_tick(recast=recast and seen)["events"]:
+            for e in self.catch_tick(recast=recast)["events"]:
                 if e["what"] == "reel":
                     caught += 1
-                    seen = True
                 elif e.get("confirmed"):
                     cast += 1
                 else:

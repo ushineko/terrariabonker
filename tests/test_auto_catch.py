@@ -46,6 +46,7 @@ def _service(monkeypatch, water, patcher):
     svc.mem = object()
     svc._proj_arr = 0xC0FFEE
     svc._last_reel = 0.0
+    svc._seen_cast = True          # most tests are mid-session; the gate has its own test
     svc.patcher = lambda: patcher
     monkeypatch.setattr(P, "find_bobbers", lambda mem, arr: list(water))
     monkeypatch.setattr(P, "find_bite",
@@ -115,8 +116,41 @@ def test_recast_waits_until_the_player_has_cast_once(monkeypatch):
     """
     p = FakePatcher()
     svc = _service(monkeypatch, [], p)
+    svc._seen_cast = False
     got = svc.watch_catch(recast=True, rounds=3)
     assert p.arms == 0 and got["cast"] == 0
+
+
+def test_the_gate_lives_in_the_round_so_both_callers_share_it(monkeypatch):
+    """The panel drives catch_tick directly and never calls watch_catch.
+
+    With the gate in the loop instead, ticking the panel checkbox would cast at once
+    while the CLI waited -- the same cheat behaving differently depending on which
+    surface you used.
+    """
+    p = FakePatcher()
+    svc = _service(monkeypatch, [], p)
+    svc._seen_cast = False
+    svc.catch_tick(recast=True, budget=0.05)
+    assert p.arms == 0, "the tick cast without the player having cast first"
+
+
+def test_a_bobber_in_the_water_opens_the_gate(monkeypatch):
+    p = FakePatcher()
+    water = [_bobber(biting=False)]
+    svc = _service(monkeypatch, water, p)
+    svc._seen_cast = False
+    svc.catch_tick(recast=True, budget=0.05)
+    assert svc._seen_cast is True
+
+
+def test_switching_off_closes_the_gate_again(monkeypatch):
+    """Off and on again means start over, not "they cast once, minutes ago"."""
+    p = FakePatcher()
+    svc = _service(monkeypatch, [], p)
+    svc._seen_cast = True
+    svc.catch_stop()
+    assert svc._seen_cast is False
 
 
 def test_the_cheat_must_be_on(monkeypatch):
@@ -221,3 +255,47 @@ def test_a_cast_is_not_attempted_straight_after_a_reel(monkeypatch):
     svc._last_reel = time.time()
     got = svc.catch_tick(recast=True, budget=0.05)
     assert p.arms == 0 and got["events"] == []
+
+
+def test_the_cast_box_is_dead_until_reeling_is_on(qt_app, monkeypatch):
+    """"and cast" does nothing on its own — it is a modifier on the watch, not a cheat."""
+    w = _window(monkeypatch)
+    try:
+        assert not w.cb_recast.isEnabled()
+        w.cb_catch.setChecked(True)
+        assert w.cb_recast.isEnabled()
+        w.cb_catch.setChecked(False)
+        assert not w.cb_recast.isEnabled()
+    finally:
+        w.close()
+
+
+def test_the_cast_box_reaches_the_worker(qt_app, monkeypatch):
+    w = _window(monkeypatch)
+    try:
+        sent = []
+        w.helper.available = True
+        monkeypatch.setattr(w.helper, "request",
+                            lambda argv, cb: (sent.append(argv), cb("{}"), True)[-1])
+        w.cb_catch.setChecked(True)
+        w._tick_catch()
+        assert "--recast" not in sent[-1]
+        w.cb_recast.setChecked(True)
+        w._tick_catch()
+        assert "--recast" in sent[-1]
+    finally:
+        w.close()
+
+
+def test_the_panel_logs_a_cast_only_when_the_line_went_out(qt_app, monkeypatch):
+    w = _window(monkeypatch)
+    try:
+        w.helper.available = True
+        monkeypatch.setattr(
+            w.helper, "request",
+            lambda argv, cb: (cb('{"events": [{"what": "cast", "confirmed": false}]}'),
+                              True)[-1])
+        w._tick_catch()
+        assert "no line went out" in w.log.toPlainText()
+    finally:
+        w.close()

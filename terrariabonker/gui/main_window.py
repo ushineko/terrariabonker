@@ -404,6 +404,14 @@ class MainWindow(QWidget):
             "decides when. Switch it off and your own clicking is untouched."))
         self.cb_catch.toggled.connect(self._set_catch_watch)
         fb2.addWidget(self.cb_catch)
+        self.cb_recast = QCheckBox("and cast")
+        self.cb_recast.setToolTip(uitext.wrap(
+            "Casts again after each catch, so fishing runs on its own. It waits until "
+            "you have cast once yourself — it will not start casting while you are "
+            "standing about — and it stops the moment you untick 'Reel in for me'."))
+        self.cb_recast.setEnabled(False)
+        self.cb_catch.toggled.connect(self.cb_recast.setEnabled)
+        fb2.addWidget(self.cb_recast)
         fb2.addWidget(QLabel("Rod power"))
         self.sp_power = self._spin(1, 255, 255)
         self.sp_power.setToolTip(uitext.wrap(
@@ -831,9 +839,11 @@ class MainWindow(QWidget):
                     what = e.get("catch", 0)
                     name = names.name(what) if what > 0 else f"NPC {-what}"
                     self.log.appendPlainText(
-                        f"[catch] reeled in {name}")
+                        f"[catch] reeled in {name}" if e["what"] == "reel"
+                        else ("[catch] cast the line" if e.get("confirmed")
+                              else "[catch] tried to cast and no line went out"))
 
-        if not self.helper.request(client.catch_argv(), done):
+        if not self.helper.request(client.catch_argv(self.cb_recast.isChecked()), done):
             self._catch_inflight = False
 
     def _set_catch_watch(self, on: bool):
