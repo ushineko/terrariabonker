@@ -54,6 +54,13 @@ ITEM_KNOCKBACK = 0xB0   # float
 ITEM_SCALE = 0xCC       # float; size, which is also melee reach
 ITEM_SHOOTSPEED = 0x100  # float
 ITEM_MANA = 0x11C       # mana cost per use
+# Verified 2026-08-27 by reforging a Minishark to Sighted at the Goblin Tinkerer and
+# diffing the item: `crit` went 0 -> 3, which is exactly Sighted's +3, while damage went
+# 12 -> 13 (x1.1). Definitive, and the method the spec named -- no candidate was written
+# to find it. `armorPenetration` (0x154?) and `bonusTagDamage` (0x158?) are the next two
+# ints and are predicted by the same declaration order that placed crit correctly, but
+# Sighted grants neither, so neither was observed. They stay unwritten.
+ITEM_CRIT = 0x150       # crit chance bonus; ADDED by a modifier, not multiplied
 ITEM_DEFENSE = 0xD4     # defense the item grants (armor/some accessories; 0 otherwise)
 ITEM_CONSUMABLE = 0xBD  # byte bool; if set, the item is used up on use (careful!)
 ITEM_AUTOREUSE = 0xBE   # byte bool; auto-swing while the button is held
@@ -147,6 +154,7 @@ class Inventory:
         "scale": (ITEM_SCALE, "f32"),
         "shootspeed": (ITEM_SHOOTSPEED, "f32"),
         "mana": (ITEM_MANA, "i32"),
+        "crit": (ITEM_CRIT, "i32"),
     }
 
     def read_slot(self, index: int) -> Slot | None:
@@ -344,7 +352,11 @@ class Inventory:
         "scale": (("scale", ITEM_SCALE, "f32"),),
         "shootspeed": (("shootspeed", ITEM_SHOOTSPEED, "f32"),),
         "mana": (("mana", ITEM_MANA, "i32"),),
+        "crit": (("crit", ITEM_CRIT, "i32"),),
     }
+
+    #: Bonuses the game ADDS to the field rather than multiplying into it.
+    _PREFIX_ADDITIVE = frozenset({"crit"})
 
     def apply_prefix_stats(self, index: int, mults: dict, base: dict) -> dict:
         """Scale the item's fields by a modifier's multipliers, from ``base``.
@@ -375,17 +387,18 @@ class Inventory:
             if stat not in self._PREFIX_FIELDS:
                 skipped.append(stat)          # a bonus we have no verified offset for
         for stat, fields in self._PREFIX_FIELDS.items():
-            mult = mults.get(stat, 1.0)
+            additive = stat in self._PREFIX_ADDITIVE
+            amount = mults.get(stat, 0.0 if additive else 1.0)
             for key, off, kind in fields:
                 if key not in base:
                     skipped.append(key)
                     continue
-                value = base[key] * mult
+                value = base[key] + amount if additive else base[key] * amount
                 if kind == "i32":
                     self.mem.write_i32(addr + off, int(round(value)))
                 else:
                     self.mem.write_f32(addr + off, value)
-                if mult != 1.0:
+                if amount != (0.0 if additive else 1.0):
                     written[key] = value
         return {"written": written, "skipped": sorted(set(skipped))}
 

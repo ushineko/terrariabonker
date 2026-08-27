@@ -94,6 +94,7 @@ class Service:
         self._main_base = None               # cached Main static block (see tilemap())
         self._watch = None                   # live _VeinWatch, driven by watch_tick()
         self._proj_arr = None                # Main.projectile, kept once located (043)
+        self._template_addrs: dict = {}      # item type -> ContentSamples template address
         self._last_reel = 0.0                # when auto-catch last pulled a bobber in
         self._seen_cast = False              # has a line been in the water this session?
 
@@ -252,6 +253,38 @@ class Service:
                     return self.mem.read_u32(s.item_addr)
         return None
 
+    def _template_addr(self, item_type: int) -> int | None:
+        """Address of the ContentSamples template Item for this type, or None.
+
+        Split out of :meth:`_template_block` because a few fields a modifier scales sit
+        beyond the copied span (`crit` at 0x150, against a span ending at 0x140), so they
+        have to be read from the object rather than the block. Cached per type: this is a
+        full region scan, and it is the same answer every time within a session.
+        """
+        if item_type in self._template_addrs:
+            return self._template_addrs[item_type]
+        vt = self._item_vtable()
+        found = None
+        if vt is not None:
+            for start, end in self.mem.regions():
+                buf = self.mem.read(start, end - start)
+                n = len(buf) // 4
+                if n < 1:
+                    continue
+                arr = np.frombuffer(buf[: n * 4], dtype=np.int32)
+                for idx in np.where(arr == item_type)[0].tolist():
+                    off = idx * 4 - ITEM_TYPE
+                    if off < 0 or off + 4 > len(buf):
+                        continue
+                    if struct.unpack_from("<I", buf, off)[0] != vt:
+                        continue
+                    found = start + off
+                    break
+                if found:
+                    break
+        self._template_addrs[item_type] = found
+        return found
+
     def _template_block(self, item_type: int) -> bytes | None:
         """Field bytes of a pristine Item of this type (from ContentSamples).
 
@@ -291,12 +324,21 @@ class Service:
         block = self._template_block(item_type)
         if not block:
             return {}
+        addr = None
         out = {}
         for key, (off, kind) in Inventory.PREFIX_BASE_FIELDS.items():
+            fmt = "<i" if kind == "i32" else "<f"
             i = off - ITEM_COPY_LO
-            if i < 0 or i + 4 > len(block):
+            if 0 <= i and i + 4 <= len(block):
+                out[key] = struct.unpack_from(fmt, block, i)[0]
                 continue
-            out[key] = struct.unpack_from("<i" if kind == "i32" else "<f", block, i)[0]
+            # Past the copied span (crit): read it off the template object itself.
+            if addr is None:
+                addr = self._template_addr(item_type)
+            if addr:
+                raw = self.mem.read(addr + off, 4)
+                if len(raw) == 4:
+                    out[key] = struct.unpack(fmt, raw)[0]
         return out
 
     def _apply_prefix(self, invs: list[Inventory], slot: int, item_type: int,

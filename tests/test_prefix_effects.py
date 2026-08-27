@@ -12,9 +12,9 @@ import pytest
 from terrariabonker import prefixes
 from terrariabonker import service as S
 from terrariabonker.inventory import (ARR_DATA_OFF, ARR_LEN_OFF, INVENTORY_PTR_OFF,
-                                      ITEM_DAMAGE, ITEM_KNOCKBACK, ITEM_MANA, ITEM_PREFIX,
-                                      ITEM_SCALE, ITEM_TYPE, ITEM_USE_ANIM, ITEM_USE_TIME,
-                                      Inventory)
+                                      ITEM_CRIT, ITEM_DAMAGE, ITEM_KNOCKBACK, ITEM_MANA,
+                                      ITEM_PREFIX, ITEM_SCALE, ITEM_TYPE, ITEM_USE_ANIM,
+                                      ITEM_USE_TIME, Inventory)
 
 BASE = 0x80000000
 LIFE = BASE + 0x6000
@@ -26,7 +26,7 @@ GODLY, LARGE, HARD, QUICK = 59, 1, 62, 42
 SPIDER_STAFF = 3010
 #: A pristine Spider Staff, as ContentSamples would hand it over.
 BASE_STATS = {"damage": 9, "knockback": 2.2, "useanim": 25, "usetime": 25,
-              "scale": 1.0, "shootspeed": 0.0, "mana": 10}
+              "scale": 1.0, "shootspeed": 0.0, "mana": 10, "crit": 0}
 
 
 def _game(monkeypatch, stats=None):
@@ -49,12 +49,14 @@ def _game(monkeypatch, stats=None):
     svc.mem = m
     svc._live_inventory = lambda: inv
     svc._all_inventories = lambda: [inv]
-    # The template block the service reads base stats out of: a pristine item's bytes.
-    block = bytearray(S.ITEM_COPY_HI - S.ITEM_COPY_LO)
-    for key, (off, kind) in Inventory.PREFIX_BASE_FIELDS.items():
-        struct.pack_into("<i" if kind == "i32" else "<f", block, off - S.ITEM_COPY_LO,
-                         stats[key])
-    svc._template_block = lambda t: bytes(block)
+    # A pristine template ITEM, not just a block: `crit` lives at 0x150, past the copied
+    # span (0x1C..0x140), so the service reads it off the object. The fixture models that
+    # split rather than pretending every base stat is in the block.
+    template = ITEMS + 8 * STRIDE
+    _write_stats(m, template, stats)
+    svc._template_addr = lambda t: template
+    svc._template_block = lambda t: m.read(template + S.ITEM_COPY_LO,
+                                           S.ITEM_COPY_HI - S.ITEM_COPY_LO)
     svc._place_item = lambda *a, **k: None
     return m, svc, inv
 
@@ -66,6 +68,7 @@ def _write_stats(m, addr, stats):
     m.poke_i32(addr + ITEM_USE_TIME, stats["usetime"])
     m.write(addr + ITEM_SCALE, struct.pack("<f", stats["scale"]))
     m.poke_i32(addr + ITEM_MANA, stats["mana"])
+    m.poke_i32(addr + ITEM_CRIT, stats["crit"])
 
 
 def _read(m, key):
@@ -153,16 +156,32 @@ def test_an_accessory_modifier_writes_only_the_byte(monkeypatch):
     assert _read(m, "damage") == 9 and _read(m, "scale") == pytest.approx(1.0)
 
 
-def test_crit_is_reported_as_skipped_rather_than_silently_dropped(monkeypatch):
-    """crit/armorPen/tagDamage have unverified offsets, so they are not written.
+def test_crit_is_added_not_multiplied(monkeypatch):
+    """The game ADDS the crit bonus; multiplying a base of 0 would give 0 forever.
 
-    Named in the result instead: a modifier that quietly loses part of itself is the bug
-    this spec exists to fix, and doing it a second time in the fix would be worse.
+    Verified in-game by reforging a Minishark to Sighted: crit went 0 -> 3, exactly
+    Sighted's +3, which is also what pinned the offset at 0x150.
     """
+    m, svc, _inv = _game(monkeypatch)
+    svc.set_item(0, SPIDER_STAFF, prefix=GODLY)          # Godly is +5
+    assert _read(m, "crit") == 5
+
+
+def test_a_crit_bonus_does_not_compound_either(monkeypatch):
+    m, svc, _inv = _game(monkeypatch)
+    svc.set_item(0, SPIDER_STAFF, prefix=GODLY)
+    svc.set_item(0, SPIDER_STAFF, prefix=GODLY)
+    assert _read(m, "crit") == 5
+
+
+def test_the_two_offsets_still_unverified_are_reported_not_dropped(monkeypatch):
+    """armorPenetration and bonusTagDamage were never observed changing, so they are not
+    written -- and a modifier that grants one must say so rather than lose it quietly."""
     _m, svc, inv = _game(monkeypatch)
-    got = svc._apply_prefix([inv], 0, SPIDER_STAFF, GODLY)
-    assert "crit" in got["skipped"], got
-    assert set(got["written"]) == {"damage", "knockback"}
+    mults = {"damage": 1.1, "armorpen": 5.0}
+    got = inv.apply_prefix_stats(0, mults, dict(BASE_STATS))
+    assert "armorpen" in got["skipped"], got
+    assert "damage" in got["written"]
 
 
 def test_the_table_comes_from_the_game_and_covers_the_real_modifiers():

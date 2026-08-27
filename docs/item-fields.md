@@ -24,6 +24,7 @@ pattern.
 | `0x10C` | `useAmmo` | Pulse Bow 40 = Wooden Arrow, Boomstick 97 = Musket Ball |
 | `0x11C` | `mana` | Space Gun 6, Water Bolt 10 — both match the wiki exactly |
 | `0x124` | `value` | sell price in copper; Wooden Sword 100, Water Bolt 75000 |
+| `0x150` | `crit` | reforged a Minishark to Sighted in-game: 0 → 3, exactly Sighted's +3 |
 
 Two more, added while scoping the fishing cheat (spec 042) and verified the same way:
 
@@ -93,3 +94,35 @@ and mining speed), or patch the switch itself for one accessory at a time.
   first.
 - "Accessory options" as a data-driven feature is not available. Framing it that way in
   any UI would promise something the game does not store.
+
+
+## What a modifier writes (spec 046)
+
+A modifier is not a display value. `Item.Prefix` multiplies the item's own fields and
+stores the results, so the prefix byte at `+0x15C` is only the name the tooltip prints —
+which is why assigning it alone produced a Godly weapon with nothing Godly about it.
+
+Confirmed by reforging a **Minishark** to **Sighted** at the Goblin Tinkerer on
+1.4.5.8+24893155 and diffing the item's 512 bytes before and after. Sighted is
+`damage ×1.1, crit +3`:
+
+| Offset | Field | Before → after |
+|---|---|---|
+| `0x0AC` | `damage` | 12 → 13 (`round(12 × 1.1)`) |
+| `0x150` | `crit` | 0 → **3** — the +3 itself, which is what pins this offset |
+| `0x0F8` | `rare` | 2 → 3 — a modifier raises the rarity tier |
+| `0x124` | `value` | 350000 → 475844 |
+| `0x15C` | `prefix` | 0 → 16 |
+
+Nothing was written to find this: the game was allowed to do it and the bytes were read
+afterwards, which is the only way to pin an offset without risking an item on a guess.
+
+**`armorPenetration` (`0x154`?) and `bonusTagDamage` (`0x158`?)** are the next two ints and
+are predicted by the same declaration order that placed `crit` correctly — but Sighted
+grants neither, so neither was observed changing. They remain unwritten. A reforge that
+rolls a modifier granting one would settle them the same way.
+
+**The game reforges from the item's current stats, not from its base.** The Minishark had
+been edited to damage 12 (its template base is 6), and Sighted took it to 13 — `12 × 1.1`,
+not `6 × 1.1`. In a vanilla game the two are the same number and the distinction never
+appears; it only shows on an item a trainer has already touched.
