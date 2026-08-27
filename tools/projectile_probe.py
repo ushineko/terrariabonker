@@ -97,7 +97,8 @@ def main() -> int:
     # Speed is the honest half of this: "inside a block" reads backwards, because a
     # projectile that COLLIDES stops at the wall it hit and is then sampled there
     # repeatedly, while one that passes through spends its life in open air.
-    stat = collections.defaultdict(lambda: [0, 0, 0, 0.0])
+    stat = collections.defaultdict(lambda: [0, 0, 0, 0.0, 0.0])
+    last = {}                  # slot -> (position, type), for actual displacement
     t0 = said = time.time()
     while time.time() - t0 < args.seconds:
         for slot, obj in enumerate(struct.unpack("<1001I", mem.read(arr + 0x10, 4004))):
@@ -123,6 +124,13 @@ def main() -> int:
             row[0 if solid else 1] += 1
             row[2] += 1
             row[3] += (vx * vx + vy * vy) ** 0.5
+            # Displacement, not velocity. A projectile pinned against a wall keeps a
+            # velocity vector while going nowhere, so velocity cannot answer "is it
+            # moving" -- which is the question collision actually raises.
+            prev = last.get(slot)
+            if prev and prev[1] == ptype:
+                row[4] += ((x - prev[0][0]) ** 2 + (y - prev[0][1]) ** 2) ** 0.5
+            last[slot] = ((x, y), ptype)
         if time.time() - said > 10:                    # a heartbeat, so it is visibly alive
             said = time.time()
             live = sum(r[2] for r in stat.values())
@@ -133,14 +141,15 @@ def main() -> int:
         print("nothing was flying. Fire something while this runs.")
         return 0
     print(f"{'type':>6} {'patched':>8} {'in blocks':>10} {'in open':>9} {'% blocks':>9} "
-          f"{'mean speed':>11}")
-    for (ptype, patched), (ins, outs, n, spd) in sorted(stat.items()):
+          f"{'velocity':>9} {'moved/sample':>13}")
+    for (ptype, patched), (ins, outs, n, spd, moved) in sorted(stat.items()):
         total = ins + outs
         print(f"{ptype:>6} {('yes' if patched else 'control'):>8} {ins:>10} {outs:>9} "
-              f"{100 * ins / total:>8.1f}% {spd / max(n, 1):>11.2f}")
-    print("\nA projectile that collides STOPS at the wall it hits, so it is sampled inside")
-    print("terrain repeatedly and its mean speed collapses. One that passes through keeps")
-    print("moving and is mostly sampled in open air. Speed is the clearer of the two.")
+              f"{100 * ins / total:>8.1f}% {spd / max(n, 1):>9.2f} {moved / max(n, 1):>13.3f}")
+    print("\n'moved/sample' is the honest column: a projectile stopped by a wall keeps a")
+    print("velocity vector while going nowhere, so velocity cannot tell you whether it is")
+    print("moving. In vanilla, a colliding aiStyle-1 projectile usually DIES on impact,")
+    print("so a patched group that persists LONGER is evidence against plain collision.")
     return 0
 
 
