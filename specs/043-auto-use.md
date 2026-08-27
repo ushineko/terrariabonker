@@ -1,6 +1,6 @@
 # Spec 043: Auto-use — press the use button from inside the frame
 
-**Status**: INCOMPLETE — specified, not started.
+**Status**: COMPLETE — every acceptance criterion verified against the running game on 1.4.5.8+24893155. Auto-use ships switched off, and auto-catch is built on it.
 
 > **Note**: No issue tracker ticket (personal utility).
 
@@ -44,8 +44,10 @@ The poller wins by volume. A stub is correct by construction.
 - [x] Disabling restores the displaced bytes with the game still running, and the game
       keeps running. *(Enable, test, disable, and the extractor put back after — all in
       one session with the game live.)*
-- [ ] The stub does not run when no player is loaded (a title-screen frame must not write
-      through a null player).
+- [x] The stub does not run when no player is loaded (a title-screen frame must not write
+      through a null player). *(At the main menu, armed 50 times: zero presses, the game
+      unharmed, and the arm flag left untouched — `Player.Update` is not called, so the
+      stub cannot run and there is no null player to write through.)*
 - [x] CPU cost is indistinguishable from the cheat being off, measured rather than assumed.
       *(19.70 ms CPU per 1000 frames both on and off, medians equal and ranges
       overlapping, across four alternating windows each. An earlier attempt reported
@@ -391,6 +393,30 @@ Moved to `0x600`/`0x604`/`0x608`, with a test that computes the extractor's exte
 than trusting a comment. This is the second collision in this spec — the first put a stub
 on top of a live one — and both came from choosing a constant without checking what was
 already there. The arena is shared memory and needs to be read as such.
+
+## The title screen, and the press that waits — 2026-08-26
+
+Armed 50 times at the main menu with the cheat enabled:
+
+```
+presses 23 -> 23 (delta 0)
+arm flag still set: True
+game alive after: True
+```
+
+The criterion passes for the reason the design predicted: `this` comes from
+`Player.Update`'s own frame, so either the method runs with a real player or it does not
+run at all. There is no null player to write through because there is no frame.
+
+**But the flag sat there set**, and that is a bug the passing test found. An arm is a
+promise to press on the *next* frame, and frames stop — at the menu, in a world load. A
+promise left waiting fires the moment the game starts updating again: a press the player
+did not ask for, arriving at a moment nobody was thinking about, most likely as their
+character appears in the world.
+
+So `auto_use_disarm()` exists, `catch_stop()` calls it when the switch goes off, and
+enabling clears the word rather than inheriting whatever a previous run left — the arena
+outlives the trainer, so a stale arm word is a real state, not a hypothetical one.
 
 ## Alternatives considered
 

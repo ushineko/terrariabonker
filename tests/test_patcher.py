@@ -756,3 +756,27 @@ def test_the_arena_data_slots_do_not_overlap(game):
         assert off not in ore, f"{off:#x} is inside the extractor's queue"
         assert off + 4 <= P.Patcher.ARENA_STUBS_OFF, f"{off:#x} runs into the stub slots"
     assert len(set(auto)) == len(auto)
+
+
+def test_enabling_does_not_inherit_a_pending_press(game):
+    """An arena survives the trainer, so a stale arm word would fire on the first frame."""
+    m, p = game
+    _plant_auto_use(m, p)
+    m.write(p.arena() + P.AUTO_USE_ARMED_OFF, b"\x01\x00\x00\x00")
+    p.enable("auto_use")
+    assert m.read_i32(p.arena() + P.AUTO_USE_ARMED_OFF) == 0
+
+
+def test_disarm_drops_a_press_that_has_not_landed(game):
+    """Frames stop -- at the menu, in a world load. A promise to press must not wait.
+
+    Found by arming 50 times at the title screen: nothing consumed any of them, and the
+    flag sat set, ready to fire the moment a world loaded.
+    """
+    m, p = game
+    _plant_auto_use(m, p)
+    p.enable("auto_use")
+    p.auto_use_arm()
+    assert p.auto_use_armed()
+    p.auto_use_disarm()
+    assert not p.auto_use_armed()

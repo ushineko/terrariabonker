@@ -1085,6 +1085,9 @@ class Service:
         """
         had, self._proj_arr = self._proj_arr is not None, None
         self._seen_cast = False
+        p = self.patcher()
+        if p.is_enabled("auto_use"):
+            p.auto_use_disarm()      # a press promised but not yet landed is not wanted
         return {"stopped": had}
 
     def watch_catch(self, *, recast: bool = False, interval: float = 0.0,

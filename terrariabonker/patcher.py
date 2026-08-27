@@ -721,6 +721,7 @@ def _auto_use_body(patcher, inj) -> bytes:
     count = patcher.arena() + AUTO_USE_COUNT_OFF
     release = patcher.arena() + AUTO_USE_RELEASE_OFF
     patcher.mem.write_i32(release, RELEASE_ITEM_OFF)
+    patcher.mem.write_i32(armed, 0)      # never inherit a pending press from a past run
     tail = (b"\xc6\x80" + _u32(USE_ITEM_OFF) + b"\x01"   # mov byte [eax+0x672],1
             # ...and the release flag, so the game reads a fresh press rather than a hold.
             # Its offset lives in the arena rather than in the instruction so a candidate
@@ -1679,6 +1680,19 @@ class Patcher:
         if not self._arena:
             return False
         return self.mem.write_i32(self._arena + AUTO_USE_ARMED_OFF, 1)
+
+    def auto_use_disarm(self) -> bool:
+        """Drop any press that has not landed yet.
+
+        An arm is a promise to press on the *next frame*, and frames stop -- at the title
+        screen, in a menu, on a world load. Left set, the flag waits and fires the moment
+        the game starts updating again, which is a press the player did not ask for
+        arriving at a moment nobody was thinking about. Found by arming 50 times at the
+        menu: nothing was consumed, and the flag sat there ready.
+        """
+        if not self._arena:
+            return False
+        return self.mem.write_i32(self._arena + AUTO_USE_ARMED_OFF, 0)
 
     def auto_use_armed(self) -> bool:
         """Is a press still waiting for a frame? Clears itself when the stub runs."""

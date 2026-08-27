@@ -26,6 +26,7 @@ class FakePatcher:
         self.enabled = enabled
         self.arms = 0
         self.presses = 0
+        self.disarmed = False
 
     def is_enabled(self, name):
         return self.enabled and name == "auto_use"
@@ -40,6 +41,10 @@ class FakePatcher:
 
     def auto_use_presses(self):
         return self.presses
+
+    def auto_use_disarm(self):
+        self.disarmed = True
+        return True
 
 
 def _bobber(*, biting, catch=2290, slot=3):
@@ -170,11 +175,12 @@ def test_the_cheat_must_be_on(monkeypatch):
         svc.catch_tick()
 
 
-def test_stop_forgets_the_located_array(monkeypatch):
+def test_stop_forgets_the_located_array_and_drops_a_pending_press(monkeypatch):
     p = FakePatcher()
     svc = _service(monkeypatch, [], p)
     assert svc.catch_stop() == {"stopped": True}
     assert svc._proj_arr is None
+    assert p.disarmed, "a press promised before the switch went off would still land"
 
 
 # --- the panel switch ---------------------------------------------------------
