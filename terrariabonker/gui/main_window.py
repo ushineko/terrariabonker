@@ -12,7 +12,6 @@ keep alive, no GC landmines, and the child is a real OS process we can signal.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -744,14 +743,7 @@ class MainWindow(QWidget):
 
         def done(raw: str):
             self._vein_inflight = False
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line.startswith("{"):
-                    continue
-                try:
-                    got = json.loads(line)
-                except ValueError:
-                    continue
+            for got in client.replies(raw):
                 for e in got.get("events", []):
                     at = e.get("at", ["?", "?"])
                     self.log.appendPlainText(
@@ -773,14 +765,7 @@ class MainWindow(QWidget):
 
         def done(raw: str):
             self._potion_inflight = False
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line.startswith("{"):
-                    continue
-                try:
-                    got = json.loads(line)
-                except ValueError:
-                    continue
+            for got in client.replies(raw):
                 # Only the transitions are worth saying: this runs four times a second,
                 # and "renewed" every round would bury everything else in the log.
                 for e in got.get("added", []):
@@ -807,14 +792,7 @@ class MainWindow(QWidget):
 
         def done(raw: str):
             self._fishing_inflight = False
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line.startswith("{"):
-                    continue
-                try:
-                    got = json.loads(line)
-                except ValueError:
-                    continue
+            for got in client.replies(raw):
                 for what, e in (got.get("kit") or {}).get("gave", {}).items():
                     self.log.appendPlainText(
                         f"[fishing] gave you a {what} (slot {e['slot']})")
@@ -841,17 +819,11 @@ class MainWindow(QWidget):
 
         def done(raw: str):
             self._buff_inflight = False
-            for line in raw.splitlines():
-                line = line.strip()
-                if line.startswith("[ERROR]"):
-                    self.log.appendPlainText(f"[fishing] {line[len('[ERROR]'):].strip()}")
-                    return
-                if not line.startswith("{"):
-                    continue
-                try:
-                    got = json.loads(line)
-                except ValueError:
-                    continue
+            err = client.error_in(raw)
+            if err is not None:
+                self.log.appendPlainText(f"[fishing] {err}")
+                return
+            for got in client.replies(raw):
                 # Say a deferral once per effect. It happens on every round while the
                 # potion runs, and eight minutes of it would bury the panel.
                 for d in got.get("deferred", []):
@@ -890,21 +862,15 @@ class MainWindow(QWidget):
 
         def done(raw: str):
             self._catch_inflight = False
-            for line in raw.splitlines():
-                line = line.strip()
-                if line.startswith("[ERROR]"):
-                    # The commonest case by far: Auto-use is off, so nothing can press
-                    # anything. Say it once and untick, rather than logging the same line
-                    # every 50 ms until the player notices.
-                    self.log.appendPlainText(f"[catch] {line[len('[ERROR]'):].strip()}")
-                    self.cb_catch.setChecked(False)
-                    return
-                if not line.startswith("{"):
-                    continue
-                try:
-                    got = json.loads(line)
-                except ValueError:
-                    continue
+            err = client.error_in(raw)
+            if err is not None:
+                # The commonest case by far: Auto-use is off, so nothing can press
+                # anything. Say it once and untick, rather than logging the same line
+                # every 50 ms until the player notices.
+                self.log.appendPlainText(f"[catch] {err}")
+                self.cb_catch.setChecked(False)
+                return
+            for got in client.replies(raw):
                 for e in got.get("events", []):
                     self._catch_n += 1
                     what = e.get("catch", 0)
@@ -951,14 +917,7 @@ class MainWindow(QWidget):
             self.helper.request(client.fishing_restore_argv(), self._said_restored)
 
     def _said_restored(self, raw: str):
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line.startswith("{"):
-                continue
-            try:
-                got = json.loads(line)
-            except ValueError:
-                continue
+        for got in client.replies(raw):
             for d in (got.get("restore") or {}).get("restored", []):
                 self.log.appendPlainText(
                     f"[fishing] rod in slot {d['slot']} back to power {d['power']}")
@@ -1214,7 +1173,7 @@ class MainWindow(QWidget):
                 if self._restore_attempts < RESTORE_RETRIES:
                     QTimer.singleShot(2000, self._do_restore)
                     return
-                if "[ERROR]" in out:
+                if client.error_in(out) is not None:
                     self.log.appendPlainText(f"[auto-restore FAILED] {out.strip()}")
                 return
             if self._restore_attempts == 1 and (rep["cheats"] or rep["items"]
@@ -1416,9 +1375,10 @@ class MainWindow(QWidget):
         def done(out):
             if out.strip():
                 self.log.appendPlainText(out.rstrip())
-            if "[ERROR]" in out:
-                msg = out.split("[ERROR]", 1)[1].strip() or "the write was refused"
-                QMessageBox.warning(self, "Slot changed in-game", msg)
+            msg = client.error_in(out)
+            if msg is not None:
+                QMessageBox.warning(self, "Slot changed in-game",
+                                    msg or "the write was refused")
                 self.refresh_inventory()
             self.refresh_status()
 

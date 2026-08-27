@@ -88,3 +88,26 @@ def test_gui_client_is_toolkit_free():
     forbidden = {"PyQt6", "PyQt5", "PySide6"}
     leaked = _imported_roots(SRC / "gui" / "client.py") & forbidden
     assert not leaked, f"gui/client.py imports {sorted(leaked)}; keep it toolkit-free"
+
+
+def test_the_panel_does_not_parse_worker_replies_itself():
+    """The reply contract belongs to client.py, which exists to own it.
+
+    Six tick handlers in main_window each carried their own copy of the walk-the-lines,
+    json.loads, swallow-ValueError loop, and four sniffed for "[ERROR]" by substring --
+    one of them against a {"error": ...} shape the worker never sends. Read from the AST,
+    not the source text (§3.1 of the mid-project review).
+    """
+    import ast
+    from pathlib import Path
+
+    from terrariabonker.gui import main_window
+
+    tree = ast.parse(Path(main_window.__file__).read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "loads":
+            root = getattr(node.value, "id", "")
+            assert root != "json", "main_window parses worker JSON itself; use client.replies"
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            assert "[ERROR]" not in node.value, \
+                "main_window matches the error prefix itself; use client.error_in"

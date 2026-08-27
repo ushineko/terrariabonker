@@ -301,6 +301,45 @@ SAMPLE_ARGVS: list[tuple[str, str, list[str]]] = [
 COMMANDS: set[str] = {cmd for _name, cmd, _argv in SAMPLE_ARGVS}
 
 
+def replies(raw: str) -> list[dict]:
+    """Every JSON object the worker sent back, in order.
+
+    The worker answers with a line of JSON, sometimes preceded by human-readable output,
+    so a reply is parsed by walking the lines and keeping the ones that decode. Six tick
+    handlers in the panel each had their own copy of this loop -- the contract this module
+    exists to own, restated six times where it could drift six ways.
+    """
+    # Only lines starting with "{" are considered, so anything that decodes is an object;
+    # a JSON array or bare string on its own line is skipped before parsing rather than
+    # filtered afterwards. (An isinstance guard here was unreachable for that reason.)
+    out = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            got = json.loads(line)
+        except ValueError:
+            continue
+        out.append(got)
+    return out
+
+
+def error_in(raw: str) -> str | None:
+    """The worker's error message, or None.
+
+    The privileged side reports failure as an ``[ERROR] ...`` line (see `cli._serve_reply`),
+    which is the only contract there is -- so it is decoded here rather than string-matched
+    at four call sites, one of which was written against a `{"error": ...}` shape that the
+    worker never sends.
+    """
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.startswith("[ERROR]"):
+            return line[len("[ERROR]"):].strip() or "the worker reported an error"
+    return None
+
+
 def build_banner(status: dict | None, known_build: str) -> str:
     """One line describing how the running build stands, or "" when all is well.
 

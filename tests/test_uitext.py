@@ -55,3 +55,40 @@ def test_cheat_notes_do_not_repeat_what_the_group_tooltip_says():
     from terrariabonker.patcher import PATCH_CATALOG
     repeated = [n for n, i in PATCH_CATALOG.items() if "restart clears" in i.note.lower()]
     assert repeated == [], repeated
+
+
+# --- the worker reply contract (mid-project review §2.2) ----------------------
+
+def test_replies_returns_every_json_object_in_order():
+    from terrariabonker.gui import client
+
+    raw = 'starting up\n{"a": 1}\n[extract] noise\n{"b": 2}\n'
+    assert client.replies(raw) == [{"a": 1}, {"b": 2}]
+
+
+def test_replies_skips_what_does_not_decode():
+    """Half-written and non-JSON lines are normal: the worker prints human output too."""
+    from terrariabonker.gui import client
+
+    # A JSON array or bare string on its own line decodes fine but is not a reply; both
+    # are skipped by the leading-brace filter before parsing, so a caller can always
+    # `.get()` what comes back.
+    assert client.replies('{"a": 1}\n{not json\n[1, 2]\n"a string"\n') == [{"a": 1}]
+
+
+def test_replies_on_nothing_is_empty_not_an_error():
+    from terrariabonker.gui import client
+
+    assert client.replies("") == [] and client.replies("no json here") == []
+
+
+def test_error_in_reads_the_prefix_the_worker_actually_sends():
+    """`[ERROR] <msg>` is the contract (cli._serve_reply). A panel handler was written
+    against a {"error": ...} reply that does not exist."""
+    from terrariabonker.gui import client
+
+    assert client.error_in("[ERROR] the auto-use cheat is not enabled") == \
+        "the auto-use cheat is not enabled"
+    assert client.error_in('out\n[ERROR] refused\n') == "refused"
+    assert client.error_in("[ERROR]") == "the worker reported an error"
+    assert client.error_in('{"ok": true}') is None
