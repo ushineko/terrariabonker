@@ -150,7 +150,29 @@ is unresolved. It is not the offset and not the write; the candidates are that t
 consumed at spawn, or that `aiStyle 1` reaches the tile check by a path the flag does not
 gate.
 
-`tools/projectile_probe.py` answers it without anyone watching a clock:
+**First A/B result, and it does not say what either prediction expected.** With
+`tileCollide` forced to 1 on even-numbered slots and odd slots left alone, over 90 seconds
+of firing:
+
+| group | in blocks | in open | % in blocks | mean speed |
+|---|---|---|---|---|
+| control (flag left at 0) | 0 | 3561 | 0.0% | 3.39 |
+| patched (flag forced to 1) | 3672 | 8288 | 30.7% | 3.79 |
+
+The patched skulls are **not stopping** — their mean speed is if anything slightly higher.
+So "forcing the flag makes them collide" is not supported. But they also behave differently
+from the control in two ways: they are sampled 3.4× as often (so they persist longer) and
+they spend a third of that time inside terrain, which the control never does at all.
+
+**This experiment is missing its control.** The split is by slot parity, and no run has been
+done with the same split and *nothing written*, so an even/odd difference unrelated to the
+edit has not been ruled out. Until that null run exists, the table above is an observation
+and not a finding. Two attempts at it caught no projectiles.
+
+`tools/projectile_probe.py` is how to do both, without anyone watching a clock:
+
+    sudo python3 tools/projectile_probe.py --type 837 --ab --watch     # the null run
+    sudo python3 tools/projectile_probe.py --type 837 --set tileCollide=1 --ab
 
     sudo python3 tools/projectile_probe.py --type 837 --set tileCollide=1 --ab
 
