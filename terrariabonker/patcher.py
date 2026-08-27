@@ -1273,12 +1273,7 @@ class Patcher:
 
         va = resolve_export(self.mem, "kernel32", "VirtualAlloc")
         base = self._free_base(self.ARENA_SIZE)
-        inj = INJECTIONS["ore_extract"]
-        # + inject_off, like every other caller. Without it the springboard lands on the
-        # anchor's first byte instead of the injection point -- for an anchor whose match
-        # starts 0x15 before the site, that is a jump written into the middle of another
-        # instruction, and the restore afterwards leaves the displaced bytes there.
-        site = self._resolve(inj.anchor) + inj.inject_off
+        site, overwrite = self._springboard()
         body = (b"\x60"                                  # pushad
                 + b"\x6a\x40"                            # push PAGE_EXECUTE_READWRITE
                 + b"\x68" + _u32(0x3000)                 # push MEM_COMMIT|MEM_RESERVE
@@ -1287,10 +1282,10 @@ class Patcher:
                 + b"\xb8" + _u32(va)                     # mov eax,VirtualAlloc
                 + b"\xff\xd0"                            # call eax (stdcall: callee cleans)
                 + b"\x61"                                 # popad
-                + inj.overwrite)
+                + overwrite)
         stub_len = len(body) + 5
         cave = self._find_cave(stub_len)
-        self._check_site(site, inj.overwrite, "arena bootstrap")
+        self._check_site(site, overwrite, "arena bootstrap")
         self.mem.write(cave, body + b"\xe9" + self._rel32(cave + len(body), site + 5))
         self.mem.write(site, b"\xe9" + self._rel32(site + 5, cave))
         if on_wait:
@@ -1302,7 +1297,7 @@ class Patcher:
                     break
                 time.sleep(0.05)
         finally:
-            self.mem.write(site, inj.overwrite)      # unhook first, always
+            self.mem.write(site, overwrite)          # unhook first, always
             self.mem.write(cave, b"\xcc" * stub_len)
         row = self._mapped(base)
         if not row:
@@ -1317,6 +1312,43 @@ class Patcher:
         self._arena = base
         self._save_state()
         return base
+
+    #: Where to hang the VirtualAlloc springboard: (anchor, offset, the bytes there).
+    #: Each must be a per-frame site whose bytes carry no relative address, so they can be
+    #: replayed from the temporary stub. The first is deliberately NOT any injection's hook
+    #: site -- it is inside the borders_movement anchor but past auto-use's 13 displaced
+    #: bytes, at the instruction auto-use's stub jumps back to, so it is executed every
+    #: frame whether that cheat is on or off. The extractor's site is kept as a fallback
+    #: for a build where borders_movement does not resolve.
+    SPRINGBOARDS = (
+        ("borders_movement", 0x12, _b("8B 45 08 D9 EE")),
+        ("grabitems_call", 0x15, _b("89 04 24 8B C0")),
+    )
+
+    def _springboard(self) -> tuple[int, bytes]:
+        """A per-frame site to hang the bootstrap on, and the bytes it displaces.
+
+        Candidates are tried in order and one whose bytes are not what we expect is
+        SKIPPED, not forced: the commonest reason is that a cheat is already hooked there.
+        The bootstrap used the extractor's own injection site, so a player with the ore
+        extractor enabled and no arena to adopt could not allocate one at all -- latent
+        until the arena stamp changed and forced a fresh allocation into a session whose
+        cheats had been restored on launch.
+        """
+        tried = []
+        for key, off, expect in self.SPRINGBOARDS:
+            try:
+                site = self._resolve(key) + off
+            except PatchError as e:
+                tried.append(f"{key}: {e}")
+                continue
+            got = self.mem.read(site, len(expect))
+            if got == expect:
+                return site, expect
+            tried.append(f"{key}+{off:#x}: bytes are {got.hex()}, expected "
+                         f"{expect.hex()} (something is hooked there)")
+        raise PatchError("no free springboard site for the arena bootstrap: "
+                         + "; ".join(tried))
 
     def slot_for(self, name: str, site: int = 0) -> int:
         """Where a given injection's stub lives in the arena.

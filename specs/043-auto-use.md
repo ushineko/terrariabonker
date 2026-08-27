@@ -277,8 +277,20 @@ because an arena always already existed to adopt; bumping the stamp to `TBARENA2
 fresh allocation into a session whose cheats had been auto-restored on launch.
 
 Worked around for the test by disabling the extractor, bootstrapping, and putting it back.
-That is not a fix, and it should not be one: **the bootstrap needs a springboard site that
-is not also a cheat's hook site**, or it must pick a free per-frame site at bootstrap time.
+**Fixed properly after v0.36.0:** the bootstrap now has its own springboard, and a list of
+candidates rather than one hard-wired site.
+
+The first candidate is inside the `borders_movement` anchor at `+0x12` — past auto-use's
+13 displaced bytes, at `8B 45 08 D9 EE`, which is the instruction auto-use's own stub jumps
+back to. So it runs every frame whether that cheat is on or off, it belongs to no
+injection, and its two instructions carry no relative address. The extractor's site stays
+as a fallback for a build where `borders_movement` does not resolve.
+
+A candidate whose bytes are not what is expected is **skipped rather than forced**, since
+the commonest reason for a mismatch is that something is hooked there, and each entry
+carries the bytes it expects alongside its offset — so a wrong offset is a mismatch rather
+than a jump into the middle of an instruction. Confirmed live with the ore extractor and
+auto-use both enabled: a fresh arena allocated, stamped and mapped, game unharmed.
 Any user with the extractor on and no adoptable arena hits this today.
 
 ### What auto-catch still needs before it is a cheat

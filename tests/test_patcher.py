@@ -459,22 +459,63 @@ def test_pylons_is_a_build_section_cheat():
     assert "pylons" in build
 
 
-def test_the_arena_bootstrap_hooks_the_injection_point_not_the_anchor():
+def test_the_arena_bootstrap_lands_on_the_bytes_it_will_restore(game):
     """The bug this guards cost a morning and looked like a game update.
 
-    `arena()` borrows the extractor's site for its springboard. It resolved the anchor but
-    never added `inject_off`, which was harmless while that injection hooked an anchor at
-    offset 0 — and became a jump written 0x15 bytes early the moment the injection moved
-    to an anchor whose match starts before the site. It landed in the middle of
-    `Player.Update`'s dead-check, a method that runs every frame, so the game died
-    instantly on every launch that auto-restored the cheat.
-    """
-    import inspect
-    from terrariabonker import patcher as P
+    `arena()` used to resolve the extractor's anchor and never add `inject_off`, which was
+    harmless while that injection hooked an anchor at offset 0 -- and became a jump written
+    0x15 bytes early the moment the injection moved to an anchor whose match starts before
+    the site. It landed in the middle of `Player.Update`'s dead-check, so the game died on
+    every launch that auto-restored the cheat.
 
-    src = inspect.getsource(P.Patcher.arena)
-    assert "inj.inject_off" in src, \
-        "arena() resolves the anchor without adding inject_off — it will hook the wrong byte"
+    Each springboard now carries its own offset AND the bytes expected there, so a wrong
+    offset is a mismatch rather than a jump into the middle of an instruction.
+    """
+    m, p = game
+    m.write(CODE + 0x900, ANCHORS["borders_movement"].pattern.raw)
+    key, off, expect = P.Patcher.SPRINGBOARDS[0]
+    assert key == "borders_movement"
+    m.write(CODE + 0x900 + off, expect)
+    site, overwrite = p._springboard()
+    assert site == CODE + 0x900 + off
+    assert overwrite == expect
+    assert m.read(site, len(expect)) == expect, "the springboard would restore other bytes"
+
+
+def test_the_bootstrap_skips_a_springboard_that_is_already_hooked(game):
+    """A player with the ore extractor on and no arena to adopt could not allocate one.
+
+    The bootstrap hung off that cheat's own injection site, so when it was enabled the
+    site held a jump and _check_site refused -- correctly, and fatally. Latent until the
+    arena stamp changed and forced a fresh allocation into a session whose cheats had been
+    restored on launch.
+    """
+    m, p = game
+    m.write(CODE + 0x900, ANCHORS["borders_movement"].pattern.raw)
+    _, off, expect = P.Patcher.SPRINGBOARDS[0]
+    m.write(CODE + 0x900 + off, b"\xe9\x00\x00\x00\x00")      # somebody is hooked here
+    m.write(CODE + 0x500, ANCHORS["grabitems_call"].pattern.raw)
+    key2, off2, expect2 = P.Patcher.SPRINGBOARDS[1]
+    m.write(CODE + 0x500 + off2, expect2)
+    site, overwrite = p._springboard()
+    assert site == CODE + 0x500 + off2, "it did not fall back to the second candidate"
+    assert overwrite == expect2
+
+
+def test_no_springboard_is_an_error_naming_what_was_tried(game):
+    """Silence here would look like a hang: the bootstrap waits on a frame that never runs."""
+    m, p = game
+    with pytest.raises(PatchError) as e:
+        p._springboard()
+    assert "springboard" in str(e.value)
+
+
+def test_the_first_springboard_is_not_an_injection_site(game):
+    """The point of the fix: the bootstrap must not depend on a cheat being switched off."""
+    key, off, _ = P.Patcher.SPRINGBOARDS[0]
+    for inj in P.INJECTIONS.values():
+        assert not (inj.anchor == key and inj.inject_off == off), \
+            f"{inj.name} hooks the springboard site"
 
 
 def test_a_jump_is_never_written_over_bytes_we_would_not_put_back(game):
