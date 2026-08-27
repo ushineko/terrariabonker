@@ -365,3 +365,47 @@ def test_reeling_does_not_need_a_rod_in_hand(monkeypatch):
     svc._live_inventory = lambda: FakeInventory(holding=False)
     got = svc.catch_tick(budget=0.05)
     assert p.arms == 1 and got["events"][0]["what"] == "reel"
+
+
+# --- characterization before the split (spec 045) -----------------------------
+
+def test_a_tick_takes_the_bite_or_casts_but_never_both(monkeypatch):
+    """One tick, one press. The two paths are separated by a `break` today; after the
+    split they are two methods, and nothing else would stop both running.
+
+    Arming twice in a tick would reel the fish and immediately re-cast into the same
+    frame -- the poller's exact failure, which the stub exists to avoid.
+    """
+    p = FakePatcher()
+    water = [_bobber(biting=True)]
+    svc = _service(monkeypatch, water, p)
+    got = svc.catch_tick(recast=True, budget=0.05)
+    assert p.arms == 1, f"armed {p.arms} times in one tick"
+    assert [e["what"] for e in got["events"]] == ["reel"]
+
+
+def test_the_reel_waits_out_the_bite_instead_of_arming_again(monkeypatch):
+    """The pull sets ai[0] a frame later, so the bite still reads as live immediately
+    after arming. Without the wait, the same fish is armed for repeatedly."""
+    p = FakePatcher()
+    water = [_bobber(biting=True)]
+    svc = _service(monkeypatch, water, p)
+    svc.catch_tick(budget=0.05)
+    assert p.arms == 1, "the same bite was armed for more than once"
+
+
+def test_the_presses_reported_are_the_stubs_own_count(monkeypatch):
+    """Not our count of arms: a caller that armed and reads back fewer presses knows the
+    press did not happen, which is the whole point of the stub keeping the tally."""
+    p = FakePatcher()
+    svc = _service(monkeypatch, [_bobber(biting=True)], p)
+    got = svc.catch_tick(budget=0.05)
+    assert got["presses"] == p.presses
+
+
+def test_a_tick_with_nothing_happening_reports_no_events(monkeypatch):
+    """The quiet path: water empty, recast off. Must return the same shape, not None."""
+    p = FakePatcher()
+    svc = _service(monkeypatch, [], p)
+    got = svc.catch_tick(budget=0.02)
+    assert got == {"events": [], "presses": 0}

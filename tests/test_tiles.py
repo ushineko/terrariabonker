@@ -9,6 +9,8 @@ walks a search past the world edge into tiles left over from the previous world.
 
 import struct
 
+import pytest
+
 from conftest import FakeMem
 from terrariabonker import tiles as T
 
@@ -889,3 +891,65 @@ def test_the_arena_is_warmed_while_the_game_runs_not_when_a_cheat_is_toggled():
 
     svc.patcher = lambda: Warm()
     assert svc.ensure_arena() is True
+
+
+# --- characterization before the split (spec 045) -----------------------------
+# These pin behaviour that the refactor must preserve but that nothing asserted
+# directly: the early return, the stall path, and disarming whatever happens.
+
+def test_a_tile_that_is_not_ore_is_refused_without_arming_anything():
+    """The early return. Its shape is load-bearing -- the caller reads `reason` -- and
+    nothing must reach the stub for a tile the whitelist does not cover."""
+    ORE = 7
+    svc, live = _extract_world({(50, 100)}, set(), ore=ORE)
+
+    real = T.whitelist
+    T.whitelist = lambda gems=False: {ORE}
+    try:
+        got = svc.extract_vein(10, 10, timeout=0.5)      # empty tile, not the vein
+    finally:
+        T.whitelist = real
+
+    assert got["reason"] == "not a whitelisted tile"
+    assert (got["queued"], got["mined"], got["batches"]) == (0, 0, 0)
+    assert got["waits"] == [] and got["median_wait"] is None
+    assert live == {(50, 100)}, "it mined something on a refused call"
+
+
+def test_a_stub_that_never_breaks_anything_stops_and_says_so():
+    """The stall path: the stub is armed but the tiles do not go (a paused game does
+    this). It must give up after the timeout, report why, and not loop forever."""
+    ORE = 7
+    vein = {(50, 100), (50, 101)}
+    svc, live = _extract_world(vein, set(), ore=ORE)
+    svc.patcher().__class__._arm = lambda self, batch: len(list(batch))  # arms, mines nothing
+
+    real = T.whitelist
+    T.whitelist = lambda gems=False: {ORE}
+    try:
+        got = svc.extract_vein(50, 100, timeout=0.05)
+    finally:
+        T.whitelist = real
+
+    assert got["mined"] == 0
+    assert "stopped early" in got["reason"], got["reason"]
+    assert live == vein, "nothing should have been mined"
+
+
+def test_the_queue_is_disarmed_even_when_a_dig_raises():
+    """A queue left armed is re-mined on every frame, so the disarm is in a `finally`.
+    The split must keep it there."""
+    ORE = 7
+    svc, _live = _extract_world({(50, 100)}, set(), ore=ORE)
+    disarms = []
+    svc.patcher().__class__._disarm = lambda self: disarms.append(1) or True
+    svc.patcher().__class__._arm = lambda self, batch: (_ for _ in ()).throw(RuntimeError("boom"))
+
+    real = T.whitelist
+    T.whitelist = lambda gems=False: {ORE}
+    try:
+        with pytest.raises(RuntimeError):
+            svc.extract_vein(50, 100, timeout=0.05)
+    finally:
+        T.whitelist = real
+    assert disarms, "the queue was left armed when the dig blew up"
