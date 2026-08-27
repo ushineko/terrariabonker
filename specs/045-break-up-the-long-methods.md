@@ -1,8 +1,10 @@
 # Spec 045: Break up the over-long methods
 
-**Status**: INCOMPLETE — tier 1 done, plus `arena` from tier 2 (the one where a mistake
-corrupts live code). The rest of tier 2 (`_enable_injection`, `set_item`) and all of tier 3
-are deliberately not started; see "What tier 1 turned up" for why they want re-arguing.
+**Status**: COMPLETE — `extract_vein`, `catch_tick` and `arena` split (the three where a
+mistake corrupts a world or live code). The remaining four targets were assessed and
+**withdrawn**, each with its reason recorded against the criterion: they are flat rather
+than nested, cheap rather than dangerous, and splitting them would move code without making
+anything easier to review. Shipped in v0.38.0.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -53,6 +55,10 @@ Tier 1 are the real wins: long, deeply nested, and on the dangerous paths. Tier 
 doing and low-risk. Tier 3 are borderline (45–49 lines); included so the decision to leave
 them is explicit rather than an oversight — a reviewer may reasonably say "not worth the
 churn" for these, and that is an acceptable outcome.
+
+**Outcome:** both tier 1 methods split, plus `arena` from tier 2. The other four withdrawn
+— see the acceptance criteria for the reason against each, and "What tier 1 turned up" for
+why nesting, not length, turned out to be the thing worth paying to remove.
 
 ### Tier 1
 
@@ -135,18 +141,36 @@ field-copy sequence in `spawn_npc`. Marginal; may be left as-is.
       *(73 → 39 lines + `_bootstrap_arena` 47. Four characterization tests added first,
       against the unsplit method, because every existing test stubbed `arena()` wholesale
       and the bootstrap body had no coverage at all.)*
-- [ ] `_enable_injection`'s three-mode body build and its site/cave resolution are separate
-      methods; the idempotent-re-apply path (no re-resolve) still has its test.
-- [ ] `set_item`'s field writes go through one table, not eight branches; every field still
-      round-trips (a test per field, or one parametrized over the table); the CLI argv
-      contract is unchanged (verified by `test_view_parity`).
-- [ ] Each tier-3 method is either split or explicitly recorded here as "left as-is, and
-      why" — no silent skips.
-- [ ] The full suite passes (`pytest`, headless) at every commit; `flake8` clean on changed
-      files; no method in the table exceeds ~40 lines afterwards, or carries a note saying
-      why it must.
-- [ ] No behaviour verified in-game (spec 040 vein mining, spec 043 catch, the arena
+- [x] ~~`_enable_injection`'s three-mode body build and its site/cave resolution are
+      separate methods.~~ **Withdrawn.** At 49 lines it is the smallest tier-2 target and
+      the one with the least to gain: the three body modes are a flat `if/elif/else`, not
+      nesting, and the idempotent-re-apply path is the interesting part — it is already
+      commented and tested where it sits. Splitting would move code without making the
+      dangerous half easier to review.
+- [x] ~~`set_item`'s field writes go through one table, not eight branches.~~
+      **Withdrawn.** The eight `if x is not None` branches are flat, obvious, and each one
+      round-trips through an existing test. The table would be tidier to read and no safer,
+      and it is the one target whose signature reaches the CLI — churn on a contract for a
+      cosmetic gain is the wrong trade. Recorded in the review as "annoying, not dangerous",
+      which is still the assessment.
+- [x] Each tier-3 method is either split or explicitly recorded here as "left as-is, and
+      why" — no silent skips. *(Both left as-is. `_patches_group` (49) fuses a section-tab
+      state machine with widget building, but it runs once at startup, has no memory writes,
+      and is covered by `test_code_patches_are_split_into_section_tabs`. `spawn_npc` (45) is
+      a straight-line sequence — template, slot, position, copy — with the ordering comment
+      that matters (`active` last) sitting on the line it describes.)*
+- [x] The full suite passes (`pytest`, headless) at every commit; `flake8` clean on changed
+      files; no method in the table exceeds ~40 lines afterwards, **or carries a note saying
+      why it must**. *(584 pass; flake8 clean. Four are over: `extract_vein` 41,
+      `_drain_vein` 45, `catch_tick` 47, `_bootstrap_arena` 47. Each is one job with a long
+      body rather than several jobs — a batch loop, a poll-with-deadline, a springboard
+      assembled byte by byte. Splitting them further would separate a loop from its own exit
+      conditions, which is the readability this spec was after, backwards.)*
+- [x] No behaviour verified in-game (spec 040 vein mining, spec 043 catch, the arena
       bootstrap) changed — argued from the unchanged tests, not re-run, and stated as such.
+      *(No test changed across the three splits, and the eight mutations in the v0.38.0
+      validation report re-check the guarantees that matter. Not re-run in-game: stated as
+      an argument from the tests, not as a live verification.)*
 
 ## What tier 1 turned up
 
@@ -166,11 +190,17 @@ fails if it is.
 mattered — the stop-at-ground walk and the disarm-in-`finally` — were re-run as mutations
 *after* the split rather than trusted because the suite was green.
 
-**Tier 2 and 3 should be re-scoped before starting.** `extract_vein` and `catch_tick` were
-the two that clearly justified the risk. `set_item` (50 lines) is mostly one flat run of
-`if x is not None` and is more annoying than dangerous; `spawn_npc` and `_patches_group`
-are ~45–49 lines and may be worth leaving. The argument for tier 2 is weaker than tier 1's
-and should be made again rather than assumed.
+**Tier 2 and 3 were re-scoped, and mostly withdrawn.** `arena` was taken because a leaked
+hook there is a jump into scrubbed bytes on the next frame — live-code corruption, not a
+failed call. The other four were not: `_enable_injection` and `set_item` are flat `if`
+chains rather than nesting, `_patches_group` runs once at startup with no memory writes, and
+`spawn_npc` is a straight-line sequence. None of them is on a path where a mistake costs a
+world, which is the test this spec set for itself in Context.
+
+The line count was never the point. `extract_vein` at 107 lines and `catch_tick` at 79 hid
+control flow inside nesting — and `catch_tick` proved it by hiding a `break` whose position
+turned out to be load-bearing. A flat 49-line method hides nothing, and splitting it buys a
+smaller number at the cost of a jump between two files to read one idea.
 
 ## Risks & Assumptions
 
