@@ -344,3 +344,71 @@ def test_nothing_is_restored_when_nothing_was_saved(gui_window, monkeypatch, tmp
     w = gui_window()
     w._restore_effects()
     assert not any(getattr(w, n).isChecked() for n in w._EFFECT_BOXES)
+
+
+# --- the recipe dialog fits its content (reported bug) ------------------------
+
+def _recipe_dialog(qt_app, n_recipes=1, n_ingredients=1):
+    from PyQt6.QtGui import QIcon
+
+    from terrariabonker.gui.main_window import RecipeDialog
+
+    recs = [{"out": 2, "n": 1, "tile": 18, "ing": [(9, 5)] * n_ingredients}
+            for _ in range(n_recipes)]
+    return RecipeDialog(2, recs, "made", lambda _i: QIcon())
+
+
+def test_a_recipe_that_fits_on_screen_opens_without_a_scrollbar(qt_app):
+    """Reported: the dialog "always opens too small".
+
+    A QScrollArea reports a small fixed sizeHint whatever is inside it, so the dialog
+    opened at its own minimum -- measured, content wanting 645px in a dialog that opened
+    at 453 -- and every recipe with more than a couple of ingredients got a scrollbar over
+    content that would have fitted.
+    """
+    from PyQt6.QtWidgets import QScrollArea
+
+    d = _recipe_dialog(qt_app, n_recipes=2, n_ingredients=6)
+    try:
+        d.show()
+        qt_app.processEvents()
+        area = d.findChildren(QScrollArea)[0]
+        assert area.viewport().height() >= area.widget().sizeHint().height(), \
+            "the content is taller than the space given to it"
+        assert area.verticalScrollBar().maximum() == 0, "it opened with a scrollbar"
+    finally:
+        d.close()
+
+
+def test_a_bigger_recipe_opens_bigger(qt_app):
+    """The size follows the content rather than being one fixed guess."""
+    small = _recipe_dialog(qt_app, n_recipes=1, n_ingredients=1)
+    big = _recipe_dialog(qt_app, n_recipes=3, n_ingredients=6)
+    try:
+        assert big.size().height() > small.size().height()
+    finally:
+        small.close()
+        big.close()
+
+
+def test_a_huge_recipe_stops_at_the_screen_and_scrolls_instead(qt_app):
+    """Fitting to content cannot mean opening taller than the display: past the cap the
+    scrollbar is the correct answer."""
+    from terrariabonker.gui.main_window import RecipeDialog
+
+    d = _recipe_dialog(qt_app, n_recipes=40, n_ingredients=8)
+    try:
+        avail = qt_app.primaryScreen().availableGeometry()
+        assert d.size().height() <= int(avail.height() * RecipeDialog._MAX_SCREEN_FRACTION)
+        assert d.size().width() <= int(avail.width() * RecipeDialog._MAX_SCREEN_FRACTION)
+    finally:
+        d.close()
+
+
+def test_a_tiny_recipe_still_respects_the_minimum_width(qt_app):
+    """Fitting to content must not make a one-ingredient recipe a sliver."""
+    d = _recipe_dialog(qt_app, n_recipes=1, n_ingredients=1)
+    try:
+        assert d.size().width() >= d.minimumWidth()
+    finally:
+        d.close()

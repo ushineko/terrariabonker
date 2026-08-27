@@ -125,6 +125,39 @@ class RecipeDialog(QDialog):
         bl.addStretch(1)
         area.setWidget(body)
         outer.addWidget(area, 1)
+        self._fit_to_content(area, body)
+
+    #: How much of the screen the dialog may take before it starts scrolling instead.
+    _MAX_SCREEN_FRACTION = 0.85
+
+    def _fit_to_content(self, area: QScrollArea, body: QWidget) -> None:
+        """Open at the size of the recipe, not at the dialog's minimum.
+
+        A `QScrollArea` reports a small fixed `sizeHint` whatever is inside it -- measured:
+        a three-recipe dialog whose content wanted 645px tall reported 408 and opened at
+        453. So every recipe with more than a couple of ingredients opened with a scrollbar
+        over content that would have fitted on screen.
+
+        The chrome (header, margins, frame) is derived by subtracting the scroll area's own
+        hint from the dialog's rather than guessed at, so it stays right if the header
+        changes. Beyond `_MAX_SCREEN_FRACTION` of the screen the scrollbar is the correct
+        answer and takes over -- an item with a dozen recipes should not open taller than
+        the display.
+        """
+        content = body.sizeHint()
+        frame = area.frameWidth() * 2
+        chrome_h = max(0, self.sizeHint().height() - area.sizeHint().height())
+        # No max() against minimumWidth here: resize() is clamped to it by Qt, so guarding
+        # it again would read as load-bearing while doing nothing (a mutation proved it).
+        want_w = content.width() + frame + area.verticalScrollBar().sizeHint().width()
+        want_h = chrome_h + content.height() + frame
+
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            want_w = min(want_w, int(avail.width() * self._MAX_SCREEN_FRACTION))
+            want_h = min(want_h, int(avail.height() * self._MAX_SCREEN_FRACTION))
+        self.resize(want_w, want_h)
 
     def _recipe_block(self, r) -> QGroupBox:
         station = recipes.station_name(r["tile"]) if "tile" in r else "by hand"
