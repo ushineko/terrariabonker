@@ -82,19 +82,39 @@ def read_mono_string(mem, ptr: int) -> str | None:
     return s if all(32 <= ord(c) < 127 for c in s) else None
 
 
+#: How far equipment and buffs may lift a cap above its permanent value. Generous on
+#: purpose: the number only has to keep random memory out, and being too tight here is
+#: what made a real player unfindable.
+_BOOST_HEADROOM = 500
+
+
 def valid_block(v: list[int]) -> bool:
     """True if six ints look like a Terraria life/mana block.
 
-    Terraria invariants do the filtering: life max is 100-500 with the permanent
-    copy equal to the current cap, and mana is always a multiple of 20 up to 400
-    with its permanent copy equal to the cap. Random memory rarely satisfies all.
+    The block is ``statLifeMax2, statLifeMax, statLife, statMana, statManaMax,
+    statManaMax2``. The ``Max2`` fields are the caps **after equipment and buffs**, so they
+    are ``>=`` their permanent counterparts, not equal to them -- and the current value is
+    bounded by the boosted cap, not the permanent one.
+
+    This used to require equality, and it cost a real player: with a mana-boosting
+    accessory on (max 200, boosted 220, currently 220) the live player failed validation,
+    the scan fell back to an inert load-time snapshot, and every write the trainer made
+    landed on a copy the game ignores. Cheats silently did nothing.
+
+    The remaining bounds still carry the filtering, together with the mono ``name`` string
+    that :func:`find_players` checks next -- that pairing is what makes a scan of ~1.6 GB
+    return the player's own copies and little else.
     """
     if len(v) < BLOCK_LEN:
         return False
     m2, m, life, mana, mmax, mmax2 = v[:BLOCK_LEN]
     return (
-        100 <= m <= 500 and m2 == m and 1 <= life <= m and
-        20 <= mmax <= 400 and mmax % 20 == 0 and mmax2 == mmax and 0 <= mana <= mmax
+        # Life: crystals take the permanent cap to 400 in 20s, fruit to 500 in 5s.
+        100 <= m <= 500 and m % 5 == 0 and
+        m <= m2 <= m + _BOOST_HEADROOM and 1 <= life <= m2 and
+        # Mana: crystals only, so the permanent cap is a multiple of 20 up to 400.
+        20 <= mmax <= 400 and mmax % 20 == 0 and
+        mmax <= mmax2 <= mmax + _BOOST_HEADROOM and 0 <= mana <= mmax2
     )
 
 

@@ -22,11 +22,34 @@ def test_valid_block_accepts_real_player():
 
 
 def test_valid_block_rejects_near_misses():
-    assert not valid_block([100, 120, 80, 20, 20, 20])     # max2 != max
-    assert not valid_block([100, 100, 80, 20, 36, 36])     # mana not multiple of 20
-    assert not valid_block([100, 100, 80, 20, 20, 40])     # manamax2 != manamax
-    assert not valid_block([100, 100, 140, 20, 20, 20])    # life > max
+    assert not valid_block([100, 120, 80, 20, 20, 20])     # boosted cap BELOW the base
+    assert not valid_block([100, 100, 80, 20, 36, 36])     # mana max not a multiple of 20
+    assert not valid_block([100, 100, 80, 20, 20, 10])     # boosted mana cap below base
+    assert not valid_block([100, 100, 140, 20, 20, 20])    # life above the boosted cap
     assert not valid_block([600, 600, 300, 20, 20, 20])    # life max out of range
+    assert not valid_block([100, 100, 80, 25, 20, 20])     # mana above the boosted cap
+
+
+def test_a_player_wearing_mana_gear_is_still_a_player():
+    """The bug this guards cost a session, and silently.
+
+    `statManaMax2` is the cap AFTER equipment and buffs, so a mana accessory makes it
+    exceed `statManaMax` and lets the current value exceed the permanent cap. The
+    validator demanded equality, so the live player failed it, the scan fell back to an
+    inert load-time snapshot, and every write the trainer made landed on a copy the game
+    ignores -- cheats did nothing, with no error anywhere.
+
+    These are the real numbers from the game it was found in: 400 life, 200 mana with a
+    +20 accessory, currently full at the boosted cap.
+    """
+    assert valid_block([400, 400, 400, 220, 200, 220])
+
+
+def test_life_boosting_gear_is_allowed_too():
+    """Same shape on the life side: `statLifeMax2` includes equipment, so it may exceed
+    the permanent cap, and current life may exceed the permanent cap with it."""
+    assert valid_block([520, 500, 520, 200, 200, 200])
+    assert valid_block([400, 400, 400, 200, 200, 200])     # and the unboosted case
 
 
 def test_read_mono_string_roundtrip():
