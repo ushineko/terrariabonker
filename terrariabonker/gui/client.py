@@ -240,35 +240,65 @@ def freeze_argv(godmode: bool, mana: bool) -> list[str]:
 
 # Every CLI subcommand this client emits. The parity test asserts each one is a
 # real subcommand of the CLI parser (and that --json reads are supported).
-COMMANDS: set[str] = {
-    "status", "inventory", "set-hp", "set-mana", "set-max-hp", "set-max-mana",
-    "set-stack", "set-item", "give", "spawn-npc", "compendium", "fast-mining",
-    "long-reach", "freeze",
-    "patch", "potions", "fishing",
-    "extract-recipes",
-}
-
-# argv samples exercised by the parity test to prove they parse cleanly.
-SAMPLE_ARGVS: list[list[str]] = [
-    status_argv(), inventory_argv(),
-    set_hp_argv("max"), set_mana_argv(20), set_max_hp_argv(500), set_max_mana_argv(200),
-    set_stack_argv(40, 999),
-    set_item_argv(0, 3507, stack=1, damage=200, auto_reuse=1, use_time=8),
-    set_item_argv(10, 3507, use_anim=8, pick=200, tile_boost=30),
-    set_item_argv(20, 285, defense=5, prefix=25),   # accessory: defense + Warding
-    set_item_argv(10, 0),                       # clear a slot
-    give_argv(2, 999), spawn_npc_argv(46, 25), compendium_argv(),
-    fast_mining_argv(), long_reach_argv(25),
-    freeze_argv(True, True),
-    patch_status_argv(), patch_set_argv("mining", True, value=0.2),
-    patch_set_argv("reach", False), patch_set_argv("fast_place", True),
-    patch_set_argv("tool_reach", True, value=40), patch_set_argv("pickup", True, value=50),
-    patch_set_argv("spawn_rate", True, value=40),
-    extract_recipes_argv(),
-    potions_argv(), potions_argv(30),
-    fishing_argv(), fishing_argv(50, kit=False),
-    fishing_power_argv(255), fishing_restore_argv(),
+# Every argv builder here, with the subcommand it is expected to emit and a sample call.
+# The expected command is written down rather than read back off the sample: deriving it
+# from argv[0] would only prove argv[0] equals itself, so a builder quietly switching to
+# another valid command would pass. The parity test walks this: a builder that
+# is not represented fails the suite, so a new command cannot be added on the GUI side
+# without proving it parses on the CLI side.
+#
+# It was a hand-written set of command names until 2026-08-26, and it had gone stale --
+# catch-tick, catch-stop, fishing-buffs, build-check, accept-build, restore and
+# extract-sprites were all missing, so the parity test silently stopped covering two
+# releases' worth of new commands while still reading like coverage.
+SAMPLE_ARGVS: list[tuple[str, str, list[str]]] = [
+    ("status_argv", "status", status_argv()),
+    ("inventory_argv", "inventory", inventory_argv()),
+    ("set_hp_argv", "set-hp", set_hp_argv("max")),
+    ("set_mana_argv", "set-mana", set_mana_argv(20)),
+    ("set_max_hp_argv", "set-max-hp", set_max_hp_argv(500)),
+    ("set_max_mana_argv", "set-max-mana", set_max_mana_argv(200)),
+    ("set_stack_argv", "set-stack", set_stack_argv(40, 999)),
+    ("set_item_argv", "set-item",
+     set_item_argv(0, 3507, stack=1, damage=200, auto_reuse=1, use_time=8)),
+    ("set_item_argv", "set-item",
+     set_item_argv(10, 3507, use_anim=8, pick=200, tile_boost=30)),
+    ("set_item_argv", "set-item", set_item_argv(20, 285, defense=5, prefix=25)),  # Warding
+    ("set_item_argv", "set-item", set_item_argv(10, 0)),               # clear a slot
+    ("give_argv", "give", give_argv(2, 999)),
+    ("spawn_npc_argv", "spawn-npc", spawn_npc_argv(46, 25)),
+    ("compendium_argv", "compendium", compendium_argv()),
+    ("compendium_argv", "compendium", compendium_argv(refresh=True)),
+    ("build_check_argv", "build-check", build_check_argv()),
+    ("accept_build_argv", "accept-build", accept_build_argv("accepted")),
+    ("accept_build_argv", "accept-build",
+     accept_build_argv("degraded", failed=("mining",))),
+    ("fast_mining_argv", "fast-mining", fast_mining_argv()),
+    ("long_reach_argv", "long-reach", long_reach_argv(25)),
+    ("freeze_argv", "freeze", freeze_argv(True, True)),
+    ("patch_status_argv", "patch", patch_status_argv()),
+    ("patch_set_argv", "patch", patch_set_argv("mining", True, value=0.2)),
+    ("patch_set_argv", "patch", patch_set_argv("reach", False)),
+    ("patch_set_argv", "patch", patch_set_argv("auto_use", True)),
+    ("potions_argv", "potions", potions_argv()),
+    ("potions_argv", "potions", potions_argv(30)),
+    ("fishing_argv", "fishing", fishing_argv()),
+    ("fishing_argv", "fishing", fishing_argv(50, kit=False)),
+    ("fishing_power_argv", "fishing", fishing_power_argv(255)),
+    ("fishing_restore_argv", "fishing", fishing_restore_argv()),
+    ("fishing_buffs_argv", "fishing-buffs", fishing_buffs_argv(True, True, True)),
+    ("fishing_buffs_argv", "fishing-buffs", fishing_buffs_argv(True, False, False)),
+    ("catch_argv", "catch-tick", catch_argv()),
+    ("catch_argv", "catch-tick", catch_argv(recast=True)),
+    ("catch_stop_argv", "catch-stop", catch_stop_argv()),
+    ("restore_argv", "restore", restore_argv()),
+    ("extract_recipes_argv", "extract-recipes", extract_recipes_argv()),
+    ("extract_sprites_argv", "extract-sprites", extract_sprites_argv()),
+    ("extract_sprites_argv", "extract-sprites", extract_sprites_argv(force=True)),
 ]
+
+#: The CLI subcommands this module can emit. Derived, never hand-maintained.
+COMMANDS: set[str] = {cmd for _name, cmd, _argv in SAMPLE_ARGVS}
 
 
 def build_banner(status: dict | None, known_build: str) -> str:

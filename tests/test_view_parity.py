@@ -30,11 +30,39 @@ def test_every_client_command_exists_in_cli():
     assert not missing, f"GUI client uses CLI subcommands that do not exist: {sorted(missing)}"
 
 
-@pytest.mark.parametrize("argv", client.SAMPLE_ARGVS, ids=lambda a: a[0])
-def test_client_argvs_parse_against_the_cli(argv):
-    """Each argv the client emits must parse cleanly (right subcommand + flags)."""
+@pytest.mark.parametrize("name,cmd,argv", client.SAMPLE_ARGVS,
+                         ids=[f"{n}:{c}" for n, c, _a in client.SAMPLE_ARGVS])
+def test_client_argvs_parse_against_the_cli(name, cmd, argv):
+    """Each argv must parse, and must emit the subcommand it is declared to emit.
+
+    Two earlier versions of this assertion were weaker than they looked. `args.func is
+    not None` says nothing about which command was reached. Deriving the expected command
+    from `argv[0]` only proves `argv[0]` equals itself -- a builder switching to another
+    valid subcommand passed it. The expectation is written beside the sample instead.
+    """
+    assert argv[0] == cmd, f"{name} emits {argv[0]!r}, declared as {cmd!r}"
     args = build_parser().parse_args(argv)   # SystemExit here = a contract drift
-    assert getattr(args, "func", None) is not None
+    assert getattr(args, "func", None) is not None, f"{name}: no CLI handler for {cmd!r}"
+
+
+def test_every_argv_builder_has_a_sample():
+    """A new builder must be added to SAMPLE_ARGVS, or it is not covered by anything.
+
+    COMMANDS was a hand-written set of names and had gone stale by seven commands --
+    catch-tick, catch-stop, fishing-buffs, build-check, accept-build, restore and
+    extract-sprites -- so this file silently stopped guarding two releases of new work
+    while still reading like coverage. COMMANDS is now derived from these samples, and
+    this test is what makes the samples exhaustive.
+    """
+    import inspect
+
+    builders = {n for n, f in vars(client).items()
+                if n.endswith("_argv") and inspect.isfunction(f)}
+    covered = {name for name, _cmd, _argv in client.SAMPLE_ARGVS}
+    assert not builders - covered, \
+        f"argv builders with no sample: {sorted(builders - covered)}"
+    assert not covered - builders, \
+        f"samples naming builders that no longer exist: {sorted(covered - builders)}"
 
 
 def _imported_roots(path: Path) -> set[str]:
