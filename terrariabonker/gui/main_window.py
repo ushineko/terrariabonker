@@ -1267,7 +1267,14 @@ class MainWindow(QWidget):
         self._call(client.inventory_argv(), on_output=self._fill_grid)
 
     def _inventory_visible(self) -> bool:
-        return self.tabs.currentIndex() == self.tabs.indexOf(self.tabs.widget(1))
+        """Is the grid actually on screen? Dispatch on the widget, never on an index.
+
+        This compared `currentIndex()` to `indexOf(widget(1))`, which is 1 by definition --
+        the Effects tab. So the 1 Hz sync ran only while Effects was showing and never
+        while the user was looking at the grid it keeps fresh. Exactly the failure the
+        note beside the tab strip warns about.
+        """
+        return self.tabs.currentWidget() is self.tab_inventory
 
     def _sync_inventory(self):
         """The 1 Hz tick: keep the grid tracking the game.

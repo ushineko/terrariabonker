@@ -1384,15 +1384,26 @@ class Service:
         return report
 
     def fast_mining(self, use_time: int = 8, use_anim: int = 13, pick: int = 200) -> list[int]:
-        hit = []
+        """Speed up every pickaxe, in every copy. Returns the LIVE copy's slots.
+
+        Writing to all the copies is deliberate (see :meth:`_all_inventories`), but the
+        report is not "whichever copy happened to be last" -- that is usually an inert
+        load-time snapshot holding whatever it held when it was taken, and the count goes
+        straight to the user. Reporting the live copy is the rule `_all_inventories`
+        already states: write to all of them, read from none.
+        """
+        live = self._live_inventory()
+        hit = live.make_fast_mining(use_time, use_anim, pick)
         for inv in self._all_inventories():
-            hit = inv.make_fast_mining(use_time, use_anim, pick)
+            inv.make_fast_mining(use_time, use_anim, pick)
         return hit
 
     def long_reach(self, tiles: int = 20) -> list[int]:
-        hit = []
+        """Extend placement reach in every copy. Returns the LIVE copy's slots."""
+        live = self._live_inventory()
+        hit = live.long_reach(tiles)
         for inv in self._all_inventories():
-            hit = inv.long_reach(tiles)
+            inv.long_reach(tiles)
         return hit
 
 

@@ -160,3 +160,84 @@ def test_a_recorded_edit_is_never_pruned_against_a_template(monkeypatch, tmp_pat
     rep = svc.restore()
     assert rep["items"] == [0]
     assert svc.inventory()[0].damage == 31
+
+
+# --- reporting the live copy, not whichever was last (mid-project review 1.2) ---
+
+def _two_copies(monkeypatch):
+    """A live inventory holding a pickaxe, and an inert snapshot holding none.
+
+    That difference is the whole point: while every copy looks the same, reporting the
+    wrong one is invisible.
+    """
+    import struct
+
+    from conftest import FakeMem
+    from terrariabonker import service as S
+    from terrariabonker.inventory import (ARR_DATA_OFF, ARR_LEN_OFF, INVENTORY_PTR_OFF,
+                                          ITEM_PICK, ITEM_TYPE, Inventory)
+
+    base = 0x70000000
+    m = FakeMem(base, 0x40000)
+    live_life, dead_life = base + 0x2000, base + 0x3000
+    # The snapshot differs in BOTH ways the two cheats look at a slot: it carries no
+    # pickaxe (fast_mining) and its second slot is empty (long_reach). A fixture whose
+    # copies differ in only one of those passes against the bug for the other cheat --
+    # which is exactly what happened on the first attempt at this test.
+    for life, arr, items, live_copy in ((live_life, base + 0x100, base + 0x8000, True),
+                                        (dead_life, base + 0x200, base + 0x9000, False)):
+        m.write(life + INVENTORY_PTR_OFF, struct.pack("<I", arr))
+        m.poke_i32(arr + ARR_LEN_OFF, 2)
+        for i in range(2):
+            addr = items + i * 0x200
+            m.write(arr + ARR_DATA_OFF + i * 4, struct.pack("<I", addr))
+            empty = not live_copy and i == 1
+            m.poke_i32(addr + ITEM_TYPE, 0 if empty else 3509)
+            m.poke_i32(addr + ITEM_PICK, 100 if live_copy else 0)
+
+    svc = S.Service.__new__(S.Service)
+    svc.mem = m
+
+    class Block:
+        def __init__(self, life):
+            self.life_addr = life
+
+    svc.live_block = lambda: Block(live_life)
+    # The live copy first, the snapshot LAST -- the order the old code reported from.
+    svc.players = lambda: [Block(live_life), Block(dead_life)]
+    return svc, Inventory(m, live_life), Inventory(m, dead_life)
+
+
+def test_fast_mining_reports_the_live_copy_not_the_last(monkeypatch):
+    """It returned whichever copy came last, which is usually an inert snapshot.
+
+    `_all_inventories` says in its own docstring not to read from those copies -- a
+    snapshot holds whatever it held when it was taken. The count goes straight to the
+    user on the CLI, so the wrong one is a lie about what was changed.
+    """
+    svc, live, dead = _two_copies(monkeypatch)
+    hit = svc.fast_mining()
+    assert hit == [0, 1], "reported the snapshot's slots (it has no pickaxes) or nothing"
+    assert [s.index for s in live.slots() if s.is_pickaxe] == [0, 1]
+
+
+def test_long_reach_reports_the_live_copy_not_the_last(monkeypatch):
+    """The snapshot's second slot is empty, so it would report [0] where the live copy
+    reports [0, 1]."""
+    svc, live, dead = _two_copies(monkeypatch)
+    assert svc.long_reach(30) == [0, 1]
+    assert dead.long_reach(30) == [0], "the fixture's copies do not differ for this cheat"
+
+
+def test_both_still_write_to_every_copy(monkeypatch):
+    """Reporting the live copy must not stop the inert ones being written.
+
+    Writing to all of them is what guarantees the live one is hit at all (spec 039).
+    """
+    from terrariabonker.inventory import ITEM_TILEBOOST
+
+    svc, live, dead = _two_copies(monkeypatch)
+    svc.long_reach(30)
+    for inv in (live, dead):
+        addr = inv._item_addr(0)
+        assert inv.mem.read_i32(addr + ITEM_TILEBOOST) == 30

@@ -240,6 +240,11 @@ subcommand list with the same exposure.
 0.9 s of real spinning to assert that a gate never arms. Fifteen further sites pass
 `budget=0.05`. One file spends well over 1.5 s sleeping to test synchronous logic.
 
+> **Update, same day:** the three bugs in §1 are fixed (`8db0e0c`..), with regression
+> tests for the two that have observable behaviour. §1.3 is a code deletion with no
+> behavioural surface, so it has no test — noted rather than papered over with a
+> source-grepping assertion, which is the anti-pattern §3.1 flags.
+
 ## 4. Suggested order of work
 
 Ordered by (harm × cheapness), not by section:

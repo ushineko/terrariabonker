@@ -314,3 +314,25 @@ def test_the_inventory_grid_does_not_set_the_window_minimum_height(app, monkeypa
             "the width pin is gone — the grid would get a horizontal scrollbar")
     finally:
         w.close()
+
+
+def test_the_grid_syncs_only_while_the_grid_is_showing(app, monkeypatch):
+    """The 1 Hz sync ran on the wrong tab entirely.
+
+    `_inventory_visible` compared `currentIndex()` to `indexOf(widget(1))`, which is 1 by
+    definition -- the Effects tab. So the grid refreshed while Effects was on screen and
+    never while the user was looking at the grid. The sibling handler had already been
+    fixed to dispatch on the widget; this one had not, which is why the tab strip carries
+    a note saying never to key off an index.
+    """
+    mw, w = _window(monkeypatch)
+    try:
+        by_title = {w.tabs.tabText(i): i for i in range(w.tabs.count())}
+        w.tabs.setCurrentIndex(by_title["Inventory"])
+        assert w._inventory_visible() is True
+
+        for other in ("Effects", "Player", "Patches", "Recipes"):
+            w.tabs.setCurrentIndex(by_title[other])
+            assert w._inventory_visible() is False, f"it thinks the grid shows on {other}"
+    finally:
+        w.close()

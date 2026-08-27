@@ -237,8 +237,11 @@ def guard(mem, force: bool = False) -> None:
         sys.exit(f"[ABORT] {msg}.\n"
                  f"        Re-derive offsets (see docs/discovery.md) or pass --force "
                  f"to override (may corrupt player data).")
-    banner = "[version] WARNING" if force else "[version] WARNING"
-    print(f"{banner}: {msg}.")
+    # One banner, deliberately: this read as `"[version] WARNING" if force else
+    # "[version] WARNING"` -- both arms identical, so the distinction it implied was never
+    # implemented. The --force case is already called out on the next line, which is where
+    # it belongs, so there is nothing for a second banner to say.
+    print(f"[version] WARNING: {msg}.")
     if level == "incompatible":
         print("[version] --force given; proceeding anyway. The locator still "
               "validates each match, so a wrong layout should find no player.")
