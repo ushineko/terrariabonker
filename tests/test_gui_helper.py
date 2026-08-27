@@ -44,12 +44,35 @@ def test_replies_are_dispatched_by_id_and_ignore_foreign_lines():
 
 
 def test_no_threads_in_the_gui_transport():
-    """Spec 029 requires the Qt event loop, not threads. Checks real use, not prose --
-    main_window's module docstring mentions QThread precisely to say it is not used."""
-    import inspect
+    """Spec 029 requires the Qt event loop, not threads.
+
+    Read from the AST rather than the source text. The text version missed
+    `from threading import Thread` and `import concurrent.futures` entirely, and would
+    have fired on the word appearing in a comment -- main_window's docstring mentions
+    QThread precisely to say it is not used.
+    """
+    import ast
+    from pathlib import Path
+
     from terrariabonker.gui import helper, main_window
+
+    banned_modules = {"threading", "concurrent", "concurrent.futures", "multiprocessing",
+                      "_thread"}
+    banned_names = {"QThread", "QThreadPool", "QRunnable", "Thread", "ThreadPoolExecutor"}
     for mod in (helper, main_window):
-        src = inspect.getsource(mod)
-        assert "import threading" not in src, mod.__name__
-        assert "QThread(" not in src, mod.__name__
-        assert "QRunnable" not in src and "QThreadPool" not in src, mod.__name__
+        tree = ast.parse(Path(mod.__file__).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    assert a.name.split(".")[0] not in banned_modules, \
+                        f"{mod.__name__} imports {a.name}"
+            elif isinstance(node, ast.ImportFrom):
+                root = (node.module or "").split(".")[0]
+                assert root not in banned_modules, f"{mod.__name__} imports from {node.module}"
+                for a in node.names:
+                    assert a.name not in banned_names, \
+                        f"{mod.__name__} imports {a.name} from {node.module}"
+            elif isinstance(node, ast.Call):
+                fn = node.func
+                name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+                assert name not in banned_names, f"{mod.__name__} constructs {name}"

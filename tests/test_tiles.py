@@ -7,7 +7,6 @@ Main.maxTilesX/maxTilesY is the world's real extent. Reading those the other way
 walks a search past the world edge into tiles left over from the previous world.
 """
 
-import inspect
 import struct
 
 from conftest import FakeMem
@@ -322,10 +321,16 @@ def test_the_hook_runs_every_frame_not_only_when_the_player_swings():
         "the displaced bytes must be wildcarded — see _check_site for what guards them"
     # and PickTile is now only a call target, never a hook site
     assert "pick_tile" in P.ANCHORS
-    src = inspect.getsource(P._ore_extract_body)
-    assert '_resolve("pick_tile")' in src, "the call target is no longer resolved directly"
-    assert "SENTINEL" not in src, \
-        "a re-entrancy sentinel is dead weight once PickTile is not the hook site"
+    # Asserted against the bytes the stub actually emits, not against its source text.
+    # The old check ("SENTINEL" not in the source) tested that a *variable name* was
+    # absent, which any rename defeats and which says nothing about the emitted stub.
+    body = _ore_stub()
+    assert body.count(b"\xff\xd0") == 1, "the stub no longer calls PickTile exactly once"
+    assert body.endswith(inj.overwrite), "the displaced bytes are not replayed last"
+    # A re-entrancy sentinel would have to be read and written somewhere in the arena; the
+    # queue count is the only arena word the stub touches, and it touches it twice (read,
+    # then clear) -- see the sibling tests for the consume-before-work ordering.
+    assert body.count(b"\x83\x25") == 1, "an extra arena word is being cleared"
 
 
 def test_the_call_passes_the_caps_the_game_passes():

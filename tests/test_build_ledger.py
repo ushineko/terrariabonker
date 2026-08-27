@@ -482,7 +482,7 @@ def test_the_scan_falls_through_variants_until_one_matches(monkeypatch):
     assert p._scan("fake", None) == [CODE + 2]
 
 
-def test_the_runtime_is_tracked_beside_the_build_not_inside_it():
+def test_the_runtime_is_tracked_beside_the_build_not_inside_it(tmp_path, monkeypatch):
     """A build key names the game. It says nothing about the .NET runtime executing it —
     and the patterns match machine code that runtime's JIT emitted, so a Proton update can
     break a cheat with Terraria untouched.
@@ -491,7 +491,6 @@ def test_the_runtime_is_tracked_beside_the_build_not_inside_it():
     verification predates the tracking, and rewriting the key would either invalidate all
     of them at a stroke or require backfilling a runtime nobody recorded.
     """
-    import inspect
     from terrariabonker import builds, version as ver
 
     # detection reads the module paths, which carry the version
@@ -520,8 +519,18 @@ def test_the_runtime_is_tracked_beside_the_build_not_inside_it():
     assert ver.build_key("1.4.5.8", "24893155") == "1.4.5.8+24893155"
     assert "mono" not in ver.KNOWN_BUILD_KEY
 
-    # and remember() carries the runtime as its own field, omitted when unknown
-    src = inspect.getsource(builds.remember)
-    assert 'entry["runtime"] = runtime' in src, "the runtime is not recorded"
-    assert "if runtime:" in src, \
+    # A real ledger file, isolated: the source-grep version this replaces never called
+    # anything, so it needed no isolation and proved correspondingly little.
+    monkeypatch.setattr(builds, "_PATH", str(tmp_path / "accepted-builds.json"))
+
+    # and remember() carries the runtime as its own field, omitted when unknown.
+    # Asserted by calling it, not by grepping its source: the source check passed if the
+    # line existed anywhere, including a branch that never ran, and failed on a rename.
+    builds.remember("1.4.5.8+24893155", builds.ACCEPTED, runtime="wine-mono-11.2.0")
+    entry = builds.load()["1.4.5.8+24893155"]
+    assert entry["runtime"] == "wine-mono-11.2.0", "the runtime is not recorded"
+
+    builds.remember("1.4.5.8+99999999", builds.ACCEPTED)
+    unknown = builds.load()["1.4.5.8+99999999"]
+    assert "runtime" not in unknown, \
         "an unknown runtime must be omitted, not stored as a guess"
