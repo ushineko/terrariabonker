@@ -56,7 +56,10 @@ behaves is on the projectile.
 |---|---|---|
 | `0x0D4` | `penetrate` | Wooden Arrow 1, Water Bolt 10, skull 3, some -1 (infinite) |
 | `0x0DC` | `maxPenetrate` | equals `penetrate` on every template; the field exists in the class, so this is it rather than an unexplained copy |
-| `0x100` | pass-through-blocks flag | 10/10 against known items — see below |
+| `0x100` | `tileCollide` | 290/293 against the game's own SetDefaults; see below |
+| `0x0D0` | `friendly` | 584/592 the same way |
+| `0x0B0` | `aiStyle` | 765/780 |
+| `0x104` | `extraUpdates` | 172/173 — the per-frame update multiplier, i.e. projectile speed |
 | `0x088` | `bobber` | true for 19 of 1100, including every bobber the fishing rods shoot |
 | `0x08C` | `scale` | Space Gun 0.65, Crystal Storm 1.2, Starfury 0.8; and writing 2.5 on live skulls was visibly bigger in game |
 | `0x098` | `alpha` | 255 on the skull and Ball of Fire, 0 on a Wooden Arrow |
@@ -77,10 +80,38 @@ directly and never consults collision — the correlation above is real either w
 not established as *causal*. The control experiment (switching it off on a projectile that
 normally collides) has not been run: see the note on measurement below.
 
-`0x0B4` was briefly labelled `timeLeft` from template values (1200 arrow, 480 skull, 3600
-Vilethorn, which look exactly right). **Retracted**: on a live skull it reads a flat 0 and
-never counts down. The template value is evidently a spawn-time input rather than the live
-field.
+### Offsets solved against the game's own code
+
+The above was guesswork from correlations until the obvious was pointed out: read what the
+game *declares*. `Projectile.SetDefaults` is a flat `if (type == N) { width = ...; aiStyle
+= ...; }` chain, so parsing its IL yields 884 projectiles with their field values by name.
+Matching those against the template bytes solves the offsets instead of inferring them:
+
+| Field | Offset | Templates agreeing with the declared value |
+|---|---|---|
+| `penetrate` | `0x0D4` | 178/178 |
+| `alpha` | `0x098` | 356/356 |
+| `timeLeft` | `0x0B4` | 241/242 |
+| `extraUpdates` | `0x104` | 172/173 |
+| `tileCollide` | `0x100` | 290/293 |
+| `aiStyle` | `0x0B0` | 765/780 |
+| `friendly` | `0x0D0` | 584/592 |
+| `hostile` | `0x030` | 167/170 |
+| `width`, `height` | `0x034`, `0x038` | 720/845 |
+
+The shortfalls are where a `DefaultTo*` helper or a shared tail overwrites what the case
+declared, not disagreement about the offset. `tileCollide` at `0x100` and `friendly` at
+`0x0D0` close the question this file left open, and on far better evidence than the
+behavioural correlation above.
+
+`0x0B4` was briefly retracted as `timeLeft` because a live skull read a flat 0. **That
+retraction was wrong** — 242 projectiles declare a `timeLeft` that matches `0x0B4` exactly.
+One live reading was weaker evidence than the game's own source, and the 0 remains
+unexplained rather than explanatory.
+
+**Reading the IL first would have saved the whole afternoon.** The same lesson the fishing
+recon recorded — two failed memory-diff sessions, then an afternoon of IL that settled it —
+and it was not applied here until the maintainer asked why not.
 
 ### Editing a template does nothing
 
