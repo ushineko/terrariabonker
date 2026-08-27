@@ -55,20 +55,63 @@ behaves is on the projectile.
 | Offset | Field | Evidence |
 |---|---|---|
 | `0x0D4` | `penetrate` | Wooden Arrow 1, Water Bolt 10, skull 3, some -1 (infinite) |
-| `0x0D0`, `0x100` | tile/collision flags | the two bools that separate the skull from an arrow |
+| `0x0DC` | `maxPenetrate` | equals `penetrate` on every template; the field exists in the class, so this is it rather than an unexplained copy |
+| `0x100` | pass-through-blocks flag | 10/10 against known items — see below |
 | `0x088` | `bobber` | true for 19 of 1100, including every bobber the fishing rods shoot |
+| `0x08C` | `scale` | Space Gun 0.65, Crystal Storm 1.2, Starfury 0.8; and writing 2.5 on live skulls was visibly bigger in game |
+| `0x098` | `alpha` | 255 on the skull and Ball of Fire, 0 on a Wooden Arrow |
+| `0x034`, `0x038` | `width`, `height` | skull 26, arrow 10, Ball of Fire 4 |
 
-`0x0DC` carries values identical to `0x0D4` on every template — probably the "restore to"
-copy the game resets `penetrate` from. Worth resolving before either is written to.
+`0x100` correlates perfectly with which items pass through blocks, taking each item's
+`shoot` field to name its projectile. Note this only works for weapons that carry their own
+projectile: guns and bows take theirs from the **ammo** (the Minishark's `shoot` is a
+placeholder, while the Musket Ball's is the real one).
 
-Which of `0x0D0` / `0x100` is `tileCollide` is **not** yet isolated: the Book of Skulls
-skull (projectile 837) reads 1 and 0, a Wooden Arrow reads 1 and 1. One of them is the
-pass-through-blocks flag; telling them apart needs a projectile whose behaviour is known
-in the other direction.
+| passes through blocks (`0`) | collides (`1`) |
+|---|---|
+| Book of Skulls 837, Vilethorn 7, Nettle Burst 150, Starfury 9 | Demon Scythe 45, Water Bolt 27, Wooden Arrow 1, Magic Missile 16, Crystal Storm 94, Space Gun 20 |
 
-**Editing here is global.** A projectile template is shared by every use of that
-projectile id, which can include enemy attacks. This is unlike an item edit, which touches
-one slot.
+**But writing it did not change behaviour.** 437 live skulls were set to `1` and still passed
+through blocks. So either the field is read only at spawn, or the skull's AI moves it
+directly and never consults collision — the correlation above is real either way, but it is
+not established as *causal*. The control experiment (switching it off on a projectile that
+normally collides) has not been run: see the note on measurement below.
+
+`0x0B4` was briefly labelled `timeLeft` from template values (1200 arrow, 480 skull, 3600
+Vilethorn, which look exactly right). **Retracted**: on a live skull it reads a flat 0 and
+never counts down. The template value is evidently a spawn-time input rather than the live
+field.
+
+### Editing a template does nothing
+
+Tested directly on 2026-08-27: the skull's template was given `penetrate -1`,
+`tileCollide 1` and `scale 2.5`, and the game was unaffected. `ContentSamples
+.ProjectilesByType` is a lookup table built at load for queries; `Projectile.SetDefaults`
+sets a new projectile's fields from code, and never consults it. The template was restored.
+
+This is the opposite of items, where the trainer's editor works by copying template bytes
+**into the live item object** — the template is where the bytes come from, not something
+the game reads.
+
+### Editing a live projectile works, and has to be enforced rather than triggered
+
+Writes to a live `Projectile` stick: `scale`, `penetrate` and `0x100` all held for 500 ms+
+with no sign of the game overwriting them, and a `scale` of 2.5 is visibly bigger in game
+(most obvious in water, where the projectile is slow enough to look at).
+
+**Detecting new projectiles by slot occupancy does not work.** A fast weapon reuses slots
+between polls, so a slot never looks new and almost nothing gets patched: 60 seconds of
+sustained fire produced three detections. Writing the desired value to every active
+projectile on every pass is both simpler and correct — a full pass costs 2.7 ms.
+
+### A note on measuring this at all
+
+Several conclusions in this file were nearly drawn from windows in which nothing was fired,
+including one that was written down and retracted the same hour. A probe that says "fire
+now" cannot be followed by someone who only sees its output afterwards. Any further work
+here wants a probe the player starts and stops themselves, or one that runs long enough
+that the timing does not matter — the same lesson the fishing recon recorded about liveness
+controls, arriving from a different direction.
 
 ## Tier 3: accessories — there is no data
 
