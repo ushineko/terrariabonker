@@ -36,21 +36,30 @@ The poller wins by volume. A stub is correct by construction.
       *(Armed once: counter 0 → 1, flag self-cleared. Idle 1 s disarmed: no movement.)*
 - [x] Arming it N times causes N uses. No burst, no repeats, no missed presses.
       *(20 arms → counter 1 → 21.)*
-- [ ] While disarmed, the player's own clicking is completely unaffected — a cheat that
-      makes the mouse feel wrong is worse than one that does nothing.
+- [x] While disarmed, the player's own clicking is completely unaffected — a cheat that
+      makes the mouse feel wrong is worse than one that does nothing. *(The maintainer
+      played with the cheat enabled and the panel boxes clear, including switching items
+      and fishing by hand, and reported nothing wrong. Judged by play rather than
+      measured; there is no instrument for "feels right".)*
 - [x] Disabling restores the displaced bytes with the game still running, and the game
       keeps running. *(Enable, test, disable, and the extractor put back after — all in
       one session with the game live.)*
 - [ ] The stub does not run when no player is loaded (a title-screen frame must not write
       through a null player).
-- [ ] CPU cost is indistinguishable from the cheat being off, measured rather than assumed.
+- [x] CPU cost is indistinguishable from the cheat being off, measured rather than assumed.
+      *(19.70 ms CPU per 1000 frames both on and off, medians equal and ranges
+      overlapping, across four alternating windows each. An earlier attempt reported
+      7 s of CPU per 6 s window against zero frames — a paused game — so the measurement
+      now discards any window whose frame counter did not advance.)*
 - [x] Fishing auto-catch is built on it and takes exactly one fish per bite. *(Confirmed
       through the shipped CLI: 8 fish including a Golden Crate, the bobber count never
       moving.)*
 - [x] Works from the CLI and the panel, sharing one implementation. *(`catch` blocks for
       the CLI, `catch-tick` serves the panel timer, both on one service round.)*
-- [ ] Verified in-game on the current build, and the anchor recorded in the build ledger
+- [x] Verified in-game on the current build, and the anchor recorded in the build ledger
       (unlike specs 041 and 042, this one patches code, so the ledger applies).
+      *(`borders_movement` claims 1.4.5.8+24893155 and nothing else; a full autofishing
+      session ran through the shipped CLI and the panel.)*
 
 ## Design
 
