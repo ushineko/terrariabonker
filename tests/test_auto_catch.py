@@ -299,3 +299,34 @@ def test_the_panel_logs_a_cast_only_when_the_line_went_out(qt_app, monkeypatch):
         assert "no line went out" in w.log.toPlainText()
     finally:
         w.close()
+
+
+def test_a_cast_that_goes_nowhere_stops_the_casting(monkeypatch):
+    """Reported from the game: with "and cast" on, swapping to a sword swung the sword.
+
+    The cheat cannot see what is in the player's hand, so it cannot tell a rod from a
+    pickaxe -- but it can tell that pressing produced no line, and that is enough to
+    stop. One stray press is a bug; a stream of them is a different program.
+    """
+    p = FakePatcher()
+    svc = _service(monkeypatch, [], p)
+    svc.CAST_CONFIRM = 0.02
+    svc.catch_tick(recast=True, budget=0.05)          # one press, no bobber
+    assert p.arms == 1
+    assert svc._seen_cast is False, "the gate stayed open after a cast went nowhere"
+    svc.catch_tick(recast=True, budget=0.05)          # and no more
+    svc.catch_tick(recast=True, budget=0.05)
+    assert p.arms == 1
+
+
+def test_a_real_cast_reopens_the_gate(monkeypatch):
+    """Picking the rod back up and casting must start it going again."""
+    p = FakePatcher()
+    water: list = []
+    svc = _service(monkeypatch, water, p)
+    svc.CAST_CONFIRM = 0.02
+    svc.catch_tick(recast=True, budget=0.05)
+    assert svc._seen_cast is False
+    water.append(_bobber(biting=False))               # the player casts
+    svc.catch_tick(recast=True, budget=0.05)
+    assert svc._seen_cast is True

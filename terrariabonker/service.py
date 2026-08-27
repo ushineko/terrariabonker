@@ -1060,6 +1060,12 @@ class Service:
                             break
                         time.sleep(0.01)
                     else:
+                        # Nothing went into the water, so stop pressing. The commonest
+                        # reason is that the player has swapped to something that is not
+                        # a rod, and a cheat that keeps arming then swings their sword
+                        # once a tick. One stray press is a bug; a stream of them is a
+                        # different program. The player's next real cast reopens the gate.
+                        self._seen_cast = False
                         events.append({"what": "cast", "confirmed": False})
                 break
             time.sleep(1 / 120)
