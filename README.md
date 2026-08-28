@@ -62,6 +62,8 @@ holds no state.*
   tooltip, sprite and a link to the wiki. Items can be given to you; NPCs can be spawned
   beside you at a distance you choose. Bosses ask twice — a confirmation naming the boss,
   then a countdown you can cancel.
+- **Projectile editor** — change what one weapon's shots do while you play: pass
+  through blocks, pierce more enemies, travel faster, be bigger, or last longer.
 
 **Cheats that change how the game behaves**
 
@@ -184,6 +186,30 @@ slots using slots the game already draws and already saves. Vanity *armour* is u
 A companion cheat, **accessories from inventory**, goes further: accessories anywhere in
 your bag grant their effects without being equipped, modifiers included. Both can be on at
 once, and the same accessory in two places applies twice.
+
+### Projectile editor
+
+Change what the shots from one weapon actually do. Pick a weapon on the **Projectiles**
+tab, and set any of:
+
+- **Pass through blocks** — shots ignore terrain
+- **Enemies pierced** — how many enemies one shot goes through, or infinite
+- **Extra ticks per frame** — how fast the shot travels
+- **Size**
+- **Lifetime** — how long a shot lives before it fades
+
+The panel tells you which projectile the weapon fires, and warns you when two weapons share
+one, because editing that projectile changes both.
+
+Nothing here is written into your save. Shots are built fresh by the game every time you
+fire, so the trainer holds the changes while it runs and the next shot after you close it
+is normal again.
+
+Two things worth knowing. **Lifetime is set once per shot rather than held**, because a
+shot that can never expire never frees its slot and the game only has room for so many at
+once. And lifetime is often the setting you actually want for getting through a wall: some
+weapons already ignore terrain but burn through their life very fast while inside it, so
+raising the lifetime is what carries them out the other side.
 
 ## Two kinds of cheat: value edits and code patches
 

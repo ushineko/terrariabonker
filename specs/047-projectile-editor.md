@@ -1,7 +1,6 @@
 # Spec 047: A per-item projectile editor
 
-**Status**: INCOMPLETE — implemented and tested headless; the in-game verification
-criterion is outstanding and needs the maintainer at the keyboard.
+**Status**: COMPLETE — verified in game by the maintainer.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -107,9 +106,13 @@ only thing that does.
       field is untouched — `reflected` sits at `0x0C9`, immediately after `hostile`.
 - [x] Offsets used by this feature are covered by `tools/monofields.py --verify`, and
       pinned as literals in a test with their provenance.
-- [ ] **In-game verification** (integration boundary — this writes to live game memory):
+- [x] **In-game verification** (integration boundary — this writes to live game memory):
       a weapon that normally collides is given `tileCollide = 0` and observed passing
       through terrain, with the before-value recorded to prove it was not already 0.
+      *Confirmed working in game by the maintainer. The before-value requirement was met
+      ahead of the feature by the recon A/B: `BoneGloveProj` read `tileCollide = 1` on 20
+      of 20 newly-seen projectiles, and forcing 0 moved it from 10.6% to 57.5% of samples
+      inside terrain against a slot-parity control — see `docs/item-fields.md`.*
 - [x] Headless tests: overrides reach the right slots, non-matching types are untouched,
       disabling stops writes, and a projectile that dies mid-sweep does not raise.
       *33 tests across the sweep, the CLI/argv contract, persistence and the panel.
