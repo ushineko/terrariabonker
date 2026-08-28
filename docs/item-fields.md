@@ -266,6 +266,35 @@ Field **widths** come from the same table and matter as much as offsets. `hostil
 byte with `reflected` packed at `0x0C9`, so the four-byte writes the probe used would have
 clobbered a neighbour.
 
+### The A/B, re-run with a probe that can see
+
+Forcing `tileCollide = 0` on even-numbered slots, control on odd, one 45-second run,
+firing at a wall. Two results, and the first explains the whole preceding investigation.
+
+**`BookOfSkullsSkull` (837) already has `tileCollide = 0`.** All 89 newly-seen skulls read
+0 *before any write*. The skulls ignore terrain by design, so forcing the flag either way
+is a null operation — control and patched are indistinguishable (67.0% vs 64.6% of samples
+inside solid tiles, 6.533 vs 6.558 displacement per sample). Every earlier session spent
+its effort enforcing a value the game had already set, on the one projectile in the game
+least able to demonstrate the effect.
+
+**`BoneGloveProj` (532) proves the edit works.** It defaults to `tileCollide = 1` (20 of
+20), and forcing 0 changed its behaviour decisively:
+
+| type 532 | in blocks | moved/sample |
+|---|---|---|
+| control (untouched) | 10.6% | 8.10 |
+| patched (`tileCollide = 0`) | **57.5%** | **27.97** |
+
+5.4× the time inside terrain and 3.4× the displacement, against a slot-parity control in
+the same run and the same wall. A projectile that passes through walls instead of stopping
+at them. **Live projectile field editing works**, and this is the first measurement in this
+file that says so on evidence rather than impression.
+
+The probe now reports every field's value *before* it writes it, and flags the case where
+the value was already what we were about to enforce. That check would have ended the
+original investigation in one run.
+
 ## Tier 3: accessories — there is no data
 
 Hermes Boots (run speed) and Cloud in a Bottle (double jump) do entirely different things.

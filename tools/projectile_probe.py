@@ -113,6 +113,12 @@ def main() -> int:
     # repeatedly, while one that passes through spends its life in open air.
     stat = collections.defaultdict(lambda: [0, 0, 0, 0.0, 0.0])
     last = {}                  # slot -> (position, type), for actual displacement
+    # What each field held BEFORE we touched it, sampled once per newly-seen projectile.
+    # Enforcing a value a projectile already had produces a null result that looks
+    # exactly like a field that does nothing, and an afternoon was lost to that.
+    defaults = collections.defaultdict(lambda: collections.defaultdict(
+        collections.Counter))
+    born = set()
     t0 = said = time.time()
     while time.time() - t0 < args.seconds:
         for slot, obj in enumerate(struct.unpack("<1001I", mem.read(arr + 0x10, 4004))):
@@ -122,6 +128,17 @@ def main() -> int:
             if args.type is not None and ptype != args.type:
                 continue
             patched = (not args.ab) or (slot % 2 == 0)
+            if wanted and (slot, ptype) not in born:
+                born.add((slot, ptype))
+                for name in wanted:
+                    off, kind = FIELDS[name]
+                    if kind == "f32":
+                        cur = round(struct.unpack("<f", mem.read(obj + off, 4))[0], 3)
+                    elif kind == "b8":
+                        cur = mem.read(obj + off, 1)[0]
+                    else:
+                        cur = mem.read_i32(obj + off)
+                    defaults[ptype][name][cur] += 1
             if wanted and patched:
                 for name, value in wanted.items():
                     off, kind = FIELDS[name]
@@ -156,6 +173,17 @@ def main() -> int:
     if not stat:
         print("nothing was flying. Fire something while this runs.")
         return 0
+    if defaults:
+        print("value each field held BEFORE any write (per newly-seen projectile):")
+        for ptype in sorted(defaults):
+            for name in sorted(defaults[ptype]):
+                counts = defaults[ptype][name]
+                shown = ", ".join(f"{v}x{n}" for v, n in counts.most_common(4))
+                flag = ""
+                if len(counts) == 1 and next(iter(counts)) == wanted.get(name):
+                    flag = "   <-- ALREADY THIS VALUE; enforcing it proves nothing"
+                print(f"  type {ptype:>5}  {name:<14} {shown}{flag}")
+        print()
     print(f"{'type':>6} {'patched':>8} {'in blocks':>10} {'in open':>9} {'% blocks':>9} "
           f"{'velocity':>9} {'moved/sample':>13}")
     for (ptype, patched), (ins, outs, n, spd, moved) in sorted(stat.items()):
