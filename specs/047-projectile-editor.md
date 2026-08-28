@@ -66,6 +66,12 @@ the UI must say so rather than imply per-weapon isolation it does not have.
 | `scale` | `0x08C` | f32 | Visual and hitbox size; the game varies it routinely |
 | `timeLeft` | `0x0B4` | i32 | Lifetime in ticks |
 
+`timeLeft` earns its place on evidence rather than symmetry. The Book of Skulls passes
+through only a few tiles despite `tileCollide = 0`, because `AI_001` special-cases type 837
+to subtract 33 ticks of life for every tick its centre is inside a solid tile. Terrain ages
+that projectile rather than stopping it, so enforcing `timeLeft` — not `tileCollide` — is
+what makes it cross a wall. See `docs/item-fields.md`.
+
 **Fields deliberately excluded**, and the reason recorded so it is not re-litigated:
 
 - `aiStyle` — reassigning behaviour makes the game run an AI against a projectile whose

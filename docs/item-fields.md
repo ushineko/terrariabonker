@@ -295,6 +295,41 @@ The probe now reports every field's value *before* it writes it, and flags the c
 the value was already what we were about to enforce. That check would have ended the
 original investigation in one run.
 
+### `tileCollide` is not the only thing terrain does to a projectile
+
+Reported from play: the Book of Skulls goes through *some* tiles, not all — despite
+`tileCollide = 0`. The answer is a hardcoded special case in `AI_001`, and it is neither
+`tileCollide` nor `penetrate`:
+
+```csharp
+if (type == 837) {                      // BookOfSkullsSkull
+    int drain = 33;
+    if (timeLeft > drain && WorldGen.SolidTile(Center.ToTileCoordinates()))
+        timeLeft -= drain;
+}
+```
+
+**Every tick its centre is inside a solid tile, the skull loses 33 ticks of life.** It
+spawns with `timeLeft = 480`, so terrain does not stop it — terrain ages it ~33× faster.
+The drain stops once `timeLeft <= 33`, so a skull gets about 14 draining ticks plus the
+remaining 18: ~32 ticks inside rock, and at the measured 4.50 px/tick that is roughly
+**9 tiles** of continuous stone before it expires.
+
+Two things follow.
+
+**`penetrate` is unrelated.** It is the number of NPCs a projectile passes through (3 for
+skulls) and never decrements on tiles. The two are easy to conflate because both read as
+"how much can it go through", and they are separate systems.
+
+**The lever for this weapon is `timeLeft`, not `tileCollide`.** Enforcing `timeLeft` every
+poll cancels the drain outright, which is exactly what spec 047's field list already
+allows. A per-projectile behaviour that looked like a collision setting turned out to be a
+lifetime setting, and only the game's own code said so.
+
+The general warning for the editor: a projectile's observable behaviour is not necessarily
+governed by the field that appears to name it. `AI_001` alone writes `tileCollide` in 13
+places and reads it in none, and special-cases type 837 five separate times.
+
 ## Tier 3: accessories — there is no data
 
 Hermes Boots (run speed) and Cloud in a Bottle (double jump) do entirely different things.
