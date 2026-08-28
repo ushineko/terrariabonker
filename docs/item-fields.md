@@ -229,8 +229,14 @@ game and filed as a coincidence — was the truest reading anyone took. The prob
 *find*, and therefore only *patch*, wet projectiles. The size change appeared at the
 waterline because that is where each skull became visible to the tool.
 
-Expected fallout, not yet confirmed in game: bobber detection should fail in **lava**
-(Hotline Fishing Hook) and honey, where `lavaWet`/`honeyWet` are set and `wet` is not.
+Expected fallout, predicted from the field layout: bobber detection should fail in **lava**
+and honey, where `lavaWet` (`0x040`) and `honeyWet` (`0x03E`) are set and `wet` is not — a
+bobber floating in lava would have read `wet = 0` and been invisible to every bobber check.
+
+**Confirmed in game after the fix**: auto-fishing in lava works, with a Golden Fishing Rod
+and Magma Snail bait. Worth recording as the one prediction in this whole investigation that
+was made from the code *before* being observed, and held. Every other model here was
+reasoned into place and turned out wrong.
 
 ### Ask the runtime instead of inferring
 
