@@ -130,3 +130,37 @@ def test_a_finished_bobber_is_not_in_the_water(mem):
     mem.write(obj + P.ACTIVE_OFF, b"\x00")          # the game is done with it
     assert P.find_bobbers(mem, ARR) == []
     assert P.read_bobber(mem, ARR, 2) is None
+
+
+def test_active_is_the_offset_the_runtime_gives(mem):
+    """Pin the offsets as literals, because no other test in this file can.
+
+    Every test here plants its fixture through ``P.ACTIVE_OFF`` and then reads it back
+    through ``P.ACTIVE_OFF``, so the whole suite passes for any value of that constant.
+    It did: ``active`` was read at ``0x03C`` for eight releases, which is ``Entity.wet``.
+    Nothing noticed, because the only projectile the trainer looked at was a fishing
+    bobber -- and a bobber floats in water, so ``wet`` is true exactly when a live bobber
+    exists. Projectiles in flight are dry, which is why no probe ever saw one.
+
+    These numbers come from the mono runtime's own field metadata and are re-checkable
+    against a running game with ``sudo python3 tools/monofields.py --verify``.
+    """
+    assert P.ACTIVE_OFF == 0x078
+    assert P.WET_OFF == 0x03C
+    assert P.ACTIVE_OFF != P.WET_OFF
+    assert (P.BOBBER_OFF, P.AI_OFF, P.LOCALAI_OFF) == (0x088, 0x044, 0x048)
+
+
+def test_a_dry_projectile_is_still_active(mem):
+    """The bug in one assertion: liveness must not depend on being in water.
+
+    A bobber sits in water and a skull does not, so reading ``wet`` as ``active`` looks
+    perfect for fishing and is blind to everything else the game shoots.
+    """
+    plant(mem, ai=(0.0, -5.0, 0.0), local_ai=(0.0, 17.0, 0.0))
+    obj = OBJ0 + 2 * STRIDE
+    mem.write(obj + P.WET_OFF, b"\x00")             # out of the water...
+    assert P.read_bobber(mem, ARR, 2) is not None   # ...but still a live projectile
+
+    mem.write(obj + P.ACTIVE_OFF, b"\x00")          # only `active` decides
+    assert P.read_bobber(mem, ARR, 2) is None

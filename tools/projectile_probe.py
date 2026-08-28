@@ -18,8 +18,15 @@ collides anyway cannot be mistaken for the edit working. The verdict column asks
 map whether the projectile is standing inside a solid tile, which is a fact rather than an
 impression of what happened on screen.
 
-Offsets are from `Projectile.SetDefaults`' own declared values (see docs/item-fields.md);
-`position` is Entity's, shared by every subclass.
+Offsets come from the mono runtime's own field metadata (`tools/monofields.py`), not
+from inference. That matters here more than anywhere else in the project: this tool used
+to read `active` at 0x03C, which is `Entity.wet`. Projectiles in flight are dry, so it
+found nothing and every result it produced before that fix -- including a 30.7%-vs-0.9%
+collision A/B -- described only the projectiles that happened to be underwater.
+
+Field WIDTHS matter too. `hostile`, `friendly` and `tileCollide` are single bytes packed
+against neighbours (`reflected` sits at 0xC9, right after `hostile`), so a 4-byte write
+would silently clobber the field next door.
 """
 
 from __future__ import annotations
@@ -36,18 +43,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from terrariabonker import locate, proc, tiles                     # noqa: E402
 from terrariabonker import projectiles as P                        # noqa: E402
 
-ACTIVE, POSX, VELX, PTYPE = 0x03C, 0x00C, 0x014, 0x094
+ACTIVE, POSX, VELX, PTYPE = 0x078, 0x00C, 0x014, 0x094
 
-#: name -> (offset, kind). Solved against the game's own SetDefaults, except where noted.
+#: name -> (offset, kind), all confirmed by `tools/monofields.py --verify`.
+#: "b8" is a one-byte bool; writing it as an i32 would take three neighbouring bytes.
 FIELDS = {
     "scale": (0x08C, "f32"),
     "alpha": (0x098, "i32"),
     "aiStyle": (0x0B0, "i32"),
     "timeLeft": (0x0B4, "i32"),
-    "friendly": (0x0D0, "i32"),
+    "damage": (0x0BC, "i32"),
+    "hostile": (0x0C8, "b8"),
+    "knockBack": (0x0CC, "f32"),
+    "friendly": (0x0D0, "b8"),
     "penetrate": (0x0D4, "i32"),
     "maxPenetrate": (0x0DC, "i32"),
-    "tileCollide": (0x100, "i32"),
+    "tileCollide": (0x100, "b8"),
     "extraUpdates": (0x104, "i32"),
     "width": (0x034, "i32"),
     "height": (0x038, "i32"),
@@ -60,7 +71,10 @@ def parse_set(pairs):
         name, _, value = p.partition("=")
         if name not in FIELDS:
             sys.exit(f"unknown field {name!r}; known: {', '.join(sorted(FIELDS))}")
-        out[name] = float(value) if FIELDS[name][1] == "f32" else int(value)
+        kind = FIELDS[name][1]
+        out[name] = float(value) if kind == "f32" else int(value)
+        if kind == "b8" and out[name] not in (0, 1):
+            sys.exit(f"{name} is a bool: pass 0 or 1, not {value}")
     return out
 
 
@@ -113,6 +127,8 @@ def main() -> int:
                     off, kind = FIELDS[name]
                     if kind == "f32":
                         mem.write(obj + off, struct.pack("<f", value))
+                    elif kind == "b8":
+                        mem.write(obj + off, bytes([int(value)]))
                     else:
                         mem.write_i32(obj + off, int(value))
             x, y = struct.unpack("<ff", mem.read(obj + POSX, 8))

@@ -32,7 +32,14 @@ ARRAY_LEN = 1001              # Main.projectile is Projectile[1001]
 ARRAY_LEN_OFF = layout.ARR_LEN_OFF
 ARRAY_DATA_OFF = layout.ARR_DATA_OFF
 
-ACTIVE_OFF = 0x03C            # Projectile.active (bool)
+ACTIVE_OFF = 0x078            # Projectile.active (bool)
+#: 0x03C -- where ``active`` was wrongly read until v0.39.0 -- is ``Entity.wet``.
+#: The two are indistinguishable while fishing, because a bobber floats in water and is
+#: therefore always wet, so every test and every hour of play agreed with the wrong
+#: offset. Projectiles in FLIGHT are dry, which is why no probe ever saw one. Confirmed
+#: against the mono runtime's own field metadata (``tools/monofields.py``) and live: 12
+#: active projectiles in the array, all with ``wet == 0``.
+WET_OFF = 0x03C               # Entity.wet (bool) -- kept named so it cannot be reused
 BOBBER_OFF = 0x088            # Projectile.bobber (bool)
 AI_OFF = 0x044                # Projectile.ai      -> float[3]
 LOCALAI_OFF = 0x048           # Projectile.localAI -> float[3]

@@ -96,7 +96,7 @@ Matching those against the template bytes solves the offsets instead of inferrin
 | `tileCollide` | `0x100` | 290/293 |
 | `aiStyle` | `0x0B0` | 765/780 |
 | `friendly` | `0x0D0` | 584/592 |
-| `hostile` | *unresolved* | ties three ways (`0x030`, `0x078`, `0x0C4`) — see below |
+| `hostile` | `0x0C8` | *not* solvable this way — settled later from runtime metadata |
 | `width`, `height` | `0x034`, `0x038` | 720/845 |
 
 The shortfalls are where a `DefaultTo*` helper or a shared tail overwrites what the case
@@ -105,6 +105,9 @@ declared, not disagreement about the offset.
 **A field is only pinned when its declared values vary.** `SetDefaults` almost always
 declares `hostile = 1`, so every offset that happens to hold 1 scores equally and three tie
 — that one is not solved, and was briefly written down as `0x030` before the check was run.
+It is `0x0C8`, and all three tied candidates were wrong: `0x030` is `direction`, `0x078` is
+`active`, `0x0C4` is `spriteDirection`. A tie among wrong answers looks exactly like a tie
+among plausible ones, which is the argument for not settling such fields by scoring at all.
 `tileCollide` survives the same check honestly: it is declared `0` 266 times and `1` 27
 times, and only `0x100` fits both. `friendly` likewise (575 ones, 17 zeros, only `0x0D0`).
 `aiStyle` and `timeLeft` are decisive on their own, with 210 and 40 distinct values. `tileCollide` at `0x100` and `friendly` at
@@ -143,6 +146,11 @@ sustained fire produced three detections. Writing the desired value to every act
 projectile on every pass is both simpler and correct — a full pass costs 2.7 ms.
 
 ### The open question, and how to answer it
+
+> **Superseded.** Everything from here to the end of this tier was measured with a
+> probe that read `Entity.wet` as `Projectile.active` and could therefore only see
+> projectiles that were underwater. The A/B table below is void. See
+> "The offset that was wrong for eight releases" at the end of this tier.
 
 `tileCollide` is the right field at the right offset, the write persists, and
 `HandleMovement` reads it — yet 437 skulls forced to `1` still passed through blocks. That
@@ -194,6 +202,69 @@ The fix is not a longer window. It is that the probe belongs to the player:
 `tools/projectile_probe.py` is run by whoever is holding the mouse, which removes the
 co-ordination entirely. The same lesson the fishing recon recorded about liveness controls,
 arriving from a different direction.
+
+**Most of that diagnosis was wrong, and the paragraph above is kept as written because the
+error is the point.** The windows were not empty and the player was firing throughout. The
+probe read `Entity.wet` as `Projectile.active`, so a projectile in flight — dry — was
+filtered out before anything else ran. Every "nothing was fired" was the tool failing to
+see, and it was reported to the player as a fact about their game twice, against their
+explicit correction both times. A measurement that disagrees with the person watching the
+screen is a claim about the instrument first.
+
+### The offset that was wrong for eight releases
+
+`Projectile.active` is at **`0x078`**. It was read at `0x03C` from the first projectile
+work until v0.40.0, and `0x03C` is `Entity.wet`.
+
+Nothing caught it, and the reason is worth recording. The only projectile this project
+ever looked at was a fishing bobber — and **a bobber floats in water, so `wet` is true
+exactly when a live bobber exists.** The wrong offset was indistinguishable from the right
+one across the entire feature that used it: 617 tests, an auto-fishing session that landed
+23 fish unattended, and every hour of play agreed with it. The first thing to disagree was
+a projectile that flies through air.
+
+It also means the collision A/B above measured only projectiles that were underwater, and
+that the "skulls get bigger the moment they hit the water" observation — reported from the
+game and filed as a coincidence — was the truest reading anyone took. The probe could only
+*find*, and therefore only *patch*, wet projectiles. The size change appeared at the
+waterline because that is where each skull became visible to the tool.
+
+Expected fallout, not yet confirmed in game: bobber detection should fail in **lava**
+(Hotline Fishing Hook) and honey, where `lavaWet`/`honeyWet` are set and `wet` is not.
+
+### Ask the runtime instead of inferring
+
+`tools/monofields.py` reads field offsets **by name** out of mono's own metadata.
+`MonoClassField` on 32-bit is `{MonoType *type; const char *name; MonoClass *parent; int
+offset;}`, so locating a name string and then a pointer to it puts the offset 8 bytes
+further on. It deliberately does not walk `MonoVTable` or `MonoClass`, whose layouts shift
+between mono builds; avoiding them is what should let this survive a game update.
+
+    sudo python3 tools/monofields.py --verify        # every constant, against the runtime
+
+`--verify` checks 42 offsets across `Entity`, `Projectile`, `Item` and `Player` and exits
+non-zero on any disagreement. It is the answer to a problem this project kept re-meeting:
+a test that plants a fixture through a constant and reads it back through the same constant
+proves only that the constant equals itself. That is how `active` survived, and how a
+mutation moving `crit` from `0x150` to `0x154` passed the whole suite in v0.39.0.
+
+Two records it settled immediately:
+
+| Field | Believed | Runtime |
+|---|---|---|
+| `Projectile.active` | `0x03C` (= `wet`) | **`0x078`** |
+| `Projectile.hostile` | unresolved, briefly `0x030` | **`0x0C8`** (a bool) |
+| `Item.armorPenetration` | predicted `0x154`, unwritten | `0x154` — confirmed |
+| `Item.bonusTagDamage` | predicted `0x158`, unwritten | `0x158` — confirmed |
+| `Item.reuseDelay` | unknown | **`0x164`** |
+
+The two `Item` fields v0.39.0 declined to write were right all along. They remain
+unwritten: verifying an offset removes the reason to refuse, but writing new fields into
+saved items is a behaviour change and belongs to a spec, not to a recon note.
+
+Field **widths** come from the same table and matter as much as offsets. `hostile` is one
+byte with `reflected` packed at `0x0C9`, so the four-byte writes the probe used would have
+clobbered a neighbour.
 
 ## Tier 3: accessories — there is no data
 
