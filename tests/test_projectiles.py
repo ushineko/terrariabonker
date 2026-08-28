@@ -150,6 +150,12 @@ def test_active_is_the_offset_the_runtime_gives(mem):
     assert P.ACTIVE_OFF != P.WET_OFF
     assert (P.BOBBER_OFF, P.AI_OFF, P.LOCALAI_OFF) == (0x088, 0x044, 0x048)
 
+    # The editable fields (spec 047). These are written into a running game, so a wrong
+    # one corrupts whatever is packed beside it rather than failing a test.
+    assert (P.TYPE_OFF, P.SCALE_OFF, P.TIMELEFT_OFF) == (0x094, 0x08C, 0x0B4)
+    assert (P.PENETRATE_OFF, P.MAXPENETRATE_OFF) == (0x0D4, 0x0DC)
+    assert (P.TILECOLLIDE_OFF, P.EXTRAUPDATES_OFF) == (0x100, 0x104)
+
 
 def test_a_dry_projectile_is_still_active(mem):
     """The bug in one assertion: liveness must not depend on being in water.

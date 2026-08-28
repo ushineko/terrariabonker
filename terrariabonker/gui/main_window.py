@@ -258,6 +258,14 @@ class MainWindow(QWidget):
         self._catch_timer.timeout.connect(self._tick_catch)
         self._catch_inflight = False
         self._catch_n = 0
+        self._proj_timer = QTimer(self)
+        self._proj_timer.timeout.connect(self._tick_projectiles)
+        self._proj_inflight = False
+        #: projectile type -> {field: value}. Keyed by projectile, not by weapon: two
+        #: weapons can share a projectile, and the panel says so rather than pretending.
+        self._proj_overrides: dict = {}
+        self._proj_shoot = 0               # what the selected weapon fires, 0 = nothing
+        self._proj_known: dict = {}        # item type -> its shoot type, once resolved
         self._vein_inflight = False
         self.refresh_status()
         self.refresh_patches()               # code patches live on the Trainer tab
@@ -326,6 +334,8 @@ class MainWindow(QWidget):
         self.tabs = tabs
         tabs.addTab(self._player_tab(), "Player")
         tabs.addTab(self._effects_tab(), "Effects")
+        self.tab_projectiles = self._projectiles_tab()
+        tabs.addTab(self.tab_projectiles, "Projectiles")
         tabs.addTab(self._patches_tab(), "Patches")
         # Kept as attributes because _on_tab_changed dispatches on the widget, not on an
         # index: indices moved when this strip was reorganised, and a stale number is a
@@ -495,6 +505,223 @@ class MainWindow(QWidget):
         col.addStretch()
         return w
 
+    #: field name -> (checkbox attr, spin attr). tileCollide has no number: it is the
+    #: checkbox. Order is the order they appear.
+    _PROJ_FIELDS = (
+        ("tileCollide", "cb_pj_nocollide", None),
+        ("penetrate", "cb_pj_penetrate", "sp_pj_penetrate"),
+        ("extraUpdates", "cb_pj_speed", "sp_pj_speed"),
+        ("scale", "cb_pj_scale", "sp_pj_scale"),
+        ("timeLeft", "cb_pj_life", "sp_pj_life"),
+    )
+
+    def _projectiles_tab(self) -> QWidget:
+        """Change what a weapon's projectiles do, while the game runs.
+
+        Nothing here is written to the game's data: projectiles are transient objects and
+        `SetDefaults` rebuilds each one from the game's own literals. Switching this off
+        restores nothing because there is nothing to restore.
+        """
+        w = QWidget()
+        col = QVBoxLayout(w)
+
+        note = QLabel("Changes the projectiles a weapon fires, while the trainer runs. "
+                      "Nothing is saved into the game — close the trainer and the next "
+                      "shot is normal again.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray")
+        col.addWidget(note)
+
+        pick = QHBoxLayout()
+        pick.addWidget(QLabel("Weapon:"))
+        self.cb_pj_weapon = QComboBox()
+        self.cb_pj_weapon.setMinimumWidth(220)
+        self.cb_pj_weapon.currentIndexChanged.connect(self._pj_weapon_changed)
+        pick.addWidget(self.cb_pj_weapon, 1)
+        btn = QPushButton("Refresh")
+        btn.clicked.connect(self._pj_fill_weapons)
+        pick.addWidget(btn)
+        col.addLayout(pick)
+
+        self.lbl_pj_shoot = QLabel("Pick a weapon from your inventory.")
+        self.lbl_pj_shoot.setWordWrap(True)
+        self.lbl_pj_shoot.setStyleSheet("color: gray")
+        col.addWidget(self.lbl_pj_shoot)
+
+        box = QGroupBox("What its projectiles do")
+        grid = QGridLayout(box)
+        self.cb_pj_nocollide = QCheckBox("Pass through blocks")
+        self.cb_pj_penetrate = QCheckBox("Enemies pierced")
+        self.sp_pj_penetrate = QSpinBox()
+        self.sp_pj_penetrate.setRange(-1, 999)
+        self.sp_pj_penetrate.setValue(-1)
+        self.sp_pj_penetrate.setSpecialValueText("infinite")
+        self.cb_pj_speed = QCheckBox("Extra ticks per frame")
+        self.sp_pj_speed = QSpinBox()
+        self.sp_pj_speed.setRange(0, 16)
+        self.sp_pj_speed.setValue(2)
+        self.cb_pj_scale = QCheckBox("Size")
+        self.sp_pj_scale = QDoubleSpinBox()
+        self.sp_pj_scale.setRange(0.05, 10.0)
+        self.sp_pj_scale.setSingleStep(0.25)
+        self.sp_pj_scale.setValue(2.0)
+        self.cb_pj_life = QCheckBox("Lifetime (ticks)")
+        self.sp_pj_life = QSpinBox()
+        self.sp_pj_life.setRange(1, 216000)
+        self.sp_pj_life.setValue(3000)
+
+        for r, (_name, cbn, spn) in enumerate(self._PROJ_FIELDS):
+            grid.addWidget(getattr(self, cbn), r, 0)
+            if spn:
+                grid.addWidget(getattr(self, spn), r, 1)
+        grid.setColumnStretch(2, 1)
+        col.addWidget(box)
+
+        life = QLabel("Lifetime is set once per projectile, not held — a projectile that "
+                      "can never expire never frees its slot, and the game only has 1001. "
+                      "Raising it is what lets a shot cross a thick wall: some projectiles "
+                      "burn life fast while inside solid blocks.")
+        life.setWordWrap(True)
+        life.setStyleSheet("color: gray")
+        col.addWidget(life)
+
+        self.cb_projectiles = QCheckBox("Apply while I play")
+        self.cb_projectiles.toggled.connect(self._set_projectile_watch)
+        col.addWidget(self.cb_projectiles)
+
+        for _name, cbn, spn in self._PROJ_FIELDS:
+            getattr(self, cbn).toggled.connect(self._pj_store)
+            if spn:
+                getattr(self, spn).valueChanged.connect(self._pj_store)
+
+        col.addStretch(1)
+        return w
+
+    def _pj_fill_weapons(self) -> None:
+        """Fill the weapon list from the inventory the grid already fetched."""
+        rows = getattr(self, "_all_rows", None) or []
+        seen, items = set(), []
+        for row in rows:
+            t = int(row.get("type") or 0)
+            if t and t not in seen:
+                seen.add(t)
+                items.append((names.name(t) or f"item {t}", t))
+        items.sort()
+        current = self.cb_pj_weapon.currentData()
+        self.cb_pj_weapon.blockSignals(True)
+        self.cb_pj_weapon.clear()
+        for label, t in items:
+            self.cb_pj_weapon.addItem(label, t)
+        if current is not None:
+            i = self.cb_pj_weapon.findData(current)
+            if i >= 0:
+                self.cb_pj_weapon.setCurrentIndex(i)
+        self.cb_pj_weapon.blockSignals(False)
+        if not items:
+            self.lbl_pj_shoot.setText("No inventory loaded yet — open the Inventory tab.")
+        else:
+            self._pj_weapon_changed()
+
+    def _pj_weapon_changed(self) -> None:
+        """Resolve the selected weapon to the projectile it fires (``Item.shoot``)."""
+        item = self.cb_pj_weapon.currentData()
+        if item is None:
+            return
+
+        def done(raw: str):
+            err = client.error_in(raw)
+            if err is not None:
+                self.lbl_pj_shoot.setText(f"Could not read what this fires: {err}")
+                return
+            got = (client.replies(raw) or [{}])[-1]
+            shoot = int(got.get("shoot") or 0)
+            self._proj_shoot = shoot
+            if not shoot:
+                self.lbl_pj_shoot.setText("This item fires no projectile, so there is "
+                                          "nothing here to change.")
+            else:
+                sharing = [n for n, t in
+                           ((self.cb_pj_weapon.itemText(i), self.cb_pj_weapon.itemData(i))
+                            for i in range(self.cb_pj_weapon.count()))
+                           if t != item and self._proj_known.get(t) == shoot]
+                extra = (f" Also fired by: {', '.join(sorted(sharing))} — editing one "
+                         f"edits them all." if sharing else "")
+                self.lbl_pj_shoot.setText(f"Fires projectile {shoot}.{extra}")
+            self._proj_known[item] = shoot
+            self._pj_select(shoot)
+
+        self._call(client.projectile_of_argv(int(item)), on_output=done)
+
+    def _pj_select(self, shoot: int) -> None:
+        """Point the controls at a projectile type: set it, then show what it has.
+
+        One method rather than two calls, because the two must not drift. Setting the
+        type without reloading leaves the previous weapon's boxes ticked, and the next
+        edit writes them onto the new projectile -- a leak between weapons that the panel
+        gives no sign of.
+        """
+        self._proj_shoot = int(shoot or 0)
+        self._pj_load_fields(self._proj_shoot)
+
+    def _pj_load_fields(self, shoot: int) -> None:
+        """Show the overrides already stored for this projectile type."""
+        saved = self._proj_overrides.get(shoot, {})
+        for name, cbn, spn in self._PROJ_FIELDS:
+            cb, sp = getattr(self, cbn), (getattr(self, spn) if spn else None)
+            for widget in (cb, sp):
+                if widget is not None:
+                    widget.blockSignals(True)
+            has = name in saved
+            # tileCollide is the checkbox itself: ticked means "pass through", i.e. 0.
+            cb.setChecked(has if name != "tileCollide" else (saved.get(name) == 0))
+            if sp is not None and has:
+                sp.setValue(type(sp.value())(saved[name]))
+            for widget in (cb, sp):
+                if widget is not None:
+                    widget.blockSignals(False)
+
+    def _pj_store(self) -> None:
+        """Collect the controls into ``_proj_overrides`` for the selected projectile."""
+        shoot = self._proj_shoot
+        if not shoot:
+            return
+        wanted = {}
+        for name, cbn, spn in self._PROJ_FIELDS:
+            if not getattr(self, cbn).isChecked():
+                continue
+            wanted[name] = 0 if name == "tileCollide" else getattr(self, spn).value()
+        if wanted:
+            self._proj_overrides[shoot] = wanted
+        else:
+            self._proj_overrides.pop(shoot, None)
+
+    def _set_projectile_watch(self, on: bool) -> None:
+        """Follow the checkbox, and tell the worker to forget state when it goes off."""
+        if on and not self._proj_timer.isActive():
+            self._proj_timer.start(50)
+        elif not on and self._proj_timer.isActive():
+            self._proj_timer.stop()
+            self._proj_inflight = False
+            self._call(client.projectile_stop_argv())
+
+    def _tick_projectiles(self) -> None:
+        """One slice of enforcement. Skipped while a request is out, like the others."""
+        if not self.helper.available or self._proj_inflight:
+            return
+        if not self._proj_overrides:
+            return
+
+        def done(raw: str):
+            self._proj_inflight = False
+            err = client.error_in(raw)
+            if err is not None:
+                self.log.appendPlainText(f"[projectile] {err}")
+                self.cb_projectiles.setChecked(False)
+
+        self._proj_inflight = True
+        if not self.helper.request(client.projectile_tick_argv(self._proj_overrides), done):
+            self._proj_inflight = False
+
     def _patches_tab(self) -> QWidget:
         w = QWidget()
         col = QVBoxLayout(w)
@@ -597,6 +824,13 @@ class MainWindow(QWidget):
                 self._extract_sprites(after=self.refresh_inventory)   # then redraw the grid
         elif w is self.tab_recipes:
             self._ensure_recipe_grid()
+        elif w is self.tab_projectiles:
+            # The weapon list is built from the inventory the grid already fetched, so a
+            # player who has not opened Inventory yet gets told that rather than an empty
+            # combo with no explanation.
+            if not getattr(self, "_all_rows", None):
+                self.refresh_inventory()
+            self._pj_fill_weapons()
 
     def _patches_group(self) -> QGroupBox:
         """Code-patch cheats, embedded in the Trainer tab. No Cheat Engine at
@@ -1732,6 +1966,7 @@ class MainWindow(QWidget):
         it off is the bug being fixed, and the patches on the other tab already come back
         this way.
         """
+        self._proj_overrides = uistate.load_projectiles()
         saved = uistate.load_effects()
         if not saved:
             return
@@ -1745,6 +1980,7 @@ class MainWindow(QWidget):
     def closeEvent(self, event):
         uistate.save_size(self.width(), self.height())
         uistate.save_effects(self._effects_state())
+        uistate.save_projectiles(self._proj_overrides)
         self._status_timer.stop()
         self._inv_timer.stop()
         self.helper.stop()

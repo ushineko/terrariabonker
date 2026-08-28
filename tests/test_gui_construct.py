@@ -19,12 +19,15 @@ def test_main_window_builds_with_every_tab(gui_window, monkeypatch):
     w = gui_window()
     try:
         titles = [w.tabs.tabText(i) for i in range(w.tabs.count())]
-        assert titles == ["Player", "Effects", "Patches", "Inventory", "Recipes",
-                          "Compendium"]
+        # Projectiles sits beside Effects because it behaves like one: held by the
+        # trainer, gone when it closes. Patches keep working until the game restarts.
+        assert titles == ["Player", "Effects", "Projectiles", "Patches", "Inventory",
+                          "Recipes", "Compendium"]
         assert w.log is not None, "the log widget the tabs log through must exist"
         # the controls that moved out of the old Trainer tab must still be wired
         for attr in ("cb_god", "cb_mana", "sp_maxhp", "sp_maxmana", "sp_reach",
-                     "cb_potions", "sp_potion_stack"):
+                     "cb_potions", "sp_potion_stack",
+                     "cb_projectiles", "cb_pj_weapon", "cb_pj_nocollide", "sp_pj_life"):
             assert getattr(w, attr, None) is not None, f"{attr} was lost in the split"
     finally:
         w.close()
