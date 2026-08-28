@@ -233,8 +233,8 @@ Expected fallout, predicted from the field layout: bobber detection should fail 
 and honey, where `lavaWet` (`0x040`) and `honeyWet` (`0x03E`) are set and `wet` is not — a
 bobber floating in lava would have read `wet = 0` and been invisible to every bobber check.
 
-**Confirmed in game after the fix**: auto-fishing in lava works, with a Golden Fishing Rod
-and Magma Snail bait. Worth recording as the one prediction in this whole investigation that
+**Confirmed in game after the fix**: auto-fishing works in both **lava** (Golden Fishing
+Rod, Magma Snail bait) and **honey**. Worth recording as the one prediction in this whole investigation that
 was made from the code *before* being observed, and held. Every other model here was
 reasoned into place and turned out wrong.
 
