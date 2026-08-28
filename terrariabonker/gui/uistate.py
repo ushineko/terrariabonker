@@ -1,4 +1,4 @@
-"""Unprivileged panel state: the window size, and which Effects are switched on.
+"""Unprivileged panel state: window size, Effects switches, projectile overrides.
 
 Kept under ``~/.cache`` alongside the sprite cache, and for the same reason recorded
 there: the config directory can be root-owned from sudo memory commands, so the
@@ -88,4 +88,36 @@ def save_effects(state: dict) -> None:
     """Record the Effects panel, keeping the window size."""
     d = _read()
     d["effects"] = {k: v for k, v in state.items() if isinstance(v, (bool, int))}
+    _write(d)
+
+
+def load_projectiles() -> dict:
+    """Saved projectile overrides as ``{projectile type: {field: value}}``. ``{}`` unset.
+
+    Keys come back from JSON as strings and are converted here, because everything
+    downstream keys on an int projectile type and a silently-stringy key would match
+    nothing while looking perfectly correct in the file.
+    """
+    got = _read().get("projectiles")
+    if not isinstance(got, dict):
+        return {}
+    out: dict[int, dict] = {}
+    for ptype, fields in got.items():
+        try:
+            key = int(ptype)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(fields, dict):
+            clean = {k: v for k, v in fields.items() if isinstance(v, (int, float))}
+            if clean:
+                out[key] = clean
+    return out
+
+
+def save_projectiles(state: dict) -> None:
+    """Record projectile overrides, keeping the window size and Effects."""
+    d = _read()
+    d["projectiles"] = {str(int(t)): {k: v for k, v in f.items()
+                                      if isinstance(v, (int, float))}
+                        for t, f in state.items() if f}
     _write(d)

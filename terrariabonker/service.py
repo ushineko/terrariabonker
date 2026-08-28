@@ -97,6 +97,7 @@ class Service:
         self._template_addrs: dict = {}      # item type -> ContentSamples template address
         self._last_reel = 0.0                # when auto-catch last pulled a bobber in
         self._seen_cast = False              # has a line been in the water this session?
+        self._proj_editor = None             # live ProjectileEditor, driven by (047)
 
     def invalidate(self) -> None:
         """Drop cached locate results; the next call rescans from scratch."""
@@ -1297,6 +1298,74 @@ class Service:
                 break
             time.sleep(1 / 120)
         return {"events": events, "presses": p.auto_use.presses()}
+
+    def projectile_of(self, item_type: int) -> dict:
+        """The projectile type an item fires, from its ContentSamples template.
+
+        ``Item.shoot`` is how a weapon the player recognises maps to the projectile the
+        editor actually writes to. A weapon whose ``shoot`` is 0 fires no projectile and
+        cannot be edited, which the caller should say plainly rather than offering a
+        control that does nothing.
+        """
+        from terrariabonker.inventory import ITEM_SHOOT
+
+        addr = self._template_addr(int(item_type))
+        if not addr:
+            raise ServiceError(f"no template for item type {item_type}")
+        shoot = self.mem.read_i32(addr + ITEM_SHOOT)
+        return {"item": int(item_type), "shoot": int(shoot or 0)}
+
+    def projectile_tick(self, overrides: dict, *, budget: float = 0.25) -> dict:
+        """Hold ``overrides`` on live projectiles for up to ``budget`` seconds. One slice.
+
+        ``overrides`` maps projectile type to ``{field: value}``. Driven from a timer the
+        way vein watching and auto-catch are, and for the same reason: the values have to
+        be re-applied continuously (``SetDefaults`` never reads a template), so returning
+        between sweeps would spend the interval in transit rather than in the game.
+
+        Nothing here persists in the game. Switching the cheat off restores nothing and
+        needs to restore nothing -- the next projectile the game spawns is a fresh object
+        built from the game's own defaults.
+        """
+        import time
+
+        from terrariabonker.projectile_edit import ProjectileEditor
+
+        clean = {}
+        for ptype, fields in (overrides or {}).items():
+            wanted = {k: v for k, v in (fields or {}).items()}
+            if wanted:
+                clean[int(ptype)] = wanted
+        if not clean:
+            return {"patched": 0, "types": {}, "sweeps": 0}
+
+        arr = self._projectile_array()
+        if self._proj_editor is None:
+            self._proj_editor = ProjectileEditor()
+
+        end = time.time() + max(0.0, budget)
+        patched, types, sweeps = 0, {}, 0
+        while True:
+            out = self._proj_editor.sweep(self.mem, arr, clean)
+            patched += out["patched"]
+            sweeps += 1
+            for t, n in out["types"].items():
+                types[t] = types.get(t, 0) + n
+            if time.time() >= end:
+                break
+            time.sleep(1 / 120)
+        return {"patched": patched, "types": types, "sweeps": sweeps}
+
+    def projectile_stop(self) -> dict:
+        """Forget per-projectile state. Called when the cheat goes off.
+
+        Deliberately forgets which projectiles have been seen: switching off and on again
+        is the player saying "start over", and a remembered sighting would deny a
+        set-once field to a projectile already in flight.
+        """
+        had = self._proj_editor is not None
+        self._proj_editor = None
+        return {"stopped": had}
 
     def catch_stop(self) -> dict:
         """Forget the located array and the cast gate. Called when the cheat goes off.

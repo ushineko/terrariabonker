@@ -44,6 +44,18 @@ BOBBER_OFF = 0x088            # Projectile.bobber (bool)
 AI_OFF = 0x044                # Projectile.ai      -> float[3]
 LOCALAI_OFF = 0x048           # Projectile.localAI -> float[3]
 
+#: Editable projectile fields (spec 047). Declared here because this module owns the
+#: Projectile layout; every consumer imports rather than re-spelling. All verified by
+#: ``tools/monofields.py --verify`` -- widths included, which matter: the bools below are
+#: ONE byte, packed against neighbours (``reflected`` sits at 0x0C9, after ``hostile``).
+TYPE_OFF = 0x094              # Projectile.type (i32)
+SCALE_OFF = 0x08C             # Projectile.scale (f32)
+TIMELEFT_OFF = 0x0B4          # Projectile.timeLeft (i32)
+PENETRATE_OFF = 0x0D4         # Projectile.penetrate (i32), -1 means infinite
+MAXPENETRATE_OFF = 0x0DC      # Projectile.maxPenetrate (i32)
+TILECOLLIDE_OFF = 0x100       # Projectile.tileCollide (bool, 1 byte)
+EXTRAUPDATES_OFF = 0x104      # Projectile.extraUpdates (i32)
+
 COUNTER_THRESHOLD = 660       # localAI[1] past this and the game rolls a catch
 
 

@@ -52,6 +52,7 @@ ITEM_DAMAGE = 0xAC      # weapon/tool damage (-1 for non-damaging items)
 # into an item is permanent, so they are left unapplied until they are verified.
 ITEM_KNOCKBACK = 0xB0   # float
 ITEM_SCALE = 0xCC       # float; size, which is also melee reach
+ITEM_SHOOT = 0x0FC              # Item.shoot -- the projectile type this item fires
 ITEM_SHOOTSPEED = 0x100  # float
 ITEM_MANA = 0x11C       # mana cost per use
 # Verified 2026-08-27 by reforging a Minishark to Sighted at the Goblin Tinkerer and

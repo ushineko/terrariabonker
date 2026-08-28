@@ -97,3 +97,37 @@ def test_only_switches_and_numbers_are_stored(tmp_path, monkeypatch):
     uistate.save_effects({"cb_fishing": True, "sp_bait": 30, "junk": {"a": 1},
                           "also_junk": None})
     assert uistate.load_effects() == {"cb_fishing": True, "sp_bait": 30}
+
+
+def test_projectile_overrides_survive_a_round_trip(tmp_path, monkeypatch):
+    from terrariabonker.gui import uistate
+
+    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
+    uistate.save_projectiles({837: {"tileCollide": 0, "timeLeft": 3000}})
+    assert uistate.load_projectiles() == {837: {"tileCollide": 0, "timeLeft": 3000}}
+
+
+def test_projectile_types_come_back_as_ints(tmp_path, monkeypatch):
+    """JSON keys are strings; everything downstream keys on an int projectile type.
+
+    A stringy key would match nothing while looking perfectly correct in the file.
+    """
+    from terrariabonker.gui import uistate
+
+    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
+    (tmp_path / "window.json").write_text('{"projectiles": {"837": {"scale": 2.0}}}')
+    assert list(uistate.load_projectiles()) == [837]
+
+
+def test_saving_one_kind_of_state_keeps_the_others(tmp_path, monkeypatch):
+    """The bug this file already had once: a fresh dict written over the whole file."""
+    from terrariabonker.gui import uistate
+
+    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
+    uistate.save_size(900, 700)
+    uistate.save_effects({"fishing": True})
+    uistate.save_projectiles({837: {"scale": 2.0}})
+
+    assert uistate.load_size() == (900, 700)
+    assert uistate.load_effects() == {"fishing": True}
+    assert uistate.load_projectiles() == {837: {"scale": 2.0}}

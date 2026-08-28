@@ -175,6 +175,28 @@ def catch_stop_argv() -> list[str]:
     return ["catch-stop", "--json"]
 
 
+def projectile_tick_argv(overrides: dict, budget: float = 0.25) -> list[str]:
+    """One slice of projectile editing.
+
+    ``overrides`` is ``{projectile type: {field: value}}``. Emitted sorted so the same
+    overrides always produce the same argv -- a command line that reorders itself between
+    calls is miserable to compare in a log or a test.
+    """
+    argv = ["projectile-tick", "--json", "--budget", str(budget)]
+    for ptype in sorted(overrides):
+        for name in sorted(overrides[ptype]):
+            argv += ["--set", f"{int(ptype)}:{name}={overrides[ptype][name]}"]
+    return argv
+
+
+def projectile_stop_argv() -> list[str]:
+    return ["projectile-stop", "--json"]
+
+
+def projectile_of_argv(item_type: int) -> list[str]:
+    return ["projectile-of", str(int(item_type)), "--json"]
+
+
 def fishing_power_argv(power: int) -> list[str]:
     return ["fishing", "--json", "--no-kit", "--power", str(power)]
 
@@ -291,6 +313,10 @@ SAMPLE_ARGVS: list[tuple[str, str, list[str]]] = [
     ("catch_argv", "catch-tick", catch_argv()),
     ("catch_argv", "catch-tick", catch_argv(recast=True)),
     ("catch_stop_argv", "catch-stop", catch_stop_argv()),
+    ("projectile_tick_argv", "projectile-tick",
+     projectile_tick_argv({837: {"tileCollide": 0, "timeLeft": 3000}})),
+    ("projectile_stop_argv", "projectile-stop", projectile_stop_argv()),
+    ("projectile_of_argv", "projectile-of", projectile_of_argv(3062)),
     ("restore_argv", "restore", restore_argv()),
     ("extract_recipes_argv", "extract-recipes", extract_recipes_argv()),
     ("extract_sprites_argv", "extract-sprites", extract_sprites_argv()),

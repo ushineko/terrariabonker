@@ -162,6 +162,7 @@ SERVE_OPS = frozenset({
     "fast-mining", "long-reach", "compendium", "spawn-npc", "build-check",
     "accept-build", "vein", "extract", "extract-tick", "extract-stop",
     "potions", "fishing", "fishing-buffs", "catch", "catch-tick", "catch-stop",
+    "projectile-tick", "projectile-stop", "projectile-of",
 })
 
 
@@ -518,6 +519,63 @@ def cmd_catch_stop(args) -> int:
     """Drop the located projectile array; the cheat was switched off."""
     svc = _svc(guard=True, force=args.force)
     print(json.dumps(svc.catch_stop()) if args.json else "[catch] stopped")
+    return 0
+
+
+def _parse_overrides(pairs) -> dict:
+    """``["837:tileCollide=0"]`` -> ``{837: {"tileCollide": 0}}``.
+
+    Unknown field names are rejected here rather than dropped silently: a typo in a
+    profile would otherwise look exactly like a field that does nothing, which is a
+    diagnosis this project has already paid for once.
+    """
+    from terrariabonker.projectile_edit import FIELDS
+
+    out: dict[int, dict] = {}
+    for raw in pairs or ():
+        head, _, value = raw.partition("=")
+        ptype, _, name = head.partition(":")
+        if not value or not name:
+            raise SystemExit(f"bad --set {raw!r}; expected TYPE:FIELD=VALUE")
+        if name not in FIELDS:
+            raise SystemExit(f"unknown field {name!r}; known: {', '.join(sorted(FIELDS))}")
+        try:
+            num = float(value) if FIELDS[name].kind == "f32" else int(value)
+        except ValueError:
+            raise SystemExit(f"bad value for {name}: {value!r}")
+        out.setdefault(int(ptype), {})[name] = num
+    return out
+
+
+def cmd_projectile_tick(args) -> int:
+    """One slice of projectile editing, for a caller that cannot block (the GUI)."""
+    svc = _svc(guard=True, force=args.force)
+    got = svc.projectile_tick(_parse_overrides(args.set), budget=args.budget)
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    types = ", ".join(f"{t}x{n}" for t, n in sorted(got["types"].items()))
+    print(f"[projectile] {got['patched']} field writes over {got['sweeps']} sweeps"
+          + (f" ({types})" if types else " (nothing in flight)"))
+    return 0
+
+
+def cmd_projectile_stop(args) -> int:
+    """Forget per-projectile state; the cheat was switched off."""
+    svc = _svc(guard=True, force=args.force)
+    print(json.dumps(svc.projectile_stop()) if args.json else "[projectile] stopped")
+    return 0
+
+
+def cmd_projectile_of(args) -> int:
+    """Which projectile does this item fire?"""
+    svc = _svc(guard=True, force=args.force)
+    got = svc.projectile_of(args.item)
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    print(f"item {got['item']} shoots projectile {got['shoot']}" if got["shoot"]
+          else f"item {got['item']} fires no projectile")
     return 0
 
 
@@ -932,6 +990,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.add_argument("--force", action="store_true", help="run on an unverified build")
     p.set_defaults(func=cmd_catch_stop)
+
+    p = sub.add_parser("projectile-tick", help="one slice of projectile editing (GUI)")
+    p.add_argument("--set", action="append", default=[], metavar="TYPE:FIELD=VALUE",
+                   help="e.g. 837:tileCollide=0 (repeatable)")
+    p.add_argument("--budget", type=float, default=0.25,
+                   help="seconds to spend enforcing in this call")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_projectile_tick)
+
+    p = sub.add_parser("projectile-stop", help="drop the projectile editor state")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_projectile_stop)
+
+    p = sub.add_parser("projectile-of", help="which projectile an item fires")
+    p.add_argument("item", type=int, help="item type")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_projectile_of)
 
     p = sub.add_parser("build-check",
                        help="report the running build and whether the cheats resolve on it")
