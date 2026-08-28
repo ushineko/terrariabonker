@@ -33,7 +33,7 @@ ARRAY_LEN_OFF = layout.ARR_LEN_OFF
 ARRAY_DATA_OFF = layout.ARR_DATA_OFF
 
 ACTIVE_OFF = 0x078            # Projectile.active (bool)
-#: 0x03C -- where ``active`` was wrongly read until v0.39.0 -- is ``Entity.wet``.
+#: 0x03C -- where ``active`` was wrongly read through v0.39.0 -- is ``Entity.wet``.
 #: The two are indistinguishable while fishing, because a bobber floats in water and is
 #: therefore always wet, so every test and every hour of play agreed with the wrong
 #: offset. Projectiles in FLIGHT are dry, which is why no probe ever saw one. Confirmed
