@@ -78,6 +78,47 @@ These are rules the project learned by breaking something. Each one has a scar.
 
 ---
 
+## Establishing a fact about the game (recon)
+
+**Measure first, then reason.** Every rule below is a model that was reasoned into place,
+held confidently, and turned out to be wrong. Reasoning is for deciding what to measure and
+for explaining a measurement — not for standing in place of one.
+
+- **Ask the game before inferring.** The runtime knows its own field offsets
+  (`tools/monofields.py`), and the assembly knows its own behaviour (`tools/ilrecon`).
+  Prefer either over declaration order, template diffs, value-signature matching, or
+  watching a number change. Run `sudo python3 tools/monofields.py --verify` when touching
+  offsets; it exits non-zero on disagreement.
+  *`Projectile.active` was inferred from the shared `Entity` layout and read `Entity.wet`
+  for eight releases.*
+- **A constant cannot be validated by a test that reads it from that constant.** A fixture
+  planted through an offset and read back through the same offset proves only that the
+  offset equals itself. Offsets derived from the game are pinned as **literals** in a test,
+  with their provenance in the docstring.
+  *617 tests passed against the wrong `active`; a mutation moving `crit` one field along
+  passed the whole suite in v0.39.0.*
+- **A tie among candidates is not a weak answer, it is no answer.** Scoring offsets against
+  a field the game almost always declares the same way ranks coincidences.
+  *`hostile` tied three ways and was written down as `0x030`. It is `0x0C8`, and all three
+  tied candidates were other fields entirely.*
+- **The field that names the behaviour may not govern it.** Read the AI, not the field list.
+  *The Book of Skulls crosses only a few tiles despite `tileCollide = 0`, because `AI_001`
+  drains 33 ticks of `timeLeft` per tick spent inside solid tile. `AI_001` writes
+  `tileCollide` in 13 places and reads it in none.*
+- **Record the before-value.** Enforcing a value something already holds is a null
+  operation that is indistinguishable from a field that does nothing.
+  *An afternoon of A/B runs forced `tileCollide = 1` on a projectile the game had already
+  set to 0.*
+- **Widths matter as much as offsets.** Many of these fields are single-byte bools packed
+  against neighbours (`reflected` sits immediately after `hostile`), so a 4-byte write
+  corrupts the field next door.
+- **When a measurement disagrees with the person watching the screen, suspect the
+  instrument.** Report it as "the probe saw nothing", never as "nothing happened".
+  *The maintainer was told twice that they were not firing. They were firing both times;
+  the probe was filtering on the wrong byte.*
+
+---
+
 ## Coding standards
 
 **Python**

@@ -133,6 +133,12 @@ offset is in doubt or after a game update.
 
 ## Re-deriving after an update
 
+**Start with `tools/monofields.py --verify`.** It reads field offsets by name out of mono's
+own metadata and checks every constant this project holds, exiting non-zero on any
+disagreement. Most of the methods described below exist because that tool did not, and they
+should now be a fallback for what the metadata cannot answer (behaviour, AOB anchors, code
+layout) rather than the first resort.
+
 `version.py` gates the trainer on the exact build (`1.4.5.7`, Steam buildid
 `24825745`). If the game updates:
 
