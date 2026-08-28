@@ -88,6 +88,34 @@ holds no state.*
 | [Fishing potion effects](#fishing) | fishing power, sonar and crates without the potions |
 | [Auto-catch](#fishing) | it reels in for you, and casts again |
 | [Auto-use](#auto-use) | lets a cheat press your use button |
+| [Auto-sell](#auto-sell) | items you pick a list of turn into coins |
+
+### Auto-sell
+
+Pick the items you never want to keep and they turn into coins as you pick them up.
+
+Right-click any item in the **Inventory** tab to put it on the sell list, and right-click
+it again to take it off. The list is by item, not by slot, so it keeps working on
+everything of that kind you find later, and it is remembered between sessions. Items on
+the list are marked in the grid.
+
+**Favorite anything you want to keep.** A favorited stack is never sold, even when it is
+on the list — alt-click it, the same way you protect a potion. That is the per-stack
+override, and it is worth using before you switch this on.
+
+The coins go into your piggy bank when you can reach one — either you are carrying a
+Piggy Bank or a Money Trough, or you have one placed in the world you are in. Otherwise
+they go into your own inventory, so nothing ends up somewhere you cannot get at. You get
+the plain shop rate; there is no shopkeeper involved, so this works in a world with no
+town at all.
+
+**Items worth nothing are destroyed, not sold.** Put a worthless junk drop on the list and
+it is binned as it arrives; you get no coins for it, because it is worth none. That is
+useful on purpose, but it means the sell list is a delete list for anything valueless.
+
+**Selling is permanent.** Once your world saves, the items are gone — there is no undo.
+Switch it on under **Effects**, or run `terrariabonker sell --watch`. `terrariabonker sell
+--dry-run` tells you what it would sell and sells nothing.
 
 ### Passive potions
 

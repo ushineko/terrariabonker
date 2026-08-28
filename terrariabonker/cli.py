@@ -16,6 +16,7 @@ import os
 import sys
 from dataclasses import asdict
 
+from terrariabonker import names
 from terrariabonker.patcher import PATCH_CATALOG, PatchError
 from terrariabonker import version as ver
 from terrariabonker.proc import elevate
@@ -163,6 +164,7 @@ SERVE_OPS = frozenset({
     "accept-build", "vein", "extract", "extract-tick", "extract-stop",
     "potions", "fishing", "fishing-buffs", "catch", "catch-tick", "catch-stop",
     "projectile-tick", "projectile-stop", "projectile-of",
+    "sell", "sell-tick", "sell-list",
 })
 
 
@@ -384,6 +386,66 @@ def cmd_potions(args) -> int:
     return 0
 
 
+def _sell_line(got: dict) -> str:
+    if got.get("error"):
+        return f"[sell] {got['error']}"
+    if not got["sold"]:
+        held = len(got["skipped"])
+        return f"[sell] nothing to sell{f' ({held} skipped)' if held else ''}"
+    what = ", ".join(f"{e['stack']}x {e['name']}" for e in got["sold"])
+    where = {"bank": "the piggy bank", "inventory": "your inventory",
+             "bank+inventory": "the piggy bank and your inventory"}[got["destination"]]
+    return f"[sell] {what} -> {_coins(got['copper'])} into {where}"
+
+
+def _coins(copper: int) -> str:
+    """Copper as the game would write it: 1 platinum 23 gold 45 silver 67 copper."""
+    from terrariabonker import selling as S
+    names_ = {71: "copper", 72: "silver", 73: "gold", 74: "platinum"}
+    parts = [f"{n} {names_[t]}" for t, n in S.coin_stacks(copper)]
+    return " ".join(parts) if parts else "0 copper"
+
+
+def cmd_sell(args) -> int:
+    """Sell whitelisted items. THIS PERMANENTLY REMOVES THEM."""
+    from terrariabonker import profile
+
+    svc = _svc(guard=True, force=args.force)
+    if args.add or args.remove:
+        for t in args.add or []:
+            profile.set_sell_whitelist(t, True)
+        for t in args.remove or []:
+            profile.set_sell_whitelist(t, False)
+    if args.list:
+        wl = sorted(profile.sell_whitelist())
+        if args.json:
+            print(json.dumps({"whitelist": wl,
+                              "names": {str(t): names.label(t) for t in wl}}))
+        else:
+            print("[sell] whitelist: "
+                  + (", ".join(f"{names.label(t)} ({t})" for t in wl) or "empty"))
+        return 0
+    if args.watch:
+        print("[sell] watching — whitelisted items are sold as they arrive. Ctrl-C stops.")
+        try:
+            got = svc.watch_selling(interval=args.interval, rounds=args.rounds,
+                                    on_event=lambda r: print(_sell_line(r), flush=True))
+        except KeyboardInterrupt:
+            print("\n[sell] stopped")
+            return 0
+        if args.json:
+            print(json.dumps(got))
+        else:
+            print(f"[sell] {_coins(got['copper'])} over {got['rounds']} rounds")
+        return 0
+    got = svc.sell_tick(dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps(got))
+        return 0
+    print(_sell_line(got))
+    return 0
+
+
 def cmd_extract(args) -> int:
     """Mine the vein at a tile. THIS WRITES TO THE WORLD."""
     svc = _svc(guard=True, force=args.force)
@@ -412,6 +474,31 @@ def cmd_extract(args) -> int:
         print(json.dumps(got))
         return 0
     print(_extract_line(got))
+    return 0
+
+
+def cmd_sell_tick(args) -> int:
+    """One auto-sell round, for the panel timer."""
+    got = _svc(guard=True, force=args.force).sell_tick(dry_run=args.dry_run)
+    print(json.dumps(got) if args.json else _sell_line(got))
+    return 0
+
+
+def cmd_sell_list(args) -> int:
+    """Read or edit the whitelist without touching the game."""
+    from terrariabonker import profile
+
+    for t in args.add or []:
+        profile.set_sell_whitelist(t, True)
+    for t in args.remove or []:
+        profile.set_sell_whitelist(t, False)
+    wl = sorted(profile.sell_whitelist())
+    if args.json:
+        print(json.dumps({"whitelist": wl,
+                          "names": {str(t): names.label(t) for t in wl}}))
+    else:
+        print("[sell] whitelist: "
+              + (", ".join(f"{names.label(t)} ({t})" for t in wl) or "empty"))
     return 0
 
 
@@ -938,6 +1025,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable")
     p.add_argument("--force", action="store_true", help="run on an unverified build")
     p.set_defaults(func=cmd_potions)
+
+    p = sub.add_parser("sell",
+                       help="sell whitelisted items for coins (PERMANENT)")
+    p.add_argument("--add", type=int, nargs="+", metavar="TYPE",
+                   help="add item type(s) to the whitelist")
+    p.add_argument("--remove", type=int, nargs="+", metavar="TYPE",
+                   help="remove item type(s) from the whitelist")
+    p.add_argument("--list", action="store_true", help="show the whitelist and stop")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="report what would sell, and sell nothing")
+    p.add_argument("--watch", action="store_true",
+                   help="keep selling as items arrive (otherwise a single round)")
+    p.add_argument("--interval", type=float, default=0.5,
+                   help="seconds between rounds when watching")
+    p.add_argument("--rounds", type=int,
+                   help="with --watch, stop after this many rounds (default: forever)")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_sell)
+
+    p = sub.add_parser("sell-tick", help="one auto-sell round (GUI; PERMANENT)")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_sell_tick)
+
+    p = sub.add_parser("sell-list", help="the auto-sell whitelist (GUI)")
+    p.add_argument("--add", type=int, nargs="+", metavar="TYPE")
+    p.add_argument("--remove", type=int, nargs="+", metavar="TYPE")
+    p.add_argument("--json", action="store_true", help="machine-readable")
+    p.add_argument("--force", action="store_true", help="run on an unverified build")
+    p.set_defaults(func=cmd_sell_list)
 
     p = sub.add_parser("extract-tick",
                        help="one slice of vein watching (GUI; WRITES to the world)")

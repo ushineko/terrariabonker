@@ -52,6 +52,11 @@ def load() -> dict:
     # the opposite, a note to put something back. On disk rather than in memory because
     # the hard case is the trainer being killed while the cheat is on.
     d.setdefault("fishing_restore", {})
+    # Item types the player has marked for auto-selling (spec 048). Keyed by TYPE rather
+    # than slot for the same reason item_edits is: the whitelist has to keep applying to
+    # stacks that have not arrived yet. Lives in the profile, not the per-pid patch state,
+    # because it is a desired configuration and must survive a game restart.
+    d.setdefault("sell_whitelist", [])
     return _migrate(d)
 
 
@@ -130,6 +135,25 @@ def clear_item(slot: int) -> None:
         if int(slot) not in d["empty_slots"]:
             d["empty_slots"].append(int(slot))
         _save(d)
+
+
+def set_sell_whitelist(item_type: int, on: bool) -> None:
+    """Add or remove one item type from the auto-sell whitelist."""
+    with _locked():
+        d = load()
+        wl = [int(t) for t in d["sell_whitelist"]]
+        itype = int(item_type)
+        if on and itype not in wl:
+            wl.append(itype)
+        elif not on and itype in wl:
+            wl.remove(itype)
+        d["sell_whitelist"] = wl
+        _save(d)
+
+
+def sell_whitelist() -> set[int]:
+    """The item types marked for auto-selling."""
+    return {int(t) for t in load()["sell_whitelist"]}
 
 
 def remember_rod_power(item_type: int, power: int) -> None:

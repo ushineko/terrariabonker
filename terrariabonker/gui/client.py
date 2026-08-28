@@ -143,6 +143,30 @@ def potions_argv(min_stack: int = 1) -> list[str]:
     return ["potions", "--json", "--min-stack", str(min_stack)]
 
 
+def sell_argv() -> list[str]:
+    """One auto-sell round. Never ``--watch``: the worker must not block, so the GUI owns
+    the cadence, as it does for potions, bait and vein watching."""
+    return ["sell-tick", "--json"]
+
+
+def sell_list_argv(add: int | None = None, remove: int | None = None) -> list[str]:
+    """Read the whitelist, optionally toggling one item type on the way."""
+    argv = ["sell-list", "--json"]
+    if add is not None:
+        argv += ["--add", str(add)]
+    if remove is not None:
+        argv += ["--remove", str(remove)]
+    return argv
+
+
+def parse_sell_list(raw: str) -> set[int] | None:
+    """The whitelist as item types, or None if the reply did not parse."""
+    for got in replies(raw):
+        if "whitelist" in got:
+            return {int(t) for t in got["whitelist"]}
+    return None
+
+
 def fishing_argv(keep: int = 30, kit: bool = True) -> list[str]:
     """One round: hand out the kit if asked, then top bait up. Never ``--watch`` — the
     worker must not block, so the GUI drives the cadence from its own timer."""
@@ -275,6 +299,10 @@ def freeze_argv(godmode: bool, mana: bool) -> list[str]:
 # releases' worth of new commands while still reading like coverage.
 SAMPLE_ARGVS: list[tuple[str, str, list[str]]] = [
     ("status_argv", "status", status_argv()),
+    ("sell_argv", "sell-tick", sell_argv()),
+    ("sell_list_argv", "sell-list", sell_list_argv()),
+    ("sell_list_argv", "sell-list", sell_list_argv(add=12)),
+    ("sell_list_argv", "sell-list", sell_list_argv(remove=12)),
     ("inventory_argv", "inventory", inventory_argv()),
     ("set_hp_argv", "set-hp", set_hp_argv("max")),
     ("set_mana_argv", "set-mana", set_mana_argv(20)),

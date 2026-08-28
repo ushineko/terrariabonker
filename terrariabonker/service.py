@@ -1442,6 +1442,220 @@ class Service:
         return {"ticks": want, "min_stack": min_stack,
                 "carried": sum(len(v) for v in out.values()), **out}
 
+    # --- auto-selling (spec 048) -------------------------------------------
+    #: The placed-piggy-bank answer, cached per loaded world. A whole-world tile search
+    #: costs 0.15 s, which is nothing once and far too much on a timer -- so the tick asks
+    #: this, and this asks the world only when the world it was told about has changed.
+    _bank_placed: tuple[object, bool] | None = None
+
+    def _world_key(self):
+        """``(key, tilemap)`` where the key changes when a different world is loaded.
+
+        The tile buffer's address plus the world's dimensions. This only has to be wrong in
+        the safe direction: a false *change* costs one rescan, while a missed change would
+        leave the previous world's answer standing.
+        """
+        tm = self.tilemap()
+        return (tm.buf, tm.max_x, tm.max_y), tm
+
+    def bank_reachable(self, *, rescan: bool = False) -> dict:
+        """Can the player open their Piggy Bank *in this world* right now?
+
+        Two ways, and either is enough:
+
+        1. they carry a Piggy Bank or a Money Trough, both of which deploy anywhere; or
+        2. one is already placed somewhere in the loaded world.
+
+        The distinction matters because ``Player.bank`` is character state, not world
+        state: coins put there while the player has no way to open a piggy bank are not
+        lost, but they are unreachable until the player finds one, which is the outcome
+        this exists to avoid.
+        """
+        from terrariabonker import selling as S
+
+        types = {s.type for s in self._live_inventory().slots() if not s.empty}
+        carried = sorted(types & {S.PIGGY_BANK_ITEM, S.MONEY_TROUGH_ITEM})
+        if carried:
+            return {"reachable": True, "why": "carried", "carried": carried,
+                    "placed": None}
+        key, tm = self._world_key()
+        if rescan or not self._bank_placed or self._bank_placed[0] != key:
+            hits = tm.find_type(S.PIGGY_BANK_TILE, limit=1)
+            self._bank_placed = (key, bool(hits))
+        placed = self._bank_placed[1]
+        return {"reachable": placed, "why": "placed" if placed else "no bank in reach",
+                "carried": [], "placed": placed}
+
+    def _credit_coins(self, container, copper: int) -> tuple[list[dict], int]:
+        """Put ``copper`` into ``container`` as coins. Returns ``(placed, unpaid copper)``.
+
+        Every write goes through :meth:`Container.write`, which re-resolves the slot and
+        checks what is in it. Nothing here writes through an address read earlier: a round
+        reads forty slots before it writes to any of them, and mono moves objects in
+        between -- opening a chest is exactly that kind of allocation.
+
+        Merging into an existing stack comes first, and a stack is capped at 100, which is
+        what ``DoCoins`` enforces. Whatever there is no room for is handed back rather than
+        quietly dropped, so the caller can pay it elsewhere or refuse the sale.
+        """
+        from terrariabonker import selling as S
+
+        placed: list[dict] = []
+        pending = S.coin_stacks(copper)
+        for i, (ctype, count) in enumerate(pending):
+            while count > 0:
+                rows = container.rows()
+                spot = next((r for r in rows if r["type"] == ctype
+                             and r["stack"] < S.COIN_MAX_STACK), None)
+                if spot is not None:
+                    n = min(S.COIN_MAX_STACK - spot["stack"], count)
+                    ok = container.write(spot["index"], expect_type=ctype,
+                                         expect_stack=spot["stack"],
+                                         stack=spot["stack"] + n)
+                else:
+                    empty = next((r for r in rows if r["type"] == 0), None)
+                    if empty is None:
+                        left = [(ctype, count)] + pending[i + 1:]
+                        return placed, sum(c * S.COIN_WORTH[S.COIN_TYPES.index(t)]
+                                           for t, c in left)
+                    n = min(S.COIN_MAX_STACK, count)
+                    ok = container.write(empty["index"], expect_type=0, expect_stack=0,
+                                         item_type=ctype, stack=n,
+                                         block=self._template_block(ctype))
+                if not ok:
+                    # The slot changed underneath us. Stop and hand back what is unpaid
+                    # rather than writing into whatever is there now.
+                    left = [(ctype, count)] + pending[i + 1:]
+                    return placed, sum(c * S.COIN_WORTH[S.COIN_TYPES.index(t)]
+                                       for t, c in left)
+                placed.append({"type": ctype, "stack": n})
+                count -= n
+        self._normalize_coins(container)
+        return placed, 0
+
+    def _normalize_coins(self, container) -> None:
+        """Promote any full coin stack the way ``DoCoins`` does: 100 of a denomination
+        becomes 1 of the next one up, merged into an existing stack where there is one.
+
+        Without this the credit is *worth* the right amount but leaves a state the game
+        would never leave -- a stack of exactly 100 silver where 1 gold belongs. Observed
+        in game: a sale merged 17 silver onto a stack of 83 and stopped at 100.
+
+        Platinum is the top denomination and has nothing to promote into, so it is left
+        alone; the game stacks it past 100 too. Every write re-resolves its slot, for the
+        reason given in :meth:`_credit_coins`.
+        """
+        from terrariabonker import selling as S
+
+        for ctype in S.COIN_TYPES[:-1]:            # copper..gold; platinum has no tier up
+            nxt = ctype + 1
+            while True:
+                rows = container.rows()
+                full = next((r for r in rows if r["type"] == ctype
+                             and r["stack"] >= S.COIN_MAX_STACK), None)
+                if full is None:
+                    break
+                into = next((r for r in rows if r["type"] == nxt
+                             and r["stack"] < S.COIN_MAX_STACK), None)
+                if into is not None:
+                    ok = container.write(into["index"], expect_type=nxt,
+                                         expect_stack=into["stack"],
+                                         stack=into["stack"] + 1)
+                else:
+                    spare = next((r for r in rows if r["type"] == 0), None)
+                    if spare is None:
+                        return                      # nowhere to put it: leave it be
+                    ok = container.write(spare["index"], expect_type=0, expect_stack=0,
+                                         item_type=nxt, stack=1,
+                                         block=self._template_block(nxt))
+                if not ok:
+                    return                          # the slot moved: stop, do not guess
+                left = full["stack"] - S.COIN_MAX_STACK
+                container.write(full["index"], expect_type=ctype,
+                                expect_stack=full["stack"],
+                                stack=left, item_type=0 if left == 0 else None)
+
+    def sell_tick(self, *, dry_run: bool = False) -> dict:
+        """Sell every whitelisted, unfavorited stack once. One round.
+
+        Stateless like the other rounds, so the CLI (a fresh process each time) and the
+        panel timer behave identically.
+
+        **Favorited stacks are never sold**, whitelist or not. That is what vanilla does
+        when selling, and it is the player's only per-stack override on a per-type
+        whitelist -- on a cheat whose effect is permanent once the world saves, that makes
+        it a correctness requirement rather than a convenience.
+        """
+        from terrariabonker import profile
+        from terrariabonker import selling as S
+
+        wanted = profile.sell_whitelist()
+        inv = self._live_inventory()
+        live = self.live_block()
+        reach = self.bank_reachable()
+        bank = S.bank_container(self.mem, live.life_addr) if reach["reachable"] else None
+        purse = S.Container(self.mem, inv.array_addr, S.SELL_SLOTS)
+        # Coins go only where SellItem puts them; the sell scan may look further.
+        coin_purse = S.Container(self.mem, inv.array_addr, S.COIN_SLOTS)
+        dest = "bank" if bank else "inventory"
+
+        sold, skipped, total = [], [], 0
+        for row in purse.rows():
+            if row["type"] == 0 or row["type"] not in wanted:
+                continue
+            if row["favorited"]:
+                skipped.append({"slot": row["index"], "type": row["type"],
+                                "why": "favorited"})
+                continue
+            # A whitelisted item worth nothing is still taken. The list is the player's
+            # statement of intent, and for junk drops "sell it" and "bin it" are the same
+            # request -- refusing would leave the one thing they most want gone sitting
+            # there. It pays 0, which is honest rather than a rounding-up.
+            price = S.sell_price(row["value"], row["stack"])
+            sold.append({"slot": row["index"], "type": row["type"],
+                         "name": names.label(row["type"]), "stack": row["stack"],
+                         "copper": price})
+            total += price
+        if dry_run or not sold:
+            return {"sold": sold, "skipped": skipped, "copper": total,
+                    "destination": dest, "reachable": reach, "dry_run": dry_run,
+                    "paid": [], "unpaid": 0 if dry_run else total}
+
+        # Pay FIRST, then take. The other order loses the item if the credit fails.
+        paid, unpaid = self._credit_coins(bank or coin_purse, total)
+        if unpaid and bank is not None:
+            more, unpaid = self._credit_coins(coin_purse, unpaid)
+            paid += more
+            dest = "bank+inventory"
+        if unpaid:
+            return {"sold": [], "skipped": skipped, "copper": 0, "destination": dest,
+                    "reachable": reach, "dry_run": False, "paid": paid,
+                    "unpaid": unpaid,
+                    "error": "no room for the coins — nothing was sold"}
+        for entry in sold:
+            for i in self._all_inventories():
+                i.set_type(entry["slot"], 0)
+                i.set_stack(entry["slot"], 0)
+        return {"sold": sold, "skipped": skipped, "copper": total, "destination": dest,
+                "reachable": reach, "dry_run": False, "paid": paid, "unpaid": 0}
+
+    def watch_selling(self, *, interval: float = 0.5, rounds: int | None = None,
+                      on_event=None) -> dict:
+        """Keep selling as items arrive. Blocking; the GUI drives :meth:`sell_tick`
+        from a timer instead, so the two share one implementation."""
+        import time
+
+        n, copper = 0, 0
+        while rounds is None or n < rounds:
+            n += 1
+            r = self.sell_tick()
+            if r["sold"] or r.get("error"):
+                copper += r["copper"]
+                if on_event:
+                    on_event(r)
+            time.sleep(interval)
+        return {"rounds": n, "copper": copper}
+
     def watch_potions(self, *, min_stack: int = 1, ticks: int | None = None,
                       interval: float = 0.25, rounds: int | None = None,
                       on_event=None) -> dict:

@@ -21,7 +21,9 @@ from PyQt6.QtGui import (QColor, QFont, QIcon, QPainter, QPixmap, QStandardItem,
                          QStandardItemModel)
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                              QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
-                             QLabel, QLineEdit, QListView, QMessageBox, QPlainTextEdit,
+                             QLabel, QLineEdit, QListView, QListWidget,
+                             QListWidgetItem, QMenu, QMessageBox,
+                             QPlainTextEdit,
                              QProgressBar, QPushButton, QScrollArea, QSpinBox,
                              QTabWidget, QVBoxLayout,
                              QWidget)
@@ -258,6 +260,15 @@ class MainWindow(QWidget):
         self._catch_timer.timeout.connect(self._tick_catch)
         self._catch_inflight = False
         self._catch_n = 0
+        self._sell_timer = QTimer(self)
+        self._sell_timer.timeout.connect(self._tick_sell)
+        self._sell_inflight = False
+        #: Item types marked for auto-selling. Mirrored from the profile so the grid can
+        #: mark them without a round trip per cell; the profile stays the source of truth.
+        self._sell_whitelist: set = set()
+        self._sell_whitelist_loaded = False
+        self._sell_warned = False       # said "no helper" once for this switch-on
+        self._sell_said_idle = False    # said "on, but nothing to sell" once
         self._proj_timer = QTimer(self)
         self._proj_timer.timeout.connect(self._tick_projectiles)
         self._proj_inflight = False
@@ -502,7 +513,35 @@ class MainWindow(QWidget):
         pb.addWidget(self.sp_potion_stack)
         pb.addStretch()
         col.addWidget(potion_box)
-        col.addStretch()
+
+        sell_box = QGroupBox("Auto-sell")
+        sb = QVBoxLayout(sell_box)
+        self.cb_sell = QCheckBox("Sell whitelisted items as they arrive")
+        self.cb_sell.setToolTip(uitext.wrap(
+            "Right-click an item in the Inventory tab to add it to the sell list. While "
+            "this is on, anything on that list is sold for coins as it arrives, and the "
+            "coins go into your piggy bank if you can reach one and into your inventory "
+            "if you cannot. Favorited stacks are never sold, so favorite anything you "
+            "want to keep. Selling is permanent: once your world saves, the items are "
+            "gone."))
+        self.cb_sell.toggled.connect(self._set_sell_watch)
+        sb.addWidget(self.cb_sell)
+        # The sell list has to live somewhere that is NOT the inventory grid. Adding is
+        # done by right-clicking an item there, but a whitelisted item is sold on the next
+        # tick, so it never stays in the grid long enough to right-click a second time --
+        # the list would be add-only, and the only way back out would be the CLI.
+        sb.addWidget(QLabel("<i>On the sell list — double-click to remove:</i>"))
+        self.lst_sell = QListWidget()
+        # No maximum height: the sell list is the one thing on this tab that grows without
+        # bound, so it takes the leftover space rather than scrolling three rows at a time
+        # under an empty half-panel.
+        self.lst_sell.setMinimumHeight(120)
+        self.lst_sell.setToolTip(uitext.wrap(
+            "Everything auto-sell will take. Add an item by right-clicking it in the "
+            "Inventory tab; remove it here by double-clicking it."))
+        self.lst_sell.itemDoubleClicked.connect(self._on_sell_list_double_clicked)
+        sb.addWidget(self.lst_sell, 1)
+        col.addWidget(sell_box, 1)      # absorbs the slack instead of a trailing stretch
         return w
 
     #: field name -> (checkbox attr, spin attr). tileCollide has no number: it is the
@@ -779,6 +818,11 @@ class MainWindow(QWidget):
         b.setFont(f)                        # recolouring in _render_cell keeps it
         b.setIconSize(QSize(CELL_H - 12, CELL_H - 12))   # sprite fills the cell (minus border)
         b.clicked.connect(lambda _=False, s=slot: self._on_cell_clicked(s))
+        # Right-click edits the auto-sell whitelist; left-click still opens the editor,
+        # which is what the cells have always done.
+        b.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        b.customContextMenuRequested.connect(
+            lambda pos, s=slot: self._on_cell_menu(s, pos))
         return b
 
     def _fetch_compendium(self, done, refresh: bool = False):
@@ -1491,6 +1535,24 @@ class MainWindow(QWidget):
     # --- inventory tab (grid) ----------------------------------------------
     def refresh_inventory(self):
         self._call(client.inventory_argv(), on_output=self._fill_grid)
+        if not self._sell_whitelist_loaded:
+            self._load_sell_whitelist()
+
+    def _load_sell_whitelist(self):
+        """Read the saved whitelist once, so the grid can mark what is being sold.
+
+        The profile is the source of truth and outlives the panel, so a session that never
+        asks would show nothing marked while the cheat happily sold things -- which is the
+        worst version of this feature to ship.
+        """
+        def done(raw: str):
+            got = client.parse_sell_list(raw)
+            if got is None:
+                return
+            self._sell_whitelist_loaded = True
+            self._apply_sell_whitelist(got)
+
+        self._call(client.sell_list_argv(), on_output=done)
 
     def _inventory_visible(self) -> bool:
         """Is the grid actually on screen? Dispatch on the widget, never on an index.
@@ -1569,8 +1631,18 @@ class MainWindow(QWidget):
             cell.setText(invgrid.abbrev(name) + (f"\n×{badge}" if badge else ""))
         else:
             cell.setIcon(self._cell_icon(row["type"], row.get("stack", 0), quality))
-        cell.setToolTip(invgrid.tooltip(row, full))
+        listed = row.get("type", 0) in self._sell_whitelist
+        cell.setToolTip(invgrid.tooltip(row, full)
+                        + ("\nAuto-sell: on" if listed else ""))
         bg, border = invgrid.cell_colors(row.get("rare", 0))
+        if listed:
+            # A dashed border, not a colour change: the cell's colour already carries the
+            # item's rarity, and overwriting that would cost information to add some.
+            cell.setStyleSheet(
+                f"QPushButton {{ background-color: rgb{bg};"
+                " border: 2px dashed #ffcc00; border-radius: 4px;"
+                " color: #f0f0f0; }")
+            return
         cell.setStyleSheet(
             f"QPushButton {{ background-color: rgb{bg};"
             f" border: 1px solid rgb{border}; border-radius: 4px;"
@@ -1579,6 +1651,124 @@ class MainWindow(QWidget):
     def _row_for(self, slot: int) -> dict:
         return next((r for r in self._all_rows if r["slot"] == slot),
                     {"slot": slot, "type": 0})
+
+    def _on_cell_menu(self, slot: int, pos):
+        """Toggle auto-selling for whatever type is in this slot.
+
+        Keyed on the item TYPE, not the slot: the whitelist has to keep applying to stacks
+        that have not arrived yet, which is the whole point of a standing whitelist. An
+        empty slot has no type, so it gets no menu rather than a disabled one.
+        """
+        row = self._row_for(slot)
+        itype = row.get("type", 0)
+        if not itype:
+            return
+        listed = itype in self._sell_whitelist
+        name = names.label(itype)
+        menu = QMenu(self)
+        act = menu.addAction(f"Stop auto-selling {name}" if listed
+                             else f"Auto-sell {name}")
+        if menu.exec(self._cells[slot].mapToGlobal(pos)) is not act:
+            return
+        self._set_sell_whitelisted(itype, not listed)
+
+    def _set_sell_whitelisted(self, itype: int, on: bool):
+        """Write the change through the worker, then repaint from what it reports back.
+
+        The reply is the source of truth rather than the click: a write that did not land
+        must not leave the grid claiming an item is being sold when it is not.
+        """
+        def done(raw: str):
+            got = client.parse_sell_list(raw)
+            if got is None:
+                self.log.appendPlainText("[sell] could not update the whitelist")
+                return
+            self._apply_sell_whitelist(got)
+            self.log.appendPlainText(
+                f"[sell] {'now selling' if on else 'no longer selling'} "
+                f"{names.label(itype)}")
+
+        argv = client.sell_list_argv(add=itype if on else None,
+                                     remove=None if on else itype)
+        if not self.helper.request(argv, done):
+            self.log.appendPlainText("[sell] the helper is not available")
+
+    def _apply_sell_whitelist(self, types: set):
+        """Adopt a whitelist, repaint the cells whose marking changed, and refill the
+        list widget -- which is the only place a sold-on-sight item can be removed from."""
+        changed = self._sell_whitelist ^ set(types)
+        self._sell_whitelist = set(types)
+        for slot, cell in self._cells.items():
+            row = self._rendered.get(slot)
+            if row and row.get("type", 0) in changed:
+                self._render_cell(cell, row)
+        self.lst_sell.clear()
+        for itype in sorted(self._sell_whitelist, key=lambda t: names.label(t)):
+            row = QListWidgetItem(self._icon_for(itype), names.label(itype))
+            row.setData(Qt.ItemDataRole.UserRole, itype)
+            self.lst_sell.addItem(row)
+
+    def _on_sell_list_double_clicked(self, item):
+        """Take one item type back off the list."""
+        itype = item.data(Qt.ItemDataRole.UserRole)
+        if itype:
+            self._set_sell_whitelisted(int(itype), False)
+
+    def _tick_sell(self):
+        """One auto-sell round. Skipped while a request is already out, so a slow round
+        cannot pile overlapping ticks onto the worker -- and, here, cannot sell twice."""
+        if not self.helper.available:
+            # Say it once per switch-on rather than never. A cheat that silently does
+            # nothing is indistinguishable from a broken one, and this is the state a
+            # player without passwordless sudo lands in.
+            if not self._sell_warned:
+                self._sell_warned = True
+                self.log.appendPlainText(
+                    "[sell] the helper is not running — auto-sell needs passwordless "
+                    "sudo. Nothing will be sold until it is available.")
+            return
+        if self._sell_inflight:
+            return
+        self._sell_inflight = True
+
+        def done(raw: str):
+            self._sell_inflight = False
+            for got in client.replies(raw):
+                if got.get("error"):
+                    self.log.appendPlainText(f"[sell] {got['error']}")
+                    continue
+                if self._sell_said_idle is False and not got.get("sold"):
+                    # One line the first time a round finds nothing, so "switched on and
+                    # nothing happened" is an answer rather than a silence.
+                    self._sell_said_idle = True
+                    reach = got.get("reachable", {})
+                    where = ("the piggy bank" if reach.get("reachable")
+                             else "your inventory (no piggy bank you can reach)")
+                    self.log.appendPlainText(
+                        "[sell] on — nothing on the sell list is in your inventory. "
+                        f"Coins will go into {where}. Right-click an item in the "
+                        "Inventory tab to add it.")
+                where = ("your inventory" if got["destination"] == "inventory"
+                         else "the piggy bank")
+                for e in got.get("sold", []):
+                    self.log.appendPlainText(
+                        f"[sell] {e['stack']}x {e['name']} -> {e['copper']} copper "
+                        f"into {where}")
+
+        if not self.helper.request(client.sell_argv(), done):
+            self._sell_inflight = False
+
+    def _set_sell_watch(self, on: bool):
+        """Nothing to disarm on the way out: stop the timer and no more items are sold."""
+        if on and not self._sell_timer.isActive():
+            self._sell_warned = False
+            self._sell_said_idle = False
+            self._sell_timer.start(500)
+            self._tick_sell()          # answer immediately rather than in half a second
+        elif not on and self._sell_timer.isActive():
+            self._sell_timer.stop()
+            self._sell_inflight = False
+            self.log.appendPlainText("[sell] off")
 
     def _on_cell_clicked(self, slot: int):
         """Re-read the slot before opening the editor so the dialog starts from truth,
@@ -1946,7 +2136,8 @@ class MainWindow(QWidget):
     #: so a restored session starts its timers exactly as a clicked one would, and there is
     #: no second code path to keep in step.
     _EFFECT_BOXES = ("cb_god", "cb_mana", "cb_fishing", "cb_catch", "cb_recast",
-                     "cb_buff_power", "cb_buff_sonar", "cb_buff_crate", "cb_potions")
+                     "cb_buff_power", "cb_buff_sonar", "cb_buff_crate", "cb_potions",
+                     "cb_sell")
     _EFFECT_SPINS = ("sp_bait", "sp_power", "sp_potion_stack")
 
     def _effects_state(self) -> dict:

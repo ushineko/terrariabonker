@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import struct
 
+import numpy as np
+
 from terrariabonker import layout
 
 MAIN_TILE_OFF = layout.MAIN_TILE_OFF
@@ -28,6 +30,15 @@ _BOUNDS_OFF = 0x08              # -> {width, originX, height, originY}
 _ENTRIES_OFF = layout.ARR_DATA_OFF   # the per-tile pointer array
 _TILE_TYPE_OFF = 0x08           # ushort, within a tile object
 _TILE_HEADER_OFF = 0x0E         # sTileHeader, ushort
+
+# Tile objects are pool-allocated 24 bytes apart and run contiguously down a column: a
+# 1200-tile column measured 1197 deltas of exactly 24 and only 3 breaks, with no nulls.
+# Reading a whole run at once and striding the type out of it is what makes a full-world
+# search affordable -- 0.15 s against 5,040,000 tiles, where one read per tile extrapolated
+# to 13.2 s. This is an ALLOCATOR OBSERVATION, not a guaranteed layout, so `find_type`
+# verifies the stride as it goes and falls back to per-tile reads for any run that does not
+# hold: a different allocation pattern costs speed and never correctness.
+_TILE_RECORD = 24
 _ACTIVE_BIT = 0x20              # Tile.active() is (sTileHeader & 32) == 32
 
 # 0x0E is *measured*, not derived. Adding up the declared field widths -- type(2),
@@ -210,6 +221,56 @@ class TileMap:
                 continue
             raw = self.mem.read(p + _TILE_TYPE_OFF, 2)
             out.append(struct.unpack("<H", raw)[0] if len(raw) == 2 else None)
+        return out
+
+    def find_type(self, want: int, limit: int = 0) -> list[tuple[int, int]]:
+        """Every ``(x, y)`` in the world holding tile id ``want``.
+
+        Whole-world by design: this answers "is one of these placed *anywhere* in the world
+        the player is in", which no bounded search around the player can answer. It is far
+        too much work for a timer -- callers run it once per world load and cache.
+
+        ``limit`` stops after that many hits (0 = no limit); a caller that only needs to
+        know whether one exists passes 1 and pays for a fraction of the world.
+        """
+        out: list[tuple[int, int]] = []
+        for x in range(self.max_x):
+            idx = self.stride * (x - self.origin_x) - self.origin_y
+            blob = self.mem.read(self.buf + _ENTRIES_OFF + 4 * idx, 4 * self.max_y)
+            if len(blob) < 4 * self.max_y:
+                continue
+            ptrs = np.frombuffer(blob, dtype=np.uint32, count=self.max_y).astype(np.int64)
+            breaks = np.nonzero(np.diff(ptrs) != _TILE_RECORD)[0] + 1
+            for start, end in zip(np.r_[0, breaks], np.r_[breaks, self.max_y]):
+                start, end = int(start), int(end)
+                for y in self._run_matches(ptrs[start:end], want):
+                    out.append((x, start + y))
+                    if limit and len(out) >= limit:
+                        return out
+        return out
+
+    def _run_matches(self, ptrs, want: int) -> list[int]:
+        """Offsets within one contiguous run whose tile id is ``want``.
+
+        Reads the whole run in one go when the 24-byte stride holds, and otherwise reads
+        the run a tile at a time, so a pool that stops being contiguous degrades in speed
+        rather than going silently blind.
+        """
+        n = len(ptrs)
+        if n and ptrs[0]:
+            raw = self.mem.read(int(ptrs[0]), _TILE_RECORD * n)
+            if len(raw) == _TILE_RECORD * n:
+                a = np.frombuffer(raw, dtype=np.uint8).reshape(n, _TILE_RECORD)
+                types = (a[:, _TILE_TYPE_OFF].astype(np.uint16)
+                         | (a[:, _TILE_TYPE_OFF + 1].astype(np.uint16) << 8))
+                return np.nonzero(types == want)[0].tolist()
+        out = []
+        for i, p in enumerate(ptrs.tolist()):
+            if not p:
+                continue
+            raw = self.mem.read(int(p) + _TILE_TYPE_OFF, 2)
+            if len(raw) == 2 and struct.unpack("<H", raw)[0] == want:
+                out.append(i)
         return out
 
 

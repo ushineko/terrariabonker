@@ -1002,3 +1002,65 @@ def test_the_pick_power_clears_every_minimum_the_game_imposes():
     unmet = {t: need for t, need in PICK_MINIMUMS.items()
              if t in T.whitelist(gems=True) and ORE_PICK_POWER < need}
     assert not unmet, f"below the game's minimum for {unmet}"
+
+
+# --- whole-world search (spec 048) ------------------------------------------
+# The piggy-bank check needs "is this tile placed ANYWHERE in the loaded world", which no
+# bounded search around the player can answer. It is affordable only because tile objects
+# are pool-allocated 24 bytes apart and contiguous down a column -- measured in game as
+# 1197 deltas of exactly 24 in a 1200-tile column, 3 runs, no nulls. That is an allocator
+# observation, so the fallback below matters as much as the fast path.
+
+def test_find_type_locates_every_matching_tile():
+    m = _world(lambda x, y: 29 if (x, y) in ((4, 7), (5, 7), (11, 2)) else 0)
+    assert T.TileMap(m, STATIC).find_type(29) == [(4, 7), (5, 7), (11, 2)]
+
+
+def test_find_type_ignores_tiles_past_the_world_edge():
+    """The buffer holds the previous world past maxTilesX/Y; a hit there is not in
+    this world, and gating the piggy bank on one would be a false positive."""
+    m = _world()
+    tm = T.TileMap(m, STATIC)
+    stale = OBJS + 0x100000
+    m.write(stale + T._TILE_TYPE_OFF, struct.pack("<H", 29))
+    m.write(TILES + 4 * (STRIDE * (WORLD_W + 2) + 3), struct.pack("<I", stale))
+    assert tm.find_type(29) == []
+
+
+def test_find_type_limit_stops_early():
+    m = _world(lambda x, y: 29 if y == 1 else 0)
+    assert T.TileMap(m, STATIC).find_type(29, limit=1) == [(0, 1)]
+    assert len(T.TileMap(m, STATIC).find_type(29, limit=3)) == 3
+
+
+def test_find_type_falls_back_when_a_run_cannot_be_read_in_one_go():
+    """The fast path reads a whole run at once, which fails when the run crosses the end
+    of a mapped region -- a short read there must fall back to per-tile reads rather than
+    dropping the run. Skipping it silently is the failure this guards: the search would
+    report "no piggy bank in this world" while looking straight at one.
+
+    (An earlier version of this test relocated a single tile object instead. That leaves a
+    one-tile run the FAST path still reads correctly, so it never reached the fallback and
+    a mutant that deleted the fallback entirely survived it.)"""
+    m = _world(lambda x, y: 29 if (x, y) == (3, 3) else 0)
+    tm = T.TileMap(m, STATIC)
+
+    # Re-point column 7 at a contiguous run whose last record runs 2 bytes past the end of
+    # memory: the 24-byte-strided bulk read is short, while each tile's own 2-byte type
+    # read is still inside.
+    end = BASE + len(m.buf)
+    first = end - T._TILE_RECORD * WORLD_H + 2
+    for y in range(WORLD_H):
+        m.write(TILES + 4 * (STRIDE * 7 + y), struct.pack("<I", first + T._TILE_RECORD * y))
+    m.write(first + T._TILE_RECORD * 4 + T._TILE_TYPE_OFF, struct.pack("<H", 29))
+
+    assert m.read(first, T._TILE_RECORD * WORLD_H) == b"", "premise: the bulk read fails"
+    assert m.read(first + T._TILE_RECORD * 4 + T._TILE_TYPE_OFF, 2) != b"", \
+        "premise: the per-tile read still works"
+    assert tm.find_type(29) == [(3, 3), (7, 4)]
+
+
+def test_find_type_skips_null_entries():
+    m = _world(lambda x, y: 29 if (x, y) == (3, 3) else 0)
+    m.write(TILES + 4 * (STRIDE * 2 + 2), struct.pack("<I", 0))
+    assert T.TileMap(m, STATIC).find_type(29) == [(3, 3)]
