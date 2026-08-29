@@ -1,11 +1,10 @@
 # Spec 049: Notice when the world changes
 
-**Status**: INCOMPLETE — shipped in v0.41.1 at the maintainer's direction with one
-criterion outstanding. 738 tests pass. `world_id()` is confirmed against the running game
-(`status --json` reports `['Royal Brewery of Maggots', 4200, 1200]`), and the restore-timing
-work is measured and done; what has **not** been observed is a world switch with the
-trainer open putting the cheats back on its own. Committed rather than held because the
-pieces are independently useful and the outstanding check needs a play session.
+**Status**: COMPLETE — shipped in v0.41.1 and verified in the running game. 738 tests pass.
+`world_id()` reads the loaded world (`status --json` reports
+`['Royal Brewery of Maggots', 4200, 1200]`), and the maintainer confirmed by playtest that
+loading into a new world brings the saved cheats back on its own, with the trainer left
+running.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -138,8 +137,10 @@ authoritative. The corrected probe ignores state that does not belong to the liv
       waiting and that they apply when the feature is first used — a cold restore takes
       ~80 s and the panel used to go silent after the first pass. The line is not repeated
       while it is unchanged. *(Mutations M30 and M31 each kill a test.)*
-- [ ] Verified in the running game: switch worlds with the trainer open and the saved
-      cheats come back without restarting it.
+- [x] Verified in the running game: switch worlds with the trainer open and the saved
+      cheats come back without restarting it. *(Maintainer playtest, reloading into a new
+      world; the cheats came back as they should. This is the bug the spec was opened
+      for.)*
 
 ## Risks & Assumptions
 
