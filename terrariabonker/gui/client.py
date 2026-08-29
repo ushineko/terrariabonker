@@ -423,6 +423,27 @@ def build_banner(status: dict | None, known_build: str) -> str:
     return " ".join(parts)
 
 
+def restore_progress(report: dict | None, attempt: int) -> str | None:
+    """One line saying how far auto-restore has got, or None when there is nothing to say.
+
+    Auto-restore takes about 80 seconds on a cold game and the panel used to say nothing
+    after the first pass, so the wait was indistinguishable from a hang. Two things make
+    it slow and only one is a fault: every pass re-resolves the anchors (measured at 14.3s
+    on a fresh pid, where a warm one costs ~5s), and some cheats hook methods the game
+    only JIT-compiles when the feature is first used -- ``fast_place`` compiles when the
+    player first places a block. Those genuinely cannot be applied before then, so the
+    line says so rather than looking stuck.
+    """
+    if not report:
+        return None
+    done = len(report.get("cheats") or ())
+    pending = len(report.get("pending") or ())
+    if not pending:
+        return f"[auto-restore] {done} cheats applied" if done else None
+    return (f"[auto-restore] {done} applied, {pending} waiting on the game "
+            f"(they apply the first time you use that feature) — pass {attempt}")
+
+
 def restore_summary(report: dict | None, _unused=None) -> list[str]:
     """Plain-language lines for what auto-restore could not finish, or [] when it did.
 

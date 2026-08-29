@@ -73,6 +73,9 @@ def _cli_args_user(sub_args: list[str]) -> tuple[str, list[str]]:
 GRID_CHUNK = 500
 # Auto-restore passes before giving up, whether it is making progress or erroring.
 RESTORE_RETRIES = 8
+#: How many consecutive status polls a world must be reported for before anything is
+#: written to it. The status timer runs at 2 s, so this is a ~2 s settle.
+WORLD_SETTLE_POLLS = 2
 ROLE_ITEM_ID = int(Qt.ItemDataRole.UserRole)
 ROLE_SEARCH = int(Qt.ItemDataRole.UserRole) + 1
 
@@ -216,6 +219,10 @@ class MainWindow(QWidget):
         self._dialog_open = False                  # pause syncing while the editor is up
         self._opening_slot = False                 # a pre-dialog slot read is outstanding
         self._restore_pid = None                   # last game pid we auto-restored to
+        self._restore_world = None                 # and which world it was in (spec 049)
+        self._restore_said = None                  # last progress line, so it says it once
+        self._world_seen = None                    # candidate world, awaiting a settle
+        self._world_settle = 0                     # consecutive polls it has held for
         self._gated_builds: set[str] = set()       # builds already asked about (spec 036)
         self._gate_open = False
         self._unavailable: set[str] = set()        # cheats this build cannot run
@@ -1394,6 +1401,7 @@ class MainWindow(QWidget):
             f"Mana {d.get('mana')}/{d.get('max_mana')} · "
             f"PID {d.get('pid')} · Terraria {build}{god}")
         self._maybe_gate_build(build, d)
+        self._note_world(d)
         self._maybe_restore(d)
 
     def _maybe_gate_build(self, build: str | None, d: dict | None = None):
@@ -1452,17 +1460,54 @@ class MainWindow(QWidget):
         self._spawn(client.accept_build_argv(choice, failed))
         self.refresh_patches()
 
+    def _note_world(self, d: dict):
+        """Track which world the game reports, and how long it has held still.
+
+        **Nothing is written to a world that has not settled.** A world load is the most
+        turbulent moment in the game's lifetime: the world, the player, and the arrays the
+        panel's timers write into are all being rebuilt, and the player becomes locatable
+        partway through. The game crashed twice during structural operations while the
+        trainer was writing, and neither crash was ever traced -- so this is caution, not
+        a fix for a known cause. It costs one poll.
+        """
+        world = d.get("world")
+        world = tuple(world) if isinstance(world, list) else world
+        if world != self._world_seen:
+            self._world_seen = world
+            self._world_settle = 0
+        self._world_settle += 1
+
+    def world_settled(self) -> bool:
+        """Has the reported world held still long enough to be written to?"""
+        return self._world_settle >= WORLD_SETTLE_POLLS
+
     def _maybe_restore(self, d: dict):
-        """Auto-restore the saved profile when a fresh in-world game is detected (any new
-        pid). Retries a few times for cheats whose method JITs lazily (e.g. fast-placement,
-        which compiles only when an item is first used)."""
+        """Auto-restore the saved profile when a fresh in-world game is detected.
+
+        "Fresh" is a new pid **or a new world**. Keying on the pid alone was the bug: the
+        game keeps its process across a world switch while rebuilding the player from the
+        save, so the edits were gone and nothing put them back until the trainer was
+        restarted.
+
+        Retries a few times for cheats whose method JITs lazily (e.g. fast-placement,
+        which compiles only when an item is first used), and the budget resets on a world
+        change for the same reason it does on a new pid.
+        """
         pid = d.get("pid")
         if pid is None or not d.get("name"):        # need a located player (game in-world)
             return
         if not (profile.cheats() or profile.item_edits()):
             return                                   # nothing saved to restore
-        if pid != self._restore_pid:
+        if not self.world_settled():
+            return
+        world = self._world_seen
+        # A world we cannot identify must not read as "a different world" every poll, or
+        # the profile would be re-applied several times a second.
+        changed = pid != self._restore_pid or (world is not None
+                                               and world != self._restore_world)
+        if changed:
             self._restore_pid = pid
+            self._restore_world = world
             self._restore_attempts = 0
             self._restore_last_left = None
             self._do_restore()
@@ -1492,6 +1537,13 @@ class MainWindow(QWidget):
                 self.log.appendPlainText(
                     f"[auto-restore] cheats={rep['cheats']} items={rep['items']} "
                     f"pending={rep['pending']} skipped={rep['skipped']}")
+            # Say something on EVERY pass, not just the first. A cold restore takes about
+            # 80 seconds and the panel used to go quiet after pass one, which reads as a
+            # hang rather than as work in progress.
+            line = client.restore_progress(rep, self._restore_attempts)
+            if line and line != self._restore_said:
+                self._restore_said = line
+                self.log.appendPlainText(line)
             self.refresh_patches()
             # Retry only while retrying still achieves something: a cheat whose method has
             # not JIT-compiled yet resolves on a later pass, but one that cannot resolve on
@@ -1728,6 +1780,10 @@ class MainWindow(QWidget):
                     "sudo. Nothing will be sold until it is available.")
             return
         if self._sell_inflight:
+            return
+        if not self.world_settled():
+            # Mid-load the inventory and the bank chest are being rebuilt underneath us.
+            # A sale can wait; a write into a half-built container cannot be taken back.
             return
         self._sell_inflight = True
 

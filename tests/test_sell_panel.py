@@ -9,6 +9,14 @@ and nothing about left-click (which opens the item editor) changes.
 from terrariabonker.gui import client
 
 
+def _settled(w):
+    """Mark the world as settled: the panel writes nothing to an unsettled world, and
+    these tests are about the tick itself, not the gate (see test_world_change.py)."""
+    from terrariabonker.gui.main_window import WORLD_SETTLE_POLLS
+    w._world_settle = WORLD_SETTLE_POLLS
+    return w
+
+
 def test_sell_argv_never_watches():
     """The worker must not block: the panel owns the cadence, as it does everywhere else."""
     assert "--watch" not in client.sell_argv()
@@ -63,7 +71,7 @@ def test_unmarking_repaints_the_cell(gui_window):
 
 def test_the_tick_does_not_stack_up_requests(gui_window):
     """Two rounds in flight at once would sell the same slot twice."""
-    w = gui_window()
+    w = _settled(gui_window())
     sent = []
     w.helper.available = True
     w.helper.request = lambda argv, done: (sent.append(argv), True)[1]
@@ -109,7 +117,7 @@ def test_the_missing_helper_is_reported_once_not_every_tick(gui_window):
 
 def test_switching_on_ticks_immediately(gui_window):
     """Half a second of nothing reads as "it isn't working"."""
-    w = gui_window()
+    w = _settled(gui_window())
     sent = []
     w.helper.available = True
     w.helper.request = lambda argv, done: (sent.append(argv), True)[1]
@@ -118,7 +126,7 @@ def test_switching_on_ticks_immediately(gui_window):
 
 
 def test_an_empty_round_explains_itself_once(gui_window):
-    w = gui_window()
+    w = _settled(gui_window())
     w.helper.available = True
     captured = {}
     w.helper.request = lambda argv, done: (captured.setdefault("done", done), True)[1]

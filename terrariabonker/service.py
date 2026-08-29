@@ -728,6 +728,18 @@ class Service:
         from terrariabonker.patcher import Patcher
         return Patcher(self.mem)
 
+    def _static_base(self):
+        """Main's static block, scanned once and remembered.
+
+        ``main_static_base`` is a full memory scan costing ~1.5s. The statics do not move
+        while the process lives, so every caller shares one answer -- ``world_id`` is read
+        on every status poll and paying for a scan each time would be the whole budget.
+        """
+        if self._main_base is None:
+            from terrariabonker.locate import main_static_base
+            self._main_base = main_static_base(self.mem)
+        return self._main_base
+
     def tilemap(self):
         """A read-only view of the world's tiles (spec 040).
 
@@ -738,12 +750,9 @@ class Service:
         like it had a delay when the mining itself takes 20ms. A world change moves
         ``Main.tile``, not the statics, so the TileMap is still rebuilt each call.
         """
-        from terrariabonker.locate import main_static_base
         from terrariabonker.tiles import TileMap
 
-        if self._main_base is None:
-            self._main_base = main_static_base(self.mem)
-        base = self._main_base
+        base = self._static_base()
         if base is None:
             raise ServiceError("could not locate Main's statics — is the game in a world?")
         try:
@@ -1448,15 +1457,37 @@ class Service:
     #: this, and this asks the world only when the world it was told about has changed.
     _bank_placed: tuple[object, bool] | None = None
 
-    def _world_key(self):
-        """``(key, tilemap)`` where the key changes when a different world is loaded.
+    def world_id(self) -> tuple | None:
+        """``(name, width, height)`` for the loaded world, or None if there isn't one.
 
-        The tile buffer's address plus the world's dimensions. This only has to be wrong in
-        the safe direction: a false *change* costs one rescan, while a missed change would
-        leave the previous world's answer standing.
+        The name carries the identity; the dimensions are corroboration. **The dimensions
+        alone are not enough, and neither is the tile buffer's address**: this used to be
+        keyed on `(buf, max_x, max_y)` and that is byte-identical across a switch between
+        two worlds of the same size, which is exactly what a measurement showed (spec 049).
+
+        Fails safe. A rotted offset gives a null or unreadable pointer, `read_mono_string`
+        returns None, and callers fall back to their old behaviour rather than acting on a
+        wrong answer.
         """
+        from terrariabonker.layout import MAIN_WORLD_NAME_OFF
+        from terrariabonker.locate import read_mono_string
+
+        base = self._static_base()
+        if base is None:
+            return None
+        name = read_mono_string(self.mem, self.mem.read_u32(base + MAIN_WORLD_NAME_OFF))
+        if not name:
+            return None
+        try:
+            tm = self.tilemap()
+        except ServiceError:
+            return None
+        return (name, tm.max_x, tm.max_y)
+
+    def _world_key(self):
+        """``(key, tilemap)`` where the key changes when a different world is loaded."""
         tm = self.tilemap()
-        return (tm.buf, tm.max_x, tm.max_y), tm
+        return self.world_id() or (tm.buf, tm.max_x, tm.max_y), tm
 
     def bank_reachable(self, *, rescan: bool = False) -> dict:
         """Can the player open their Piggy Bank *in this world* right now?

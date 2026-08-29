@@ -69,6 +69,9 @@ def cmd_status(args) -> int:
             "name": p.name if p else None, "hp": p.hp if p else None,
             "max_hp": p.max_hp if p else None, "mana": p.mana if p else None,
             "max_mana": p.max_mana if p else None,
+            # Which world is loaded, so the panel can re-apply the profile on a world
+            # switch and not only on a new pid (spec 049). None when it cannot be read.
+            "world": svc.world_id(),
         }))
         return 0
     _print_snapshot(svc)

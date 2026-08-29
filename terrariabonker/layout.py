@@ -33,3 +33,9 @@ MAIN_PROJECTILE_OFF = 0x9BC     # Main.projectile
 MAIN_RECIPE_OFF = 0xA68         # Main.recipe
 MAIN_PLAYER_OFF = 0xA7C         # Main.player
 MAIN_NPC_FRAME_COUNT_OFF = 0xC34  # Main.npcFrameCount
+# Main.worldName, a mono string, and the only thing in this block that identifies which
+# world is loaded. Found by diffing the static block across a real world switch (spec 049):
+# 139 dwords changed and this was the one whose value matched the world files either side.
+# The tile buffer's address and the world dimensions do NOT identify a world -- both were
+# byte-identical across a switch between two 4200x1200 worlds.
+MAIN_WORLD_NAME_OFF = 0x660
