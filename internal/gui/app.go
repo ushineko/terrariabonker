@@ -72,6 +72,11 @@ type ui struct {
 
 	// log is the window's output, the counterpart of the Qt panel's log box.
 	log *logpane.Pane
+	// split is the live divider between a section and the output, and logOffset
+	// is where the user last dragged it. The position belongs to the window
+	// because the sections rebuild often and each rebuild makes a new split.
+	split     *container.Split
+	logOffset float64
 
 	// The Effects loops. Built once with the window, not with the section, so
 	// a cheat survives navigating away from the controls that started it.
@@ -244,6 +249,7 @@ func (u *ui) shellOptions(o Options) shell.Options {
 		Sections:     sections(u),
 		Section:      o.Section,
 		Scheme:       o.Scheme,
+		Header:       func(*shell.Shell) []fyne.CanvasObject { return u.headerActions() },
 		StatusBar:    func(*shell.Shell) []fyne.CanvasObject { return u.statusSegments() },
 		OnCreate:     func(s *shell.Shell) { u.onCreate(s, o) },
 		OnStart:      func(*shell.Shell) { u.start() },
@@ -272,7 +278,25 @@ func (u *ui) onCreate(s *shell.Shell, o Options) {
 	u.cp.kind, u.cp.picked = anyKind, -1
 	u.gate.asked = map[string]bool{}
 	u.gate.unavailable = map[string]bool{}
+	u.loadLogOffset()
 	u.startWatches()
+}
+
+// loadLogOffset reads where the output divider was left, or leaves it at the
+// default. A stored position outside the bar's range is ignored rather than
+// obeyed: it would open the window with one of the two panes invisible.
+func (u *ui) loadLogOffset() {
+	u.logOffset = defaultLogOffset
+	got := u.sh.App.Preferences().Float(logOffsetKey)
+	if got > 0 && got < 1 {
+		u.logOffset = got
+	}
+}
+
+// saveLogOffset remembers the divider for the next run.
+func (u *ui) saveLogOffset() {
+	u.rememberSplit()
+	u.sh.App.Preferences().SetFloat(logOffsetKey, u.logOffset)
 }
 
 // resolve finds the CLI and works out whether sudo will run without a prompt.
@@ -412,6 +436,7 @@ a watcher in the worker to drop. The worker goes last, because stopping a watch
 sends it one more command.
 */
 func (u *ui) shutdown() {
+	u.saveLogOffset()
 	u.freeze.halt()
 	for _, w := range []*watch{
 		u.potions, u.fishing, u.buffs, u.catch, u.sell, u.inventory, u.statusPoll,

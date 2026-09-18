@@ -112,17 +112,14 @@ func (u *ui) buildRecipes() fyne.CanvasObject {
 				"Uses: pick an ingredient to see what it makes."),
 		nil, filter)
 
-	return container.NewBorder(
+	return u.logSplit(container.NewBorder(
 		container.NewVBox(widgets.Heading("Recipes", "Browse craftable items."), head),
-		container.NewVBox(
-			container.NewHBox(count,
-				widgets.WithTip(extract, "The recipe book is read from the game once and "+
-					"cached. Re-extract after a game update."),
-				widgets.WithTip(icons, "Item icons are decoded from the game's own files "+
-					"into ~/.cache. It takes around half a minute, once.")),
-			widgets.FixedHeight(u.logWidget(), logHeight),
-		),
-		nil, nil, body)
+		container.NewHBox(count,
+			widgets.WithTip(extract, "The recipe book is read from the game once and "+
+				"cached. Re-extract after a game update."),
+			widgets.WithTip(icons, "Item icons are decoded from the game's own files "+
+				"into ~/.cache. It takes around half a minute, once.")),
+		nil, nil, body))
 }
 
 // modeWidth is the Makes/Uses picker's width. The recipe dialog is sized to

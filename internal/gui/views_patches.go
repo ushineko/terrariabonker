@@ -30,7 +30,7 @@ func (u *ui) buildPatches() fyne.CanvasObject {
 	head := widgets.Heading("Patches", "Code written into the running game.")
 
 	if len(u.px.catalog) == 0 {
-		return container.NewBorder(nil, widgets.FixedHeight(u.logWidget(), logHeight), nil, nil,
+		return u.logSplit(
 			container.NewVScroll(container.NewVBox(head, widgets.Card("Catalog",
 				widgets.Wrapped("The patch catalog has not been read yet."),
 				widgets.DimWrapped("It comes from the CLI. If this stays empty, "+cliName+
@@ -46,10 +46,7 @@ func (u *ui) buildPatches() fyne.CanvasObject {
 		tabs.Append(container.NewTabItem(section, u.patchGrid(section)))
 	}
 
-	return container.NewBorder(
-		head,
-		container.NewVBox(u.restoreCard(), widgets.FixedHeight(u.logWidget(), logHeight)),
-		nil, nil, tabs)
+	return u.logSplit(container.NewBorder(head, u.restoreCard(), nil, nil, tabs))
 }
 
 /*

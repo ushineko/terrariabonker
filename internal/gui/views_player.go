@@ -31,10 +31,23 @@ const (
 	maxReach       = 100
 )
 
-// logHeight is the output pane under the section. The Qt window capped its log
-// box at 150 px; this is the same idea in the library's shape -- a fixed region
-// written to in place, so a growing log never reflows the section above it.
-const logHeight float32 = 160
+/*
+The output pane under every section.
+
+logMinHeight is as small as it may be dragged, not the size it opens at. The Qt
+window capped its log box at a fixed 150 px, which was the only thing wrong with
+it: the one section where the output matters is whichever one is failing, and
+there was no way to give it more room.
+
+defaultLogOffset is where the bar sits before anyone moves it -- about the same
+share of the window the fixed pane used to take.
+*/
+const (
+	logMinHeight     float32 = 90
+	defaultLogOffset float64 = 0.78
+	// logOffsetKey is where the dragged position is remembered between runs.
+	logOffsetKey = "log.split"
+)
 
 /*
 buildPlayer is the player themselves: what they are made of, and the two tools
@@ -87,7 +100,7 @@ func (u *ui) buildPlayer() fyne.CanvasObject {
 		widgets.DimWrapped("Applies to every pickaxe you carry. Reach is in tiles."),
 	)
 
-	return container.NewBorder(nil, widgets.FixedHeight(u.logWidget(), logHeight), nil, nil,
+	return u.logSplit(
 		container.NewVScroll(container.NewVBox(
 			widgets.Heading("Player", "Set player stats and tool limits."),
 			stats,
@@ -103,10 +116,36 @@ func (u *ui) logWidget() fyne.CanvasObject {
 	}
 	return u.log.Widget(logpane.Options{
 		Title:     "Output",
-		Height:    logHeight,
+		Height:    logMinHeight,
 		Clipboard: u.sh.App.Clipboard(),
 		Flash:     u.sh.Flash,
 	})
+}
+
+/*
+logSplit puts a section over the output, with a bar between them to drag.
+
+The bar's position is the window's, not the section's: a section rebuild would
+otherwise put it back where it started, and the sections rebuild often. It is
+read off the live split before that split is thrown away, because Fyne's does not
+report a drag as it happens.
+*/
+func (u *ui) logSplit(body fyne.CanvasObject) fyne.CanvasObject {
+	u.rememberSplit()
+	split := container.NewVSplit(body, u.logWidget())
+	split.SetOffset(u.logOffset)
+	u.split = split
+	return split
+}
+
+// rememberSplit takes the bar's position off the split that is about to be
+// replaced.
+func (u *ui) rememberSplit() {
+	if u.split == nil {
+		return
+	}
+	u.logOffset = u.split.Offset
+	u.split = nil
 }
 
 // spin is a whole-number entry with bounds, the counterpart of the Qt window's

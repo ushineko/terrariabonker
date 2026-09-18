@@ -79,13 +79,13 @@ func (u *ui) buildInventory() fyne.CanvasObject {
 			"so slots show shortened names.")
 	}
 
-	return container.NewBorder(
+	return u.logSplit(container.NewBorder(
 		container.NewVBox(
 			widgets.Heading("Inventory", "Edit carried items."),
 			hint,
 		),
-		widgets.FixedHeight(u.logWidget(), logHeight), nil, nil,
-		container.NewVScroll(body))
+		nil, nil, nil,
+		container.NewVScroll(body)))
 }
 
 /*

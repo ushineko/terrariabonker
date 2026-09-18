@@ -86,18 +86,15 @@ func (u *ui) buildCompendium() fyne.CanvasObject {
 	body := u.compendiumTable(rows)
 	head := container.NewBorder(nil, nil, widgets.FixedWidth(kind, kindWidth), nil, filter)
 
-	return container.NewBorder(
+	return u.logSplit(container.NewBorder(
 		container.NewVBox(
 			widgets.Heading("Compendium", "Browse every item and NPC."),
 			head,
 		),
-		container.NewVBox(
-			container.NewHBox(count, give, wiki,
-				widgets.WithTip(rescan, "Stats are read from the game once and cached per "+
-					"build. Re-scan after a game update.")),
-			widgets.FixedHeight(u.logWidget(), logHeight),
-		),
-		nil, nil, body)
+		container.NewHBox(count, give, wiki,
+			widgets.WithTip(rescan, "Stats are read from the game once and cached per "+
+				"build. Re-scan after a game update.")),
+		nil, nil, body))
 }
 
 /*

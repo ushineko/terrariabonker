@@ -45,7 +45,7 @@ Separate from Patches because they differ in the way a player notices: close the
 window and these stop, while a patch keeps working until the game restarts.
 */
 func (u *ui) buildEffects() fyne.CanvasObject {
-	return container.NewBorder(nil, widgets.FixedHeight(u.logWidget(), logHeight), nil, nil,
+	return u.logSplit(
 		container.NewVScroll(container.NewVBox(
 			widgets.Heading("Effects", "Cheats that run while the trainer is open."),
 			u.freezeCard(),

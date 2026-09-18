@@ -67,17 +67,14 @@ func (u *ui) buildProjectiles() fyne.CanvasObject {
 	on.OnChanged = func(v bool) { u.setProjectiles(v) }
 	u.sh.Gate(again)
 
-	return container.NewBorder(
+	return u.logSplit(container.NewBorder(
 		container.NewVBox(
 			widgets.Heading("Projectiles", "Change what a weapon's shots do."),
 			head, says,
 		),
-		container.NewVBox(
-			container.NewHBox(widgets.WithTip(on,
-				"Re-applies the ticked fields to whatever is in flight, several times a "+
-					"second, for as long as this is on.")),
-			widgets.FixedHeight(u.logWidget(), logHeight),
-		),
+		container.NewHBox(widgets.WithTip(on,
+			"Re-applies the ticked fields to whatever is in flight, several times a "+
+				"second, for as long as this is on.")),
 		nil, nil,
 		container.NewVScroll(container.NewVBox(
 			u.projFields(),
@@ -89,7 +86,7 @@ func (u *ui) buildProjectiles() fyne.CanvasObject {
 				"1001. Raising it is what lets a shot cross a thick wall: some projectiles "+
 				"burn their life fast while inside solid blocks."),
 		)),
-	)
+	))
 }
 
 /*
