@@ -18,6 +18,11 @@ import (
 /*
 Every offset is the Python's offset, and there are no others on either side.
 
+The Python spreads them over three modules and re-exports some of them; this
+declares each one once, so the comparison is against the union of the three and
+a name is allowed to appear in more than one of them only if it agrees with
+itself.
+
 These numbers are build-specific and hand-derived, and they now exist in two
 languages -- which is the exact failure the Python module was created to end,
 after they were once spelled five times under four names. Nothing here checks a
@@ -33,9 +38,15 @@ func TestEveryOffsetMatchesThePython(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", "-c", `
 import json
-from terrariabonker import layout
-print(json.dumps({k: v for k, v in vars(layout).items()
-                  if k.isupper() and isinstance(v, int)}))
+from terrariabonker import inventory, layout, player
+out = {}
+for mod in (layout, player, inventory):
+    for k, v in vars(mod).items():
+        if not k.isupper() or not isinstance(v, int) or isinstance(v, bool):
+            continue
+        assert out.get(k, v) == v, f"{k} disagrees with itself across modules"
+        out[k] = v
+print(json.dumps(out))
 `) //nolint:gosec // a fixed script
 	cmd.Dir = repoRoot
 	out, err := cmd.CombinedOutput()
@@ -44,7 +55,7 @@ print(json.dumps({k: v for k, v in vars(layout).items()
 	}
 	require.NoErrorf(t, err, "asking the Python: %s", out)
 
-	var want map[string]uint32
+	var want map[string]int64
 	require.NoError(t, json.Unmarshal(out, &want))
 	require.NotEmpty(t, want)
 

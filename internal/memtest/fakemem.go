@@ -21,6 +21,7 @@ package memtest
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"unicode/utf16"
 
 	"github.com/ushineko/terrariabonker/internal/proc"
@@ -138,6 +139,25 @@ func (m *FakeMem) ReadU32(addr uint32) (uint32, bool) {
 	}
 	return binary.LittleEndian.Uint32(b), true
 }
+
+// ReadI32 is a signed word at addr, and whether it was there. A player's fields
+// are signed, and the sign is load-bearing: a damage of -1 means an item that
+// does none.
+func (m *FakeMem) ReadI32(addr uint32) (int32, bool) {
+	v, ok := m.ReadU32(addr)
+	return int32(v), ok //nolint:gosec // a word, as its bits
+}
+
+// WriteI32 puts a signed word at addr and reports whether it landed.
+func (m *FakeMem) WriteI32(addr uint32, value int32) bool {
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], uint32(value)) //nolint:gosec // a word, as its bits
+	return m.Write(addr, b[:])
+}
+
+// Hex is the whole buffer, which is how a test compares what two
+// implementations left behind rather than what each said it did.
+func (m *FakeMem) Hex() string { return hex.EncodeToString(m.Buf) }
 
 // PokeI32 writes a signed word, which is how most of the game's fields are
 // planted.

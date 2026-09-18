@@ -53,14 +53,13 @@ const (
 )
 
 /*
-Offsets is every constant above, under the name the Python gives it.
+mainOffsets is every constant above, under the name the Python gives it.
 
-It exists for the test that compares the two, and it is written next to the
-constants it names so that adding one and forgetting the other is visible where
-it happens. The values are the constants themselves, so a number cannot disagree
-with its own entry.
+It is written next to the constants it names so that adding one and forgetting
+the other is visible where it happens. The values are the constants themselves,
+so a number cannot disagree with its own entry.
 */
-var Offsets = map[string]uint32{
+var mainOffsets = map[string]int64{
 	"ARR_LEN_OFF":              ArrLenOff,
 	"ARR_DATA_OFF":             ArrDataOff,
 	"MAIN_MAX_TILES_OFF":       MainMaxTilesOff,
@@ -71,4 +70,31 @@ var Offsets = map[string]uint32{
 	"MAIN_RECIPE_OFF":          MainRecipeOff,
 	"MAIN_PLAYER_OFF":          MainPlayerOff,
 	"MAIN_NPC_FRAME_COUNT_OFF": MainNPCFrameCountOff,
+}
+
+/*
+Offsets is every number this package pins, from all of its files, under the
+names the Python gives them.
+
+Signed, because most of a player is reached backwards from the field a scan can
+recognise. It exists for the test that compares the two implementations, which
+checks both directions: a number on one side and not the other fails rather than
+diverging quietly.
+*/
+var Offsets = merge(mainOffsets, playerOffsets, itemOffsets)
+
+// merge is the maps above in one, and refuses a name declared twice -- which is
+// the whole failure this package exists to end, so it is a panic at startup and
+// not a value that quietly wins.
+func merge(parts ...map[string]int64) map[string]int64 {
+	out := make(map[string]int64)
+	for _, part := range parts {
+		for name, value := range part {
+			if _, clash := out[name]; clash {
+				panic("layout: " + name + " is declared twice")
+			}
+			out[name] = value
+		}
+	}
+	return out
 }
