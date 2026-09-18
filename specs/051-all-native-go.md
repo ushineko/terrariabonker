@@ -89,11 +89,21 @@ build the differential habit this port depends on.
    `projectiles` — loaders over the unchanged JSON in `data/`. No memory, no privilege,
    no fixture needed, and a differential test per table per row.
 
-   **`names` is done.** `internal/game` reads the embedded `items.json` and
-   `tooltips.json`; every one of the 6,195 names and tooltips, every label and every
-   search result is checked against what the Python makes of the same bytes. The window
-   no longer shells out for them, so item names arrive before the first section is drawn
-   and with no game running.
+   **`names`, `prefixes` and `recipes` are done.** `internal/game` reads the embedded
+   tables; every one of the 6,195 names and tooltips, every modifier's name, quality and
+   effect, all 32 class combinations' modifier pools, and all 3,603 recipes with their
+   stations and tile icons are checked against what the Python makes of the same bytes.
+
+   The window read all three through the CLI at start-up and now reads none of them:
+   three subprocesses gone, and every section is drawn with names, modifiers and recipes
+   the first time rather than redrawn when a subprocess answers. `RecipesArgv`,
+   `PrefixesArgv`, `NamesArgv` and their parsers went with them.
+
+   The modifier pools are the interesting ones. They are not extracted data -- they are
+   Terraria's own categorisation, written down by hand -- so porting them means the same
+   constants spelled twice, which is this project's oldest failure mode. Every id's
+   quality and every combination's pool is compared, and the comparison was
+   mutation-checked by breaking one range and one set.
 
    This is also the step that pays immediately: the Go window shells out to the CLI four
    times at start-up for names, prefixes, recipes and the patch catalog, and those four

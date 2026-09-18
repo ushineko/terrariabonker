@@ -16,6 +16,7 @@ import (
 
 	"github.com/ushineko/fynedesygn/fynetest"
 
+	"github.com/ushineko/terrariabonker/internal/game"
 	"github.com/ushineko/terrariabonker/internal/gui/client"
 )
 
@@ -41,14 +42,18 @@ func seedCatalog(u *ui) {
 // seedRecipes gives a window a three-recipe book, one of which needs a station.
 func seedRecipes(u *ui) {
 	anvil := 16
-	u.rc.book = &client.Recipes{
-		Recipes: []client.Recipe{
+	u.rc.book = &game.Recipes{
+		Recipes: []game.Recipe{
 			{Out: 757, N: 1, Ing: [][]int{{9, 12}, {4, 1}}, Tile: &anvil},
 			{Out: 3506, N: 1, Ing: [][]int{{9, 10}}},
 			{Out: 9, N: 4, Ing: [][]int{{4, 1}}},
 		},
 		Stations: map[string]string{"16": "Anvil"},
 	}
+	// The indexes too, the way loadRecipes replaces them: the window reads the
+	// real book when it is built now, so a fixture that only replaced the book
+	// would be indexed as the 3,603-recipe one.
+	u.rc.makes, u.rc.uses = nil, nil
 	u.indexRecipes()
 }
 
@@ -117,16 +122,6 @@ func TestTheRecipeBookIsIndexedBothWays(t *testing.T) {
 	require.Equal(t, []int{9}, u.visibleRecipeItems())
 	u.rc.filter = "4"
 	require.Equal(t, []int{4}, u.visibleRecipeItems(), "an ingredient found by its id")
-}
-
-// A recipe says where it is made. Terraria calls most stations by a tile
-// number, and an unnamed one must still read as something rather than blank.
-func TestARecipeSaysWhereItIsMade(t *testing.T) {
-	stations := map[string]string{"16": "Anvil"}
-	anvil, unknown := 16, 4242
-	require.Equal(t, "by hand", client.Recipe{}.Station(stations))
-	require.Equal(t, "Anvil", client.Recipe{Tile: &anvil}.Station(stations))
-	require.Equal(t, "tile 4242", client.Recipe{Tile: &unknown}.Station(stations))
 }
 
 /*

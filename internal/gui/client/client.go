@@ -474,73 +474,6 @@ func ExtractSpritesArgv(force bool) []string {
 // ExtractRecipesArgv reads the crafting recipes out of the game.
 func ExtractRecipesArgv() []string { return []string{"extract-recipes"} }
 
-/*
-Recipe is one crafting recipe: what it makes, how many, and what it takes.
-
-The field names are the cache's own, short because there are thousands of them:
-"out" is the item made, "n" how many, "ing" the ingredients as [item, count]
-pairs, "tile" the crafting station when one is needed.
-*/
-type Recipe struct {
-	Out  int     `json:"out"`
-	N    int     `json:"n"`
-	Ing  [][]int `json:"ing"`
-	Tile *int    `json:"tile"`
-}
-
-// Recipes is the cached recipe book: the recipes themselves, and the names of
-// the crafting stations they call for.
-type Recipes struct {
-	Recipes  []Recipe          `json:"recipes"`
-	Stations map[string]string `json:"stations"`
-}
-
-// RecipesArgv reads the cached recipe book. Static and unprivileged: browsing
-// it is offline work, and `extract-recipes` is what fills it.
-func RecipesArgv() []string { return []string{"recipes", "--json"} }
-
-// ParseRecipes decodes the recipe book.
-func ParseRecipes(raw string) (*Recipes, bool) {
-	line, ok := lastLine(raw)
-	if !ok {
-		return nil, false
-	}
-	var r Recipes
-	if err := json.Unmarshal([]byte(line), &r); err != nil {
-		return nil, false
-	}
-	return &r, true
-}
-
-// Station names the crafting station a recipe needs, or says it is made by
-// hand when it needs none.
-func (r Recipe) Station(stations map[string]string) string {
-	if r.Tile == nil {
-		return "by hand"
-	}
-	if n, ok := stations[strconv.Itoa(*r.Tile)]; ok && n != "" {
-		return n
-	}
-	return "tile " + strconv.Itoa(*r.Tile)
-}
-
-// PrefixesArgv reads the modifier catalog. Static, so it is read through a
-// one-shot run rather than the worker, which needs a game.
-func PrefixesArgv() []string { return []string{"prefixes", "--json"} }
-
-// ParsePrefixes decodes the modifier catalog.
-func ParsePrefixes(raw string) ([]Prefix, bool) {
-	line, ok := lastLine(raw)
-	if !ok {
-		return nil, false
-	}
-	var out []Prefix
-	if err := json.Unmarshal([]byte(line), &out); err != nil {
-		return nil, false
-	}
-	return out, true
-}
-
 // --- code patches ------------------------------------------------------------
 
 // Patch is one entry of the patch catalog: what it is called, what it does, and
@@ -894,12 +827,10 @@ func Samples() []Sample {
 		{"GiveArgv", "give", GiveArgv(29, 1)},
 		{"CompendiumArgv", "compendium", CompendiumArgv(false)},
 		{"CompendiumArgv/refresh", "compendium", CompendiumArgv(true)},
-		{"PrefixesArgv", "prefixes", PrefixesArgv()},
 		{"SpawnNPCArgv", "spawn-npc", SpawnNPCArgv(50, 10)},
 		{"ExtractSpritesArgv", "extract-sprites", ExtractSpritesArgv(false)},
 		{"ExtractSpritesArgv/force", "extract-sprites", ExtractSpritesArgv(true)},
 		{"ExtractRecipesArgv", "extract-recipes", ExtractRecipesArgv()},
-		{"RecipesArgv", "recipes", RecipesArgv()},
 		{"ProjectileOfArgv", "projectile-of", ProjectileOfArgv(3507)},
 		{"ProjectileTickArgv", "projectile-tick", ProjectileTickArgv(nil)},
 		{"ProjectileTickArgv/set", "projectile-tick", ProjectileTickArgv(

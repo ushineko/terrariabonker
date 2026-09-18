@@ -16,6 +16,7 @@ import (
 	"github.com/ushineko/fynedesygn/dialogs"
 	"github.com/ushineko/fynedesygn/widgets"
 
+	"github.com/ushineko/terrariabonker/internal/game"
 	"github.com/ushineko/terrariabonker/internal/gui/client"
 )
 
@@ -39,12 +40,12 @@ const (
 
 // recipeState is the book and what the section is showing of it.
 type recipeState struct {
-	book *client.Recipes
+	book *game.Recipes
 	// makes and uses index the book by item, built once when it is read:
 	// filtering runs on every keystroke and walking 3,600 recipes per stroke is
 	// work that does not need doing twice.
-	makes  map[int][]client.Recipe
-	uses   map[int][]client.Recipe
+	makes  map[int][]game.Recipe
+	uses   map[int][]game.Recipe
 	ids    []int // every item the current mode knows about, sorted by name
 	mode   string
 	filter string
@@ -205,8 +206,8 @@ func (u *ui) indexRecipes() {
 		return
 	}
 	if u.rc.makes == nil {
-		u.rc.makes = map[int][]client.Recipe{}
-		u.rc.uses = map[int][]client.Recipe{}
+		u.rc.makes = map[int][]game.Recipe{}
+		u.rc.uses = map[int][]game.Recipe{}
 		for _, r := range u.rc.book.Recipes {
 			u.rc.makes[r.Out] = append(u.rc.makes[r.Out], r)
 			for _, ing := range r.Ing {
@@ -261,7 +262,7 @@ func (u *ui) showRecipe(itemID int) {
 		}
 		made := fmt.Sprintf("%s x%d", u.itemName(r.Out), r.N)
 		body.Add(widgets.PlainRow(made, strings.Join(parts, ", ")))
-		body.Add(widgets.DimWrapped("at: " + r.Station(u.rc.book.Stations)))
+		body.Add(widgets.DimWrapped("at: " + u.rc.book.Station(r)))
 	}
 
 	dialogs.ShowDetail(u.sh.Window, title, container.NewVScroll(body), recipeDialogW, recipeDialogH)
@@ -309,22 +310,14 @@ func (u *ui) extractSprites() {
 }
 
 // loadRecipes reads the cached book. Static and unprivileged, so it goes
-// straight to the CLI.
+// loadRecipes reads the crafting book, in this process: it is bundled data
+// (spec 051, step 1), read once when the window is built rather than asked for.
 func (u *ui) loadRecipes() {
-	u.sh.Load("Reading the recipes...", func(ctx context.Context) error {
-		out, err := u.runUser(ctx, client.RecipesArgv())
-		book, ok := client.ParseRecipes(out)
-		if !ok {
-			if err != nil {
-				fyne.Do(func() { u.note("recipes: " + firstLine(detail(out, err))) })
-			}
-			return nil
-		}
-		fyne.Do(func() {
-			u.rc.book, u.rc.makes, u.rc.uses = book, nil, nil
-			u.indexRecipes()
-			u.sh.Refresh()
-		})
-		return nil
-	})
+	book, err := game.CraftingBook()
+	if err != nil {
+		u.note("recipes: " + err.Error())
+		return
+	}
+	u.rc.book, u.rc.makes, u.rc.uses = book, nil, nil
+	u.indexRecipes()
 }

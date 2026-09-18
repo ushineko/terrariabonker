@@ -275,10 +275,12 @@ func (u *ui) onCreate(s *shell.Shell, o Options) {
 	u.cp.kind, u.cp.picked = anyKind, -1
 	u.gate.asked = map[string]bool{}
 	u.gate.unavailable = map[string]bool{}
-	// Before the first section is built, because it is a read of embedded data
-	// rather than a subprocess: a grid drawn before the names arrive would draw
-	// numbers and then redraw.
+	// Before the first section is built: these are reads of embedded data
+	// rather than subprocesses (spec 051, step 1), and a section drawn before
+	// them would show numbers where it should show names and then redraw.
 	u.loadItemNames()
+	u.loadPrefixes()
+	u.loadRecipes()
 	u.startWatches()
 	// After the watches exist, because restoring a switch arms one.
 	u.loadState()
@@ -311,13 +313,11 @@ func (u *ui) start() {
 	}
 	u.startWorker()
 	u.loadCatalog()
-	u.loadPrefixes()
 	u.loadStatus()
 	u.pollStatus()
 	u.loadPatches()
 	u.loadSellList()
 	u.loadNames()
-	u.loadRecipes()
 	u.syncInventory()
 }
 

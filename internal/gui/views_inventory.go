@@ -294,25 +294,19 @@ func (u *ui) mergeNames(names map[int]string) {
 	}
 }
 
-// loadPrefixes reads the modifier catalog. Static and unprivileged, so it goes
-// straight to the CLI rather than through the worker.
+// loadPrefixes reads the modifier catalog, in this process: it is bundled data
+// (spec 051, step 1), so there is nobody to ask for it.
 func (u *ui) loadPrefixes() {
-	u.sh.Load("Reading the modifiers...", func(ctx context.Context) error {
-		out, err := u.runUser(ctx, client.PrefixesArgv())
-		list, ok := client.ParsePrefixes(out)
-		if !ok {
-			if err != nil {
-				fyne.Do(func() { u.note("modifiers: " + firstLine(detail(out, err))) })
-			}
-			return nil
-		}
-		byID := make(map[int]client.Prefix, len(list))
-		for _, p := range list {
-			byID[p.ID] = p
-		}
-		fyne.Do(func() { u.iv.prefix = byID })
-		return nil
-	})
+	list, err := game.ItemPrefixes()
+	if err != nil {
+		u.note("modifiers: " + err.Error())
+		return
+	}
+	byID := make(map[int]client.Prefix, len(list.All()))
+	for _, id := range list.All() {
+		byID[id] = client.Prefix{ID: id, Name: list.Name(id), Quality: list.Quality(id)}
+	}
+	u.iv.prefix = byID
 }
 
 // redrawAllCells repaints every cell, for when something that affects all of

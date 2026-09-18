@@ -77,13 +77,23 @@ func intKeyed(file string) (map[int]string, error) {
 	}
 	out := make(map[int]string, len(byText))
 	for key, value := range byText {
-		id, err := strconv.Atoi(key)
+		id, err := atoiKey(file, key)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %q is not an item id: %w", file, key, err)
+			return nil, err
 		}
 		out[id] = value
 	}
 	return out, nil
+}
+
+// atoiKey reads one of these tables' keys, which are numbers written as strings
+// because that is what a JSON object can hold.
+func atoiKey(file, key string) (int, error) {
+	id, err := strconv.Atoi(key)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %q is not an id: %w", file, key, err)
+	}
+	return id, nil
 }
 
 // Name is an item's display name, or "" for an id the table does not have --
