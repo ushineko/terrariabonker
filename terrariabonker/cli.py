@@ -754,6 +754,23 @@ def cmd_freeze(args) -> int:
     return 0
 
 
+def cmd_recipes(args) -> int:
+    """The cached crafting recipes, as they sit in data/recipes.json.
+
+    Static, and read without a Service so it works with the game closed -- the
+    cache is what `extract-recipes` wrote, and browsing it is offline work.
+
+    The third of these dumps, and all three exist for one reason: the Qt panel
+    reaches the common layer's data by importing it, which a front end in
+    another language cannot do. The cache is handed over as it is rather than
+    reshaped, so there is one spelling of a recipe and it is this file's.
+    """
+    from terrariabonker import recipes as rec
+
+    print(json.dumps(rec.load()))
+    return 0
+
+
 def cmd_prefixes(args) -> int:
     """The modifier catalog: every prefix id with its name and quality.
 
@@ -1222,6 +1239,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tiles", type=int, default=20, help="extra tiles of reach (default 20)")
     force_flag(p)
     p.set_defaults(func=cmd_long_reach)
+
+    p = sub.add_parser("recipes", help="dump the cached crafting recipes")
+    p.add_argument("--json", action="store_true", help="machine-readable catalog")
+    p.set_defaults(func=cmd_recipes)
 
     p = sub.add_parser("prefixes", help="list item modifiers (id, name, quality)")
     p.add_argument("--json", action="store_true", help="machine-readable catalog")

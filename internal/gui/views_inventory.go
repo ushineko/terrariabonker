@@ -248,23 +248,22 @@ func (u *ui) loadNames() {
 			}
 			return nil
 		}
-		names := make(map[int]string, len(cat.Items))
-		for _, it := range cat.Items {
-			names[it.ID] = it.Name
-		}
 		fyne.Do(func() {
-			u.iv.names, u.iv.namesOK = names, true
-			u.redrawAllCells()
+			// One read feeds both sections: the cells want names and the
+			// Compendium wants the rest of it, and the read costs a scan of the
+			// game's item templates.
+			u.takeCatalog(cat)
+			u.sh.Refresh()
 		})
 		return nil
 	})
 }
 
-// loadPrefixes reads the modifier catalog. Static, so it goes direct rather than
-// through the worker.
+// loadPrefixes reads the modifier catalog. Static and unprivileged, so it goes
+// straight to the CLI rather than through the worker.
 func (u *ui) loadPrefixes() {
 	u.sh.Load("Reading the modifiers...", func(ctx context.Context) error {
-		out, err := u.runDirect(ctx, client.PrefixesArgv())
+		out, err := u.runUser(ctx, client.PrefixesArgv())
 		list, ok := client.ParsePrefixes(out)
 		if !ok {
 			if err != nil {

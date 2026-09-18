@@ -17,6 +17,7 @@ package client
 
 import (
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -40,6 +41,23 @@ type Status struct {
 	// World is which world is loaded, so the panel can re-apply the profile on a
 	// world switch and not only on a new pid (spec 049). Null when unreadable.
 	World json.RawMessage `json:"world"`
+}
+
+/*
+BuildKey is the build the gate and the patch report key on.
+
+Version plus Steam buildid, because that pair is what a byte pattern is really
+pinned to: a rebuild can carry the same version string and different code. Falls
+back to the version alone when the buildid could not be read.
+*/
+func (s *Status) BuildKey() string {
+	if s == nil {
+		return ""
+	}
+	if s.BuildID != "" && s.Build != "" {
+		return s.Build
+	}
+	return s.Version
 }
 
 // --- read operations: argv and parser ---------------------------------------
@@ -208,20 +226,32 @@ func GiveArgv(itemType, stack int) []string {
 
 // --- static catalogs -----------------------------------------------------------
 
-// Item is one entry of the item catalog.
+// Item is one entry of the item catalog. Stats come from the game's own
+// template objects, so they are empty for a build that has not been scanned.
 type Item struct {
-	ID      int    `json:"id"`
-	Name    string `json:"name"`
-	Kind    string `json:"kind"`
-	Tooltip string `json:"tooltip"`
-	Wiki    string `json:"wiki"`
+	ID      int                `json:"id"`
+	Name    string             `json:"name"`
+	Kind    string             `json:"kind"`
+	Tooltip string             `json:"tooltip"`
+	Wiki    string             `json:"wiki"`
+	Stats   map[string]float64 `json:"stats"`
 }
 
 // NPC is one entry of the NPC catalog.
 type NPC struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	NetID int    `json:"net_id"`
+	ID    int                `json:"id"`
+	Name  string             `json:"name"`
+	Kind  string             `json:"kind"`
+	Wiki  string             `json:"wiki"`
+	NetID int                `json:"net_id"`
+	Stats map[string]float64 `json:"stats"`
+}
+
+// Stat reads one of an entry's stats, and says whether it was reported at all:
+// a damage of 0 and a damage the game never told us apart.
+func Stat(stats map[string]float64, key string) (float64, bool) {
+	v, ok := stats[key]
+	return v, ok
 }
 
 // Compendium is the full catalog: every item, and every NPC.
@@ -258,6 +288,150 @@ type Prefix struct {
 	ID      int    `json:"id"`
 	Name    string `json:"name"`
 	Quality string `json:"quality"` // "good", "bad" or "neutral"
+}
+
+/*
+The build gate (spec 036).
+
+The patches are matched by byte pattern against one exact game build, so an
+update has three outcomes -- everything still matches, some of it does, or none
+of it -- and the window has to be able to tell which before it writes anything.
+BuildCheck patches nothing; it reports.
+*/
+const (
+	// DecisionAccepted records a build where every cheat still resolved.
+	DecisionAccepted = "accepted"
+	// DecisionDegraded records a build the user chose to run with some cheats
+	// switched off, and names them so they stay off.
+	DecisionDegraded = "degraded"
+)
+
+// CheatProbe is one cheat's verdict on the running build.
+type CheatProbe struct {
+	Resolved bool   `json:"resolved"`
+	Sites    int    `json:"sites"`
+	Reason   string `json:"reason"`
+}
+
+// BuildCheck is what the game is, and whether the cheats still fit it.
+type BuildCheck struct {
+	Build   string `json:"build"`
+	Level   string `json:"level"`
+	Runtime string `json:"runtime"`
+	// Message is the CLI's own sentence about how this build compares with the
+	// one the patterns were derived on. Shown as it stands rather than restated
+	// here, so the known-good build is spelled in one place.
+	Message string `json:"message"`
+	// Known is whether the project verified this build; Recognised is that, or
+	// this machine having already decided about it.
+	Known      bool   `json:"known"`
+	Recognised bool   `json:"recognised"`
+	Decision   string `json:"decision"`
+	// Failed is what did not resolve in this probe. DecidedFailed is what was
+	// recorded as dead when the decision was made, which is the list to honour:
+	// a cheat the user chose to run without stays off even if it resolves again.
+	Failed        []string              `json:"failed"`
+	DecidedFailed []string              `json:"decided_failed"`
+	Cheats        map[string]CheatProbe `json:"cheats"`
+}
+
+// BuildCheckArgv asks what build is running and whether the cheats resolve on
+// it. It needs the game, and it writes nothing.
+func BuildCheckArgv() []string { return []string{"build-check", "--json"} }
+
+// ParseBuildCheck decodes a build report.
+func ParseBuildCheck(raw string) (*BuildCheck, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var b BuildCheck
+	if err := json.Unmarshal([]byte(line), &b); err != nil || b.Build == "" {
+		return nil, false
+	}
+	return &b, true
+}
+
+// AcceptBuildArgv records this machine's decision about the running build, so
+// the gate does not ask again. failed is sorted, because the CLI stores it and
+// two orderings of one answer would read as two answers.
+func AcceptBuildArgv(decision string, failed []string) []string {
+	argv := []string{"accept-build", decision, "--json"}
+	if len(failed) > 0 {
+		sorted := append([]string(nil), failed...)
+		sort.Strings(sorted)
+		argv = append(argv, "--failed")
+		argv = append(argv, sorted...)
+	}
+	return argv
+}
+
+// SpawnNPCArgv puts an NPC in the world, a distance away in tiles.
+func SpawnNPCArgv(netID, distance int) []string {
+	return []string{"spawn-npc", strconv.Itoa(netID), "--distance", strconv.Itoa(distance)}
+}
+
+// ExtractSpritesArgv builds the item icon cache from the game's own files. It
+// runs unprivileged so the cache belongs to the user rather than to root.
+func ExtractSpritesArgv(force bool) []string {
+	argv := []string{"extract-sprites"}
+	if force {
+		argv = append(argv, "--force")
+	}
+	return argv
+}
+
+// ExtractRecipesArgv reads the crafting recipes out of the game.
+func ExtractRecipesArgv() []string { return []string{"extract-recipes"} }
+
+/*
+Recipe is one crafting recipe: what it makes, how many, and what it takes.
+
+The field names are the cache's own, short because there are thousands of them:
+"out" is the item made, "n" how many, "ing" the ingredients as [item, count]
+pairs, "tile" the crafting station when one is needed.
+*/
+type Recipe struct {
+	Out  int     `json:"out"`
+	N    int     `json:"n"`
+	Ing  [][]int `json:"ing"`
+	Tile *int    `json:"tile"`
+}
+
+// Recipes is the cached recipe book: the recipes themselves, and the names of
+// the crafting stations they call for.
+type Recipes struct {
+	Recipes  []Recipe          `json:"recipes"`
+	Stations map[string]string `json:"stations"`
+}
+
+// RecipesArgv reads the cached recipe book. Static and unprivileged: browsing
+// it is offline work, and `extract-recipes` is what fills it.
+func RecipesArgv() []string { return []string{"recipes", "--json"} }
+
+// ParseRecipes decodes the recipe book.
+func ParseRecipes(raw string) (*Recipes, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var r Recipes
+	if err := json.Unmarshal([]byte(line), &r); err != nil {
+		return nil, false
+	}
+	return &r, true
+}
+
+// Station names the crafting station a recipe needs, or says it is made by
+// hand when it needs none.
+func (r Recipe) Station(stations map[string]string) string {
+	if r.Tile == nil {
+		return "by hand"
+	}
+	if n, ok := stations[strconv.Itoa(*r.Tile)]; ok && n != "" {
+		return n
+	}
+	return "tile " + strconv.Itoa(*r.Tile)
 }
 
 // PrefixesArgv reads the modifier catalog. Static, so it is read through a
@@ -341,6 +515,24 @@ type PatchStatus struct {
 	// BuildVerified is whether every AOB matched on this game build. False
 	// means at least one patch is aimed at a signature that has moved.
 	BuildVerified bool `json:"build_verified"`
+	// Detail is the per-patch verdict, which is what a control needs: the
+	// summary above cannot say which of twelve patches is the one that moved.
+	Detail map[string]PatchDetail `json:"detail"`
+}
+
+/*
+PatchDetail is one patch's standing on the running build.
+
+Available and Verified are different failures and the interface has to tell them
+apart: unavailable means the pattern does not resolve here, so the control must
+not be clickable; unverified means it resolves but was confirmed on another
+build, so it works and the user should know it is unproven.
+*/
+type PatchDetail struct {
+	On        bool   `json:"on"`
+	Available bool   `json:"available"`
+	Verified  bool   `json:"verified"`
+	Reason    string `json:"reason"`
 }
 
 // PatchStatusArgv asks what is currently patched into the running game.
@@ -578,6 +770,15 @@ func Samples() []Sample {
 		{"CompendiumArgv", "compendium", CompendiumArgv(false)},
 		{"CompendiumArgv/refresh", "compendium", CompendiumArgv(true)},
 		{"PrefixesArgv", "prefixes", PrefixesArgv()},
+		{"SpawnNPCArgv", "spawn-npc", SpawnNPCArgv(50, 10)},
+		{"ExtractSpritesArgv", "extract-sprites", ExtractSpritesArgv(false)},
+		{"ExtractSpritesArgv/force", "extract-sprites", ExtractSpritesArgv(true)},
+		{"ExtractRecipesArgv", "extract-recipes", ExtractRecipesArgv()},
+		{"RecipesArgv", "recipes", RecipesArgv()},
+		{"BuildCheckArgv", "build-check", BuildCheckArgv()},
+		{"AcceptBuildArgv", "accept-build", AcceptBuildArgv(DecisionAccepted, nil)},
+		{"AcceptBuildArgv/degraded", "accept-build",
+			AcceptBuildArgv(DecisionDegraded, []string{"reach", "mining"})},
 	}
 }
 

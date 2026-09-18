@@ -85,3 +85,21 @@ func (s *sprites) ready() bool {
 	_, err := os.Stat(filepath.Join(s.dir, ".done"))
 	return err == nil
 }
+
+/*
+raw is a cached file's bytes by name, for callers that want the encoding rather
+than a resource -- the detail table's thumbnail column takes bytes.
+
+Named rather than keyed by id because the cache holds two namespaces: items are
+Item_<id>.png and NPCs are NPC_<type>.png, and their numbers collide.
+*/
+func (s *sprites) raw(name string) []byte {
+	if s == nil || s.dir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(s.dir, name)) //nolint:gosec // a path this package built
+	if err != nil {
+		return nil
+	}
+	return data
+}

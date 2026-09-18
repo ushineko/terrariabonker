@@ -3,7 +3,9 @@ package gui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -69,7 +71,7 @@ func (u *ui) patchGrid(section string) fyne.CanvasObject {
 			continue
 		}
 		label, value := u.patchRow(p)
-		grid.Add(widgets.WithTip(label, p.Note))
+		grid.Add(label)
 		grid.Add(value)
 	}
 	return container.NewVScroll(container.NewPadded(grid))
@@ -85,6 +87,10 @@ the window still has the box ticked, and the status poll is what notices.
 func (u *ui) patchRow(p client.Patch) (label, value fyne.CanvasObject) {
 	on := widget.NewCheck(p.Label, nil)
 	on.SetChecked(u.px.on[p.Name])
+	why, usable := u.patchStanding(p)
+	if !usable {
+		on.Disable()
+	}
 
 	var read func() *float64
 
@@ -136,7 +142,34 @@ func (u *ui) patchRow(p client.Patch) (label, value fyne.CanvasObject) {
 	}
 
 	on.OnChanged = func(v bool) { u.setPatch(p, v, read()) }
-	return on, value
+	return widgets.WithTip(on, why), value
+}
+
+/*
+patchStanding is what a patch's control should say, and whether it should work.
+
+Three states the game can put a patch in, and they are not the same thing:
+switched off by the build gate, unavailable on this build, or resolving but
+unproven. The tip carries the reason, because the row has room for a label and a
+number and nothing else.
+*/
+func (u *ui) patchStanding(p client.Patch) (why string, usable bool) {
+	if u.gated(p.Name) {
+		return "Off for this build. It did not match when the game updated and you " +
+			"chose to carry on without it. Re-check with `" + cliName + " build-check`.", false
+	}
+	d, known := u.px.detail[p.Name]
+	switch {
+	case !known:
+		return p.Note, true
+	case !d.Available:
+		return "Not available on this build: " + widgets.OrNone(d.Reason, "the pattern does "+
+			"not resolve here") + ".", false
+	case !d.Verified:
+		return p.Note + "\n\nThis one resolves on the running build but was confirmed on " +
+			"a different one.", true
+	}
+	return p.Note, true
 }
 
 // patchValueWidth is the width of a value box. The grid aligns where they
@@ -190,21 +223,53 @@ func (u *ui) restoreCard() fyne.CanvasObject {
 	u.sh.Gate(run)
 
 	build := widgets.OrNone(u.px.build, "unknown")
-	verdict := widgets.StatusText("verified", fd.StatusGood)
-	if !u.px.verified {
-		verdict = widgets.StatusText("unverified on this build", fd.StatusWarn)
-	}
-	if len(u.px.catalog) == 0 {
-		verdict = widgets.StatusText("not read", fd.StatusInfo)
-	}
 
 	// One row. This sits under the tabs and every pixel it takes is one the
 	// patch list does not get.
 	return container.NewHBox(
 		widgets.WithTip(run, "A game restart clears every patch. This puts back what the "+
 			"profile says should be on."),
-		widgets.Dim("build"), widget.NewLabel(build), verdict,
+		widgets.Dim("build"), widget.NewLabel(build), u.patchVerdict(),
 	)
+}
+
+/*
+patchVerdict is how the whole catalog stands on the running build.
+
+A count rather than a yes or no. "Unverified" was the only thing the Qt panel
+said for a long time and it covers two very different situations -- every cheat
+working but unproven, and four of twelve not resolving at all -- which is the
+gap the build gate was written to close.
+*/
+func (u *ui) patchVerdict() fyne.CanvasObject {
+	if len(u.px.catalog) == 0 {
+		return widgets.StatusText("not read", fd.StatusInfo)
+	}
+	var dead, unproven []string
+	for name, d := range u.px.detail {
+		switch {
+		case !d.Available:
+			dead = append(dead, name)
+		case !d.Verified:
+			unproven = append(unproven, name)
+		}
+	}
+	sort.Strings(dead)
+
+	if len(dead) > 0 {
+		return widgets.WithTip(
+			widgets.StatusText(fmt.Sprintf("%d of %d do not resolve here",
+				len(dead), len(u.px.detail)), fd.StatusBad),
+			"Not available on this build: "+strings.Join(dead, ", ")+
+				". Their patterns no longer match the game's code.")
+	}
+	if len(unproven) > 0 || !u.px.verified {
+		return widgets.WithTip(
+			widgets.StatusText(fmt.Sprintf("%d unproven here", len(unproven)), fd.StatusWarn),
+			"These resolve on the running build but were confirmed on a different one. "+
+				"They should work. Nobody has checked them here.")
+	}
+	return widgets.StatusText("verified", fd.StatusGood)
 }
 
 // patchState is the Patches section's data: the catalog, and what the game says
@@ -214,6 +279,7 @@ type patchState struct {
 	sections []string
 	on       map[string]bool
 	values   map[string]float64
+	detail   map[string]client.PatchDetail
 	build    string
 	verified bool
 }
@@ -221,13 +287,13 @@ type patchState struct {
 /*
 loadCatalog reads the catalog once, through a one-shot CLI run.
 
-Not through the worker: the worker needs a game, and this is labels and ranges.
-Reading it at start-up means the section draws its controls whether or not
-Terraria is up.
+Not through the worker and not under sudo: the worker needs a game, and labels
+and ranges need no privilege. Reading it at start-up means the section draws its
+controls whether or not Terraria is up.
 */
 func (u *ui) loadCatalog() {
 	u.sh.Load("Reading the patch catalog...", func(ctx context.Context) error {
-		out, err := u.runDirect(ctx, client.PatchCatalogArgv())
+		out, err := u.runUser(ctx, client.PatchCatalogArgv())
 		cat, ok := client.ParsePatchCatalog(out)
 		if !ok {
 			if err != nil {
@@ -262,14 +328,14 @@ func (u *ui) loadPatches() {
 		if !ok {
 			if err != nil {
 				fyne.Do(func() {
-					u.px.on, u.px.values = nil, nil
+					u.px.on, u.px.values, u.px.detail = nil, nil, nil
 					u.px.verified = false
 				})
 			}
 			return nil
 		}
 		fyne.Do(func() {
-			u.px.on, u.px.values = st.On, st.Values
+			u.px.on, u.px.values, u.px.detail = st.On, st.Values, st.Detail
 			u.px.build, u.px.verified = st.Build, st.BuildVerified
 			u.sh.Refresh()
 		})

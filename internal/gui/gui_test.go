@@ -219,6 +219,12 @@ var sentDirectly = map[string]string{
 		"dispatches, so through it this would need a running game -- and the controls " +
 		"it describes are drawn before one is attached",
 	"PrefixesArgv": "static data, for the same reason as the patch catalog",
+	"ExtractSpritesArgv": "writes the icon cache under the user's home; run through " +
+		"sudo it would write it as root and the unprivileged extractor could never " +
+		"rewrite it",
+	"ExtractSpritesArgv/force": "as above",
+	"ExtractRecipesArgv":       "reads the game's files to disk, unprivileged, as above",
+	"RecipesArgv":              "static data, read from the cache that extract-recipes wrote",
 }
 
 // Each exception must name a builder that exists, or the list is stale and

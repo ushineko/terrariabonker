@@ -90,8 +90,17 @@ type ui struct {
 	// inventory is the 1 Hz sync. A watch like the others, because that is what
 	// it is: a loop the window holds up while it is open.
 	inventory *watch
+	// statusPoll keeps the status bar current and is the build gate's trigger.
+	statusPoll *watch
 	// sprites is the item icon cache on disk.
 	sprites *sprites
+	// cp is the Compendium's catalog and what it is showing of it.
+	cp compendiumState
+	// rc is the recipe book and the two indexes into it.
+	rc recipeState
+	// gate is the build check: which builds have been asked about, and which
+	// cheats this one may not run.
+	gate gateState
 
 	mu        sync.Mutex
 	status    *client.Status
@@ -134,15 +143,15 @@ type sectionEntry struct {
 // rather than a silently different list.
 func sectionBuilders() map[string]sectionEntry {
 	return map[string]sectionEntry{
-		"Player":    {theme.AccountIcon, (*ui).buildPlayer},
-		"Effects":   {theme.MediaPlayIcon, (*ui).buildEffects},
-		"Patches":   {theme.SettingsIcon, (*ui).buildPatches},
-		"Inventory": {theme.StorageIcon, (*ui).buildInventory},
+		"Player":     {theme.AccountIcon, (*ui).buildPlayer},
+		"Effects":    {theme.MediaPlayIcon, (*ui).buildEffects},
+		"Patches":    {theme.SettingsIcon, (*ui).buildPatches},
+		"Inventory":  {theme.StorageIcon, (*ui).buildInventory},
+		"Recipes":    {theme.ListIcon, (*ui).buildRecipes},
+		"Compendium": {theme.HelpIcon, (*ui).buildCompendium},
 		// Phases 2-5 of spec 050 fill these in. Until then each says what it is
 		// for, rather than being absent from a navigation the flag help lists.
 		"Projectiles": {theme.MailSendIcon, placeholder("Projectiles", "Edit how projectiles behave.")},
-		"Recipes":     {theme.ListIcon, placeholder("Recipes", "Browse craftable items.")},
-		"Compendium":  {theme.HelpIcon, placeholder("Compendium", "Browse every item and NPC.")},
 	}
 }
 
@@ -228,6 +237,9 @@ func (u *ui) onCreate(s *shell.Shell, o Options) {
 	u.iv.shown = map[int]client.ItemSlot{}
 	u.iv.cells = map[int]*fyne.Container{}
 	u.sprites = newSprites()
+	u.cp.kind, u.cp.picked = anyKind, -1
+	u.gate.asked = map[string]bool{}
+	u.gate.unavailable = map[string]bool{}
 	u.startWatches()
 }
 
@@ -260,9 +272,11 @@ func (u *ui) start() {
 	u.loadCatalog()
 	u.loadPrefixes()
 	u.loadStatus()
+	u.pollStatus()
 	u.loadPatches()
 	u.loadSellList()
 	u.loadNames()
+	u.loadRecipes()
 	u.syncInventory()
 }
 
@@ -367,7 +381,9 @@ sends it one more command.
 */
 func (u *ui) shutdown() {
 	u.freeze.halt()
-	for _, w := range []*watch{u.potions, u.fishing, u.buffs, u.catch, u.sell, u.inventory} {
+	for _, w := range []*watch{
+		u.potions, u.fishing, u.buffs, u.catch, u.sell, u.inventory, u.statusPoll,
+	} {
 		if w != nil {
 			w.halt()
 		}
@@ -403,19 +419,29 @@ func (u *ui) once(what string, argv []string) {
 const onceTimeout = 60 * time.Second
 
 /*
-runDirect performs one CLI operation as a one-shot run, never through the worker.
+runUser performs one CLI operation without sudo.
 
-For static reads. The worker connects to a Service before it dispatches anything,
-so everything sent through it needs Terraria running -- which is right for the
-operations that touch the game and wrong for the ones that do not. The patch
-catalog is labels and ranges; asking for it should not depend on whether a game
-is up, because the controls it describes are built before one is.
+For everything that does not touch the game's memory: the patch catalog, the
+modifier list, building the icon cache, reading the recipes. Three reasons, and
+each matters on its own.
+
+The worker connects to a Service before it dispatches, so anything sent through
+it needs Terraria running -- right for operations on the game and wrong for
+static reads, which are made before anything is attached.
+
+Least privilege: none of these needs root, so none of them asks for it.
+
+And for the extractions it is load-bearing rather than tidy. They write the icon
+cache under the user's home. Run under sudo they would write it as root, and the
+unprivileged extractor could then never rewrite it -- the Qt panel has a
+separate argv builder for exactly this, and the cache lives under ~/.cache
+rather than ~/.config for the same reason.
 */
-func (u *ui) runDirect(ctx context.Context, argv []string) (string, error) {
+func (u *ui) runUser(ctx context.Context, argv []string) (string, error) {
 	if u.cli == "" {
 		return "", fmt.Errorf("%s is not on PATH", cliName)
 	}
-	cmd := exec.CommandContext(ctx, "sudo", append(sudoPrefix(u.cli), argv...)...) //nolint:gosec // argv comes from the client package
+	cmd := exec.CommandContext(ctx, u.cli, argv...) //nolint:gosec // argv comes from the client package
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
@@ -448,27 +474,50 @@ already says so -- so this returns nil and reports in band.
 func (u *ui) loadStatus() {
 	u.sh.Load("Reading the game...", func(ctx context.Context) error {
 		out, err := u.run(ctx, client.StatusArgv())
-		st, ok := client.ParseStatus(out)
-		fyne.Do(func() {
-			u.mu.Lock()
-			was := u.statusMsg
-			u.status, u.statusOK = st, ok
-			u.statusMsg = ""
-			if !ok {
-				u.statusMsg = shortReason(out, err)
-			}
-			said := was == u.statusMsg
-			u.mu.Unlock()
-			// The full text goes to the log once, not on every poll: this runs
-			// every couple of seconds and "Terraria is not running" is not news
-			// the second time.
-			if !ok && !said {
-				u.note(firstLine(detail(out, err)))
-			}
-			u.sh.RedrawStatus()
-		})
+		fyne.Do(func() { u.takeStatus(out, err) })
 		return nil
 	})
+}
+
+/*
+pollStatus keeps the status bar current, and is what the build gate hangs off.
+
+Every two seconds, the cadence the Qt panel arrived at. It is not only a display:
+this is the one poll that can notice the game being restarted into a different
+build under a window that is already open, which is the case the gate exists for.
+*/
+func (u *ui) pollStatus() {
+	u.statusPoll = newWatch(u, "status", statusEvery,
+		client.StatusArgv,
+		func(raw string) { u.takeStatus(raw, nil) })
+	u.statusPoll.set(true)
+}
+
+// statusEvery is the poll cadence, from the Qt panel's own timer.
+const statusEvery = 2 * time.Second
+
+// takeStatus stores a status reply and acts on it. On the UI thread.
+func (u *ui) takeStatus(out string, err error) {
+	st, ok := client.ParseStatus(out)
+	u.mu.Lock()
+	was := u.statusMsg
+	u.status, u.statusOK = st, ok
+	u.statusMsg = ""
+	if !ok {
+		u.statusMsg = shortReason(out, err)
+	}
+	said := was == u.statusMsg
+	u.mu.Unlock()
+	// The full text goes to the log once, not on every poll: this runs every
+	// couple of seconds and "Terraria is not running" is not news the second
+	// time.
+	if !ok && !said {
+		u.note(firstLine(detail(out, err)))
+	}
+	u.sh.RedrawStatus()
+	if ok {
+		u.maybeGateBuild(st)
+	}
 }
 
 /*

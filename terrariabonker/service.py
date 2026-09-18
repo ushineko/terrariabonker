@@ -1783,6 +1783,11 @@ class Service:
             "decision": (decided or {}).get("decision"),
             "recognised": bool(verified) or decided is not None,
             "cheats": probe, "failed": failed,
+            # What was recorded as dead when the decision was made, which is not
+            # the same list as this probe's: a cheat the user chose to run
+            # without stays off even if it resolves again, and a panel that only
+            # sees the fresh probe cannot honour that choice.
+            "decided_failed": sorted((decided or {}).get("failed") or ()),
         }
 
     def accept_build(self, how: str, failed=()) -> dict:
