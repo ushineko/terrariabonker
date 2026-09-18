@@ -13,12 +13,6 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Headless Qt, set before anything imports PyQt6. Four test modules used to set this for
-# themselves and three others that build real widgets did not -- those passed only because
-# another module's import happened to run first during collection, so running one of them
-# alone on a headless box was a coin flip.
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 from terrariabonker.proc import Mem  # noqa: E402
 
 
@@ -67,17 +61,6 @@ class FakeMem(Mem):
         self.write(life_addr - 0x6C0, struct.pack("<I", name_ptr))
 
 
-# --- Qt ---------------------------------------------------------------------
-# One application and one window builder for the whole suite. These were copied into
-# seven and four files respectively, under two different fixture names, which is how the
-# headless setting came to be missing from half of them.
-
-@pytest.fixture
-def qt_app():
-    """The one QApplication. Qt allows a single instance per process."""
-    from PyQt6.QtWidgets import QApplication
-
-    yield QApplication.instance() or QApplication([])
 
 
 

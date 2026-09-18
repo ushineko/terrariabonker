@@ -110,10 +110,21 @@ build the differential habit this port depends on.
    round trips have no reason to exist once Go can read the same files. The window keeps
    working through the CLI until each one lands.
 
-2. **The test fixture.** Whatever builds the synthetic memory image for `pytest` becomes
-   a file format both languages read, or a Go generator producing the identical bytes.
-   Nothing that touches memory starts until a Go test can load the image the Python
-   tests use.
+2. **The test fixture.** Nothing that touches memory starts until a Go test can build
+   the image the Python tests use.
+
+   **Done**, and it turned out to be smaller than the spec assumed. There is no image
+   file: `tests/conftest.py`'s fake is a buffer at a base address with a handful of
+   helpers that plant structures into it. So the asset to carry across is not a blob to
+   load but *the shape of those structures* -- where a mono string keeps its length, that
+   the length counts UTF-16 code units rather than bytes, how far below a player's life
+   field the name pointer sits. `internal/memtest` plants the same things and a test
+   compares the buffers byte for byte.
+
+   Those offsets are facts about the game that now exist in two languages, which is the
+   failure mode AGENTS.md names. The comparison is what holds them together, and it was
+   mutation-checked by moving the name pointer four bytes and counting bytes instead of
+   code units.
 3. **`proc` and `locate`.** `process_vm_readv`/`writev` and `/proc/<pid>/maps` from Go,
    then AOB/signature scanning and the player-block scan. Differential test: the same
    image in, the same address out.
