@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	fyne.io/fyne/v2 v2.8.1
 	github.com/stretchr/testify v1.12.1
-	github.com/ushineko/fynedesygn v0.1.18
+	github.com/ushineko/fynedesygn v0.1.19
 )
 
 require (
