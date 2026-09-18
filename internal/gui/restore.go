@@ -98,7 +98,7 @@ func (u *ui) maybeRestore(st *client.Status) {
 func (u *ui) restoreProfile() {
 	u.rs.attempts++
 	u.rs.inflight = true
-	u.sh.Load("Putting the saved patches back...", func(ctx context.Context) error {
+	u.sh.Load("Restoring saved patches...", func(ctx context.Context) error {
 		out, err := u.run(ctx, client.RestoreArgv())
 		rep, ok := client.ParseRestore(out)
 		fyne.Do(func() {

@@ -305,7 +305,7 @@ func (u *ui) restoreCard() fyne.CanvasObject {
 	u.px.apply = apply
 
 	run := widget.NewButton("Restore saved patches", func() {
-		u.sh.Perform("Restoring...", func(ctx context.Context) error {
+		u.sh.Perform("Restoring saved patches...", func(ctx context.Context) error {
 			out, err := u.run(ctx, client.RestoreArgv())
 			fyne.Do(func() {
 				for _, line := range splitLines(out) {
