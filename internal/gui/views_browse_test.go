@@ -245,14 +245,36 @@ func TestTheSellListNamesItsItems(t *testing.T) {
 	u.iv.names = map[int]string{757: "Terra Blade", 9: "Wood"}
 	u.fx.whitelist = []int{757, 9}
 
-	win := test.NewWindow(u.sellCard())
-	t.Cleanup(win.Close)
-	win.Resize(fyne.NewSize(500, 400))
+	// The list is a dialog now, so the card is not where the names are.
+	require.Contains(t, fynetest.Texts(u.sellCard()), "The sell list: 2 items")
 
-	texts := fynetest.Texts(win.Canvas().Content())
+	u.sh.Window.Resize(fyne.NewSize(900, 700)) // a dialog lays its list out to fit
+	u.showSellList()
+	texts := fynetest.Texts(u.sh.Window.Canvas().Overlays().Top())
 	require.Contains(t, texts, "Terra Blade (#757)")
 	require.Contains(t, texts, "Wood (#9)")
 	for _, text := range texts {
 		require.NotContainsf(t, text, "item type", "%q is a number where a name should be", text)
 	}
+}
+
+/*
+The card says how much is on the list, so the button is worth reading.
+
+A button that only said "The sell list" would make someone open a dialog to
+learn there is nothing in it.
+*/
+func TestTheSellCardSaysHowMuchIsOnTheList(t *testing.T) {
+	require.Equal(t, "The sell list is empty", sellListLabel(0))
+	require.Equal(t, "The sell list: 1 item", sellListLabel(1))
+	require.Equal(t, "The sell list: 12 items", sellListLabel(12))
+}
+
+// Removing with nothing picked says so rather than doing nothing, which reads
+// as a button that is broken.
+func TestRemovingNothingSaysSo(t *testing.T) {
+	u := testUI(t)
+	u.fx.whitelist = []int{757}
+	u.fx.sellPick = -1
+	require.NotPanics(t, func() { u.removeFromSellList() })
 }

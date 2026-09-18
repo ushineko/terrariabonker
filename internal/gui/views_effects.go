@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+	"github.com/ushineko/fynedesygn/dialogs"
 	"github.com/ushineko/fynedesygn/widgets"
 
 	"github.com/ushineko/terrariabonker/internal/gui/client"
@@ -205,19 +206,50 @@ func (u *ui) potionCard() fyne.CanvasObject {
 /*
 sellCard sells whitelisted items as they arrive.
 
-The list lives here rather than on the Inventory grid. Items are added by
-right-clicking one there, but a whitelisted item is sold on the next round, so it
-never stays in the grid long enough to right-click a second time: the list would
-be add-only with no way back out but the CLI.
+The list opens in a dialog rather than sitting under the switch. It is the one
+thing on this section that grows without bound -- a player can whitelist as many
+items as they like -- and a pane pinned to a fixed height at the bottom of a card
+gives a list of twenty items four rows and a scrollbar while the section above it
+has room to spare.
 */
 func (u *ui) sellCard() fyne.CanvasObject {
 	on := widget.NewCheck("Sell whitelisted items as they arrive", nil)
 	on.SetChecked(u.sell.running())
 	on.OnChanged = func(v bool) { u.sell.set(v) }
 
-	// A row is the item's icon and its name, not its number. It said "item type
-	// 3507" because the names came from a subprocess that had not answered when
-	// the section was built; they are read in this process now (spec 051).
+	open := widget.NewButton(sellListLabel(len(u.fx.whitelist)), func() { u.showSellList() })
+
+	return widgets.Card("Auto-sell",
+		widgets.WithTip(on, "Anything on the list is sold for coins as it arrives. The "+
+			"coins go to your piggy bank if you can reach one. Favorited stacks are never "+
+			"sold. Selling is permanent once your world saves."),
+		widgets.WithTip(open, "Add an item by right-clicking it in the Inventory section."),
+	)
+}
+
+// sellListLabel says how much is on the list, so the button is worth reading
+// before it is pressed.
+func sellListLabel(n int) string {
+	switch n {
+	case 0:
+		return "The sell list is empty"
+	case 1:
+		return "The sell list: 1 item"
+	}
+	return fmt.Sprintf("The sell list: %d items", n)
+}
+
+/*
+showSellList opens the whitelist.
+
+A dialog because the list is read and edited in bursts -- whitelist a few things,
+then forget about it -- and because it is the one list here with no natural
+length. Items are added by right-clicking one in the Inventory grid; a
+whitelisted item is sold on the next round, so it never stays in the grid long
+enough to right-click a second time, which is why taking one off has to be
+possible here.
+*/
+func (u *ui) showSellList() {
 	list := widget.NewList(
 		func() int { return len(u.fx.whitelist) },
 		func() fyne.CanvasObject {
@@ -239,33 +271,34 @@ func (u *ui) sellCard() fyne.CanvasObject {
 			label.SetText(fmt.Sprintf("%s (#%d)", u.itemName(itemType), itemType))
 		},
 	)
-	u.fx.sellList = list
-	remove := widget.NewButton("Remove selected", func() {
-		i := u.fx.sellPick
-		if i < 0 || i >= len(u.fx.whitelist) {
-			u.note("[sell] pick a row to remove")
-			return
-		}
-		t := u.fx.whitelist[i]
-		u.once("Removing from the sell list", client.SellListArgv(nil, &t))
-		u.loadSellList()
-	})
 	list.OnSelected = func(i widget.ListItemID) { u.fx.sellPick = i }
+	u.fx.sellList = list
 
-	return widgets.Card("Auto-sell",
-		widgets.WithTip(on, "Anything on the list below is sold for coins as it arrives. The "+
-			"coins go to your piggy bank if you can reach one. Favorited stacks are never "+
-			"sold. Selling is permanent once your world saves."),
-		widgets.WithTip(widgets.Dim("on the sell list"),
-			"Add an item by right-clicking it in the Inventory section."),
-		widgets.FixedHeight(list, sellListHeight),
-		remove,
-	)
+	remove := widget.NewButton("Remove selected", func() { u.removeFromSellList() })
+	body := container.NewBorder(nil, remove, nil, nil, list)
+
+	dialogs.ShowDetail(u.sh.Window, "The sell list", body, sellDialogW, sellDialogH)
 }
 
-// sellListHeight is the whitelist's pane. Fixed, because it is the one thing on
-// this section that grows without bound.
-const sellListHeight float32 = 140
+// removeFromSellList takes the picked item off, and says so when nothing is
+// picked rather than doing nothing.
+func (u *ui) removeFromSellList() {
+	i := u.fx.sellPick
+	if i < 0 || i >= len(u.fx.whitelist) {
+		u.note("[sell] pick a row to remove")
+		return
+	}
+	itemType := u.fx.whitelist[i]
+	u.once("Removing from the sell list", client.SellListArgv(nil, &itemType))
+	u.loadSellList()
+}
+
+// The sell list's dialog: tall enough for a dozen rows without scrolling, which
+// is more than most lists ever hold.
+const (
+	sellDialogW float32 = 480
+	sellDialogH float32 = 520
+)
 
 // startWatches describes every loop this section drives. Built once, with the
 // window, so a watch survives the section being rebuilt.
