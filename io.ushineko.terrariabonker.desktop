@@ -1,10 +1,23 @@
 [Desktop Entry]
+Type=Application
 Name=terrariabonker
+GenericName=Terraria trainer
 Comment=Live-memory trainer and item editor for Terraria (Proton)
 Exec=__EXEC__
 Icon=terrariabonker
 Terminal=false
-Type=Application
-Categories=Game;Utility;
+# One main category: desktop-file-validate warns that two of them can put the
+# entry in the menu twice. Keywords below are what a launcher search matches on.
+Categories=Game;
 Keywords=terraria;trainer;godmode;cheat;memory;item;editor;
 StartupNotify=true
+# The basename of this file must stay io.ushineko.terrariabonker.desktop. Fyne
+# sets the Wayland app_id from the application's unique ID (appID in
+# internal/gui), and a Wayland compositor resolves a window's icon by matching
+# that app_id to a desktop file of the same name. Renaming this file to
+# terrariabonker.desktop silently costs the taskbar icon on every Wayland
+# session -- and that name is taken anyway, by the Qt panel's own entry.
+# StartupWMClass covers the X11 and XWayland case, where the match is on
+# WM_CLASS instead. Without it the titlebar finds the icon and the task manager
+# does not, which is how this was noticed.
+StartupWMClass=io.ushineko.terrariabonker
