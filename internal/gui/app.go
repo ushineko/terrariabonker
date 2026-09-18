@@ -97,24 +97,22 @@ func sectionBuilders() map[string]sectionEntry {
 		"Player": {theme.AccountIcon, (*ui).buildPlayer},
 		// Phases 2-5 of spec 050 fill these in. Until then each says what it is
 		// for, rather than being absent from a navigation the flag help lists.
-		"Effects":     {theme.MediaPlayIcon, placeholder("Effects", "Cheats the trainer keeps up rather than writes once.")},
-		"Projectiles": {theme.MailSendIcon, placeholder("Projectiles", "What the player's shots are made of.")},
-		"Patches":     {theme.SettingsIcon, placeholder("Patches", "What has been written into the running game, and what would put it back.")},
-		"Inventory":   {theme.StorageIcon, placeholder("Inventory", "Every slot the player carries, synced while the game runs.")},
-		"Recipes":     {theme.ListIcon, placeholder("Recipes", "What can be crafted, and what it takes.")},
-		"Compendium":  {theme.HelpIcon, placeholder("Compendium", "Every item and NPC the game knows about.")},
+		"Effects":     {theme.MediaPlayIcon, placeholder("Effects", "Cheats that run while the trainer is open.")},
+		"Projectiles": {theme.MailSendIcon, placeholder("Projectiles", "Edit how projectiles behave.")},
+		"Patches":     {theme.SettingsIcon, placeholder("Patches", "Code written into the running game.")},
+		"Inventory":   {theme.StorageIcon, placeholder("Inventory", "Edit carried items.")},
+		"Recipes":     {theme.ListIcon, placeholder("Recipes", "Browse craftable items.")},
+		"Compendium":  {theme.HelpIcon, placeholder("Compendium", "Browse every item and NPC.")},
 	}
 }
 
-// placeholder is a section that is not built yet, saying what it will be. A
-// navigation entry that draws nothing reads as a broken window; one that says
-// "not yet" reads as an unfinished one, which is what this is.
+// placeholder is a section that is not built yet. It states its purpose, so the
+// navigation entry is not blank.
 func placeholder(title, blurb string) func(*ui) fyne.CanvasObject {
 	return func(*ui) fyne.CanvasObject {
 		return widgets.Card(title,
 			widgets.Wrapped(blurb),
-			widgets.DimWrapped("Not ported yet. The Qt window still has this section; "+
-				"see spec 050 for which phase brings it over."),
+			widgets.DimWrapped("Not ported yet. Use the Qt panel for this section."),
 		)
 	}
 }
@@ -188,16 +186,14 @@ func (u *ui) resolve(o Options) {
 // start brings up the privileged worker and the first status read.
 func (u *ui) start() {
 	if u.cli == "" {
-		u.statusMsg = cliName + " is not on PATH — run install.sh"
-		u.sh.Flash("Cannot find the "+cliName+" CLI on PATH. The window drives it for "+
-			"every operation; run install.sh, or pass --cli.", fd.StatusBad)
+		u.statusMsg = "not installed"
+		u.sh.Flash(cliName+" is not on PATH. Run install.sh, or pass --cli.", fd.StatusBad)
 		return
 	}
 	if !u.sudoOK {
 		// Said once, plainly, rather than failing the same way on every button.
-		u.sh.Flash("sudo asks for a password on this machine. Every memory operation "+
-			"runs under sudo -n and there is nowhere here to type one, so those will "+
-			"fail until passwordless sudo is configured for "+cliName+".", fd.StatusWarn)
+		u.sh.Flash("sudo needs a password. Memory operations will fail until "+
+			"passwordless sudo is set up for "+cliName+".", fd.StatusWarn)
 	}
 	u.startWorker()
 	u.loadStatus()
@@ -212,7 +208,7 @@ func (u *ui) startWorker() {
 	}
 	h, err := newHelper("sudo", append(sudoPrefix(u.cli), "serve"), u.note)
 	if err != nil {
-		u.note("the privileged worker did not start: " + err.Error())
+		u.note("worker did not start: " + err.Error())
 		return
 	}
 	u.work = h
@@ -263,7 +259,7 @@ func (u *ui) run(ctx context.Context, argv []string) (string, error) {
 		}
 		// Refused or dead: the serve whitelist does not cover everything, and a
 		// worker that has gone must not take the window with it.
-		u.note("the worker will not take " + argv[0] + "; running it directly")
+		u.note("running " + argv[0] + " directly")
 	}
 	cmd := exec.CommandContext(ctx, "sudo", append(sudoPrefix(u.cli), argv...)...) //nolint:gosec // argv comes from the client package
 	out, err := cmd.CombinedOutput()

@@ -79,19 +79,17 @@ func (u *ui) buildPlayer() fyne.CanvasObject {
 			widget.NewFormItem("Max HP", container.NewBorder(nil, nil, nil, setHP, maxHP)),
 			widget.NewFormItem("Max mana", container.NewBorder(nil, nil, nil, setMana, maxMana)),
 		),
-		widgets.DimWrapped("Heal and refill write the current value; the two ceilings are "+
-			"written once and stay until the game is restarted or the character is reloaded."),
+		widgets.DimWrapped("Ceilings last until the game restarts."),
 	)
 
 	tools := widgets.Card("Tools",
 		container.NewHBox(mining, widgets.Dim("reach +"), widgets.FixedWidth(reach, 90), longReach),
-		widgets.DimWrapped("Fast mining applies to every pickaxe the player carries. Reach is "+
-			"in tiles, on top of the game's own."),
+		widgets.DimWrapped("Applies to every pickaxe you carry. Reach is in tiles."),
 	)
 
 	return container.NewBorder(nil, widgets.FixedHeight(u.logWidget(), logHeight), nil, nil,
 		container.NewVScroll(container.NewVBox(
-			widgets.Heading("Player", "What the player is made of, and how far they can reach."),
+			widgets.Heading("Player", "Set player stats and tool limits."),
 			stats,
 			tools,
 		)))
