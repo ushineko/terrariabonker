@@ -33,7 +33,13 @@ import (
 const GameExe = "Terraria.exe"
 
 // Region is a half-open span of a process's address space.
-type Region struct{ Start, End uint32 }
+type Region struct {
+	Start, End uint32
+	// Writable says the CPU may write here as well as read it. It matters only
+	// for executable regions: a code cave is borrowed padding inside somebody
+	// else's mapping, and almost none of those are writable.
+	Writable bool
+}
 
 // Size is how many bytes the region covers.
 func (r Region) Size() int { return int(r.End - r.Start) }
@@ -85,6 +91,7 @@ func parseRegion(line, want string) (Region, bool) {
 	if !strings.Contains(parts[1], want) {
 		return Region{}, false
 	}
+	writable := strings.Contains(parts[1], "w")
 	if len(parts) > 5 && strings.HasPrefix(parts[5], "/dev/") {
 		return Region{}, false
 	}
@@ -112,7 +119,7 @@ func parseRegion(line, want string) (Region, bool) {
 	if start > math.MaxUint32 || end > math.MaxUint32 {
 		return Region{}, false
 	}
-	return Region{Start: uint32(start), End: uint32(end)}, true
+	return Region{Start: uint32(start), End: uint32(end), Writable: writable}, true
 }
 
 // Mem is read and write access to one process, by pid.

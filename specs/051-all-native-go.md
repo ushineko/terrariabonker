@@ -253,6 +253,33 @@ build the differential habit this port depends on.
    game, and it is the one module where being wrong costs more than an error message.
    Its stubs are architecture-specific byte sequences that move across as data, not as
    rewritten code.
+
+   **The anchors and the scanner are done**, which is the half that decides *where* bytes
+   get written. All seventeen patterns are across as data with their provenance, and the
+   whole table is compared by name, bytes, wildcards, verified builds and seed -- both
+   directions, so an anchor added on one side and missed on the other fails. A byte typed
+   wrong here does not fail: it matches somewhere else, or matches nothing and takes a
+   cheat offline, and the first of those corrupts the game.
+
+   **Checked against the live game**, which is the only evidence that counts for a
+   transcription: every one of the seventeen anchors resolved to the **same addresses** in
+   both implementations, including the four sites `trydrop` matches by design. Go took
+   7.9 s to the Python's 19.7 s over the same 1.6 GiB of executable memory.
+
+   One anchor, `grabitems`, matched nothing in either -- `pickup` is the one cheat showing
+   as unavailable, and the reason text says what that means: the method may have moved in
+   this build, or may not be JIT-compiled yet. Both implementations agree, and the
+   fourteen cheats that were enabled at the time all resolved.
+
+   Eleven mutations checked, three of which needed the tests strengthening: the probe
+   pattern was changed to one whose longest fixed run is at the *end*, so that not
+   stepping back from the seed and not verifying the full pattern both fail; and cases
+   were added for falling through to a second candidate pattern, for overlapping matches,
+   and for keeping resolved sites. One of those found a test bug -- it swapped the anchor
+   before planting the code, so it planted the pattern that was meant not to match.
+
+   Still to come: the arena, code caves, the stub bodies, the cheat catalog and
+   enable/disable -- the half that decides *what* gets written.
 8. **`xnb` and `sprites`.** Decoding the game's containers and building the PNG cache.
    Pillow leaves with them; Go's `image/png` writes the cache. Differential test: decode
    the same `Item_<id>.xnb` in both and compare the PNG bytes, or the pixels.
