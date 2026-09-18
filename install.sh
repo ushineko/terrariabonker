@@ -63,7 +63,10 @@ fi
 #     still the complete one, and a missing Go toolchain must not fail an install
 #     of the trainer itself.
 if [ -x "$APP_DIR/$GO_GUI" ] || command -v go >/dev/null; then
-    if [ ! -x "$APP_DIR/$GO_GUI" ]; then
+    # Rebuilt on every install rather than only when missing: an install after a
+    # change that left the old binary in place would report success and start
+    # yesterday's window.
+    if command -v go >/dev/null; then
         echo "Building $GO_GUI..."
         ( cd "$APP_DIR" && CGO_ENABLED=1 go build \
             -ldflags "-X main.version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$APP_DIR/terrariabonker/__init__.py")" \
