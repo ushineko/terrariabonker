@@ -1,8 +1,9 @@
 # Spec 050: The GUI in Go, on fynedesygn
 
-**Status**: INCOMPLETE — phases 1-5 are done and installed. Phase 6 (retiring the Qt
-window) waits on AC10: the maintainer's live session. Until then both panels are
-installed and they exclude each other, so the Qt one is still there to fall back to.
+**Status**: INCOMPLETE — phases 1-5 are done, installed, and run against the live
+game. Phase 6 (retiring the Qt window) is all that is left, and it is larger than
+"delete a directory": 272 of the Python suite's 739 tests import `terrariabonker.gui`,
+and some of them test the common layer through it rather than testing the window.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -145,7 +146,13 @@ is in `SERVE_OPS`. Losing this check is not an acceptable outcome of the port.
   Python suite still passes unchanged.
 - [ ] AC9 `terrariabonker/gui/` is deleted, PyQt6 is out of `requirements.txt`, and
   `install.sh` installs and launches the Go window (phase 6).
-- [ ] AC10 The maintainer runs it against the live game and reports what is wrong.
+- [x] AC10 The maintainer runs it against the live game and reports what is wrong.
+  Five things, all fixed: a shape menu that opened in the corner, tips that took
+  every click in the window, a banner that did the same for twelve seconds after
+  every operation and then was unreadable when it stopped, item names that were
+  numbers until a game had been read, and -- the one that mattered --
+  `compat_level` declared an int when the CLI emits a word, which made every
+  status reply undecodable and silently disabled the build gate and auto-restore.
 
 ## Risks & Assumptions
 
@@ -162,6 +169,35 @@ is in `SERVE_OPS`. Losing this check is not an acceptable outcome of the port.
   no offsets move — but a wrong argv is a wrong write. AC5 exists for that.
 - **Rollback**: until phase 6 the Qt window is untouched and still installed; after it,
   `git revert` of the phase-6 commit brings it back.
+
+## What the live session found
+
+The reply direction was never checked. Every argv the window builds has been
+parsed by the real CLI since phase 1, because `client.py` came with that property
+and the port kept it; nothing ever checked that a reply the CLI emits decodes
+into the struct that reads it. One wrong field type made the whole status
+document undecodable, and because `encoding/json` rejects the document rather
+than the field, the failure was total and silent -- and invisible without a
+running game, because with no game the CLI returns an error instead of a reply.
+Both halves are now tested the same way, by asking the Python.
+
+**Where the time goes, measured.** Applying a patch takes tens of seconds and the
+transport is not the reason. Through the warm worker, with the game running:
+
+| Operation | Warm | Note |
+| --- | --- | --- |
+| `status` | 3 ms | 3.7 s for the first, which locates the player |
+| `inventory` | 3 ms | 15 KB of JSON |
+| `patch status` | 2 ms | |
+| `build-check` | 3 ms | resolves every anchor |
+| `compendium` | 1.4 s | 3.2 MB of JSON, read once |
+
+The cost is in the patcher, and specifically in anything that needs the game to
+*execute* something: the arena bootstrap hangs a springboard on a per-frame path
+and waits up to 20 s for a frame to run it. Terraria pauses in single-player
+whenever its window loses focus -- which is what clicking in the trainer does. So
+the wait is usually the game being paused by the act of asking, and a port to Go
+does not make it shorter.
 
 ## What the port found
 
