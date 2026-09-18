@@ -259,6 +259,47 @@ func (u *ui) loadNames() {
 	})
 }
 
+/*
+loadItemNames reads the bundled name table.
+
+Unprivileged and static, so it works with the game closed -- which is why it
+exists. Names used to arrive only with the compendium, and the compendium needs
+a running game, so every recipe, every grid cell and every picker listed numbers
+until one had been read. A recipe book that works offline should say "Terra
+Blade".
+*/
+func (u *ui) loadItemNames() {
+	u.sh.Load("Reading the item names...", func(ctx context.Context) error {
+		out, err := u.runUser(ctx, client.NamesArgv())
+		names, ok := client.ParseNames(out)
+		if !ok {
+			if err != nil {
+				fyne.Do(func() { u.note("item names: " + firstLine(detail(out, err))) })
+			}
+			return nil
+		}
+		fyne.Do(func() {
+			u.mergeNames(names)
+			u.sh.Refresh()
+		})
+		return nil
+	})
+}
+
+// mergeNames adds names without dropping any already known. The compendium's
+// come from the running game and the table's are bundled; neither is a reason
+// to forget the other.
+func (u *ui) mergeNames(names map[int]string) {
+	if u.iv.names == nil {
+		u.iv.names = make(map[int]string, len(names))
+	}
+	for id, name := range names {
+		if name != "" {
+			u.iv.names[id] = name
+		}
+	}
+}
+
 // loadPrefixes reads the modifier catalog. Static and unprivileged, so it goes
 // straight to the CLI rather than through the worker.
 func (u *ui) loadPrefixes() {

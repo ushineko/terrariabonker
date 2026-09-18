@@ -285,6 +285,7 @@ func (u *ui) takeCatalog(cat *client.Compendium) {
 	sort.Strings(list)
 
 	u.cp.entries, u.cp.kinds, u.cp.picked = entries, list, -1
-	u.iv.names, u.iv.namesOK = names, true
+	u.mergeNames(names)
+	u.iv.namesOK = true
 	u.redrawAllCells()
 }

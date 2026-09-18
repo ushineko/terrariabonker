@@ -45,6 +45,13 @@ func (u *ui) buildPatches() fyne.CanvasObject {
 	for _, section := range u.px.sections {
 		tabs.Append(container.NewTabItem(section, u.patchGrid(section)))
 	}
+	// The section is rebuilt whenever the patches are read, and a fresh AppTabs
+	// opens on its first tab. Without this, ticking something in Combat put the
+	// user back in Movement.
+	if u.px.tab >= 0 && u.px.tab < len(tabs.Items) {
+		tabs.SelectIndex(u.px.tab)
+	}
+	tabs.OnSelected = func(*container.TabItem) { u.px.tab = tabs.SelectedIndex() }
 
 	return u.logSplit(container.NewBorder(head, u.restoreCard(), nil, nil, tabs))
 }
@@ -83,7 +90,7 @@ the window still has the box ticked, and the status poll is what notices.
 */
 func (u *ui) patchRow(p client.Patch) (label, value fyne.CanvasObject) {
 	on := widget.NewCheck(p.Label, nil)
-	on.SetChecked(u.px.on[p.Name])
+	on.SetChecked(u.wanted(p))
 	why, usable := u.patchStanding(p)
 	if !usable {
 		on.Disable()
@@ -103,12 +110,8 @@ func (u *ui) patchRow(p client.Patch) (label, value fyne.CanvasObject) {
 			byLabel[pr.Label] = pr.Value
 		}
 		sel := widget.NewSelect(labels, nil)
-		sel.SetSelected(presetFor(p, u.px.values[p.Name]))
-		sel.OnChanged = func(string) {
-			if on.Checked {
-				u.setPatch(p, true, read())
-			}
-		}
+		sel.SetSelected(presetFor(p, u.wantedValue(p)))
+		sel.OnChanged = func(string) { u.recordPatch(p, on.Checked, read()) }
 		// Boxed the same way as a typed value. The grid's second column
 		// expands, and a Select left to fill it would stretch across the
 		// window while the entries beside it stayed 170 wide.
@@ -122,8 +125,9 @@ func (u *ui) patchRow(p client.Patch) (label, value fyne.CanvasObject) {
 		}
 	default:
 		entry := widget.NewEntry()
-		entry.SetText(formatValue(p, u.px.values[p.Name]))
+		entry.SetText(formatValue(p, u.wantedValue(p)))
 		entry.Validator = numberIn(p.Value.Lo, p.Value.Hi)
+		entry.OnChanged = func(string) { u.recordPatch(p, on.Checked, read()) }
 		// The unit follows the box rather than being pinned beside it. Pinning
 		// it set a minimum and not a maximum, so a long unit overflowed and
 		// pushed the box left, which is what made the column ragged.
@@ -138,7 +142,7 @@ func (u *ui) patchRow(p client.Patch) (label, value fyne.CanvasObject) {
 		}
 	}
 
-	on.OnChanged = func(v bool) { u.setPatch(p, v, read()) }
+	on.OnChanged = func(v bool) { u.recordPatch(p, v, read()) }
 	return widgets.WithTip(on, why), value
 }
 
@@ -173,25 +177,116 @@ func (u *ui) patchStanding(p client.Patch) (why string, usable bool) {
 // start; this makes them the same size as each other.
 const patchValueWidth float32 = 170
 
-// setPatch writes one patch and then re-reads the game, because what a patch
-// did is reported by the status rather than by the command.
-func (u *ui) setPatch(p client.Patch, on bool, value *float64) {
-	what := "Disabling " + p.Name
-	if on {
-		what = "Enabling " + p.Name
+/*
+wanted and wantedValue are how a control should be drawn: what the user has set
+if they have set it, and what the game reports otherwise.
+
+Two sources rather than one because a patch takes tens of seconds to write. In
+between the tick and the press, the switch has to show what was asked for.
+*/
+func (u *ui) wanted(p client.Patch) bool {
+	if w, ok := u.px.want[p.Name]; ok {
+		return w.on
 	}
-	u.sh.Perform(what+"...", func(ctx context.Context) error {
-		out, err := u.run(ctx, client.PatchSetArgv(p.Name, on, value))
-		fyne.Do(func() {
-			for _, line := range splitLines(out) {
-				u.note(line)
+	return u.px.on[p.Name]
+}
+
+func (u *ui) wantedValue(p client.Patch) float64 {
+	if w, ok := u.px.want[p.Name]; ok && w.value != nil {
+		return *w.value
+	}
+	return u.px.values[p.Name]
+}
+
+/*
+recordPatch notes a change without writing it.
+
+A change back to what the game already has is forgotten rather than recorded, so
+ticking a switch and unticking it leaves nothing to apply and the Apply button
+goes quiet again.
+*/
+func (u *ui) recordPatch(p client.Patch, on bool, value *float64) {
+	if u.px.want == nil {
+		u.px.want = map[string]patchWant{}
+	}
+	if on == u.px.on[p.Name] && sameValue(p, value, u.px.values[p.Name]) {
+		delete(u.px.want, p.Name)
+	} else {
+		u.px.want[p.Name] = patchWant{on: on, value: value}
+	}
+	u.sh.RedrawStatus()
+	u.refreshApply()
+}
+
+// sameValue reports whether a typed value is the one the game already has. A
+// patch with no value of its own is always the same.
+func sameValue(p client.Patch, want *float64, got float64) bool {
+	if p.Value == nil || want == nil {
+		return true
+	}
+	return *want == got
+}
+
+// pending is the changes waiting to be written, in the catalog's order so they
+// are applied and reported in the order they are read on screen.
+func (u *ui) pending() []client.Patch {
+	out := make([]client.Patch, 0, len(u.px.want))
+	for _, p := range u.px.catalog {
+		if _, ok := u.px.want[p.Name]; ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+/*
+applyPatches writes every pending change, one after another.
+
+One press, one wait. Applying a code patch means scanning the running game for
+its byte pattern and allocating a cave for it, which takes tens of seconds --
+so doing this per switch meant sitting through that wait for each one, and there
+was no way to say "these five" and walk away.
+
+Cancellable, because five of them is minutes. The cancel lands between patches
+rather than during one: a half-written patch is not something to leave behind.
+*/
+func (u *ui) applyPatches() {
+	todo := u.pending()
+	if len(todo) == 0 {
+		u.sh.Flash("Nothing to apply.", fd.StatusInfo)
+		return
+	}
+	u.sh.PerformCancellable(applyLabel(todo), func(ctx context.Context) error {
+		for i, p := range todo {
+			if ctx.Err() != nil {
+				fyne.Do(func() { u.note(fmt.Sprintf("[patch] stopped after %d of %d", i, len(todo))) })
+				break
 			}
-			if err == nil {
-				u.loadPatches()
-			}
-		})
-		return err
+			w := u.px.want[p.Name]
+			out, err := u.run(ctx, client.PatchSetArgv(p.Name, w.on, w.value))
+			fyne.Do(func() {
+				for _, line := range splitLines(out) {
+					u.note(line)
+				}
+				if err == nil {
+					delete(u.px.want, p.Name)
+					return
+				}
+				u.note("[patch] " + p.Name + " failed: " + firstLine(detail(out, err)))
+			})
+		}
+		fyne.Do(func() { u.loadPatches() })
+		return nil
 	})
+}
+
+// applyLabel names the wait, because it is a long one and "Working..." does not
+// say how long.
+func applyLabel(todo []client.Patch) string {
+	if len(todo) == 1 {
+		return "Applying " + todo[0].Name + "..."
+	}
+	return fmt.Sprintf("Applying %d patches...", len(todo))
 }
 
 /*
@@ -202,6 +297,13 @@ world clears every one of them while the profile still says they should be on.
 This is what puts them back.
 */
 func (u *ui) restoreCard() fyne.CanvasObject {
+	apply := widget.NewButton(applyText(len(u.px.want)), func() { u.applyPatches() })
+	apply.Importance = widget.HighImportance
+	if len(u.px.want) == 0 {
+		apply.Disable()
+	}
+	u.px.apply = apply
+
 	run := widget.NewButton("Restore saved patches", func() {
 		u.sh.Perform("Restoring...", func(ctx context.Context) error {
 			out, err := u.run(ctx, client.RestoreArgv())
@@ -224,10 +326,43 @@ func (u *ui) restoreCard() fyne.CanvasObject {
 	// One row. This sits under the tabs and every pixel it takes is one the
 	// patch list does not get.
 	return container.NewHBox(
+		widgets.WithTip(apply, "Writes every switch you have changed, one after another. "+
+			"A patch takes tens of seconds to write, so set them all and press this once."),
 		widgets.WithTip(run, "A game restart clears every patch. This puts back what the "+
 			"profile says should be on."),
 		widgets.Dim("build"), widget.NewLabel(build), u.patchVerdict(),
 	)
+}
+
+// applyText names how much is waiting, so the button says whether pressing it
+// is worth the wait.
+func applyText(n int) string {
+	switch n {
+	case 0:
+		return "Apply"
+	case 1:
+		return "Apply 1 change"
+	}
+	return fmt.Sprintf("Apply %d changes", n)
+}
+
+/*
+refreshApply retitles the Apply button as switches are set.
+
+The button alone rather than the section: rebuilding the section to update one
+label would take every control down and put it back while the user is still
+ticking things, and would lose the focus and the caret of a value being typed.
+*/
+func (u *ui) refreshApply() {
+	if u.px.apply == nil {
+		return
+	}
+	u.px.apply.SetText(applyText(len(u.px.want)))
+	if len(u.px.want) == 0 {
+		u.px.apply.Disable()
+		return
+	}
+	u.px.apply.Enable()
 }
 
 /*
@@ -269,9 +404,32 @@ func (u *ui) patchVerdict() fyne.CanvasObject {
 	return widgets.StatusText("verified", fd.StatusGood)
 }
 
+/*
+patchWant is one patch as the user has set it, waiting to be written.
+
+Applying a code patch takes tens of seconds -- it scans the game's code for its
+pattern and allocates a cave -- so the section collects the changes and writes
+them on one press instead of making that wait once per switch.
+*/
+type patchWant struct {
+	on    bool
+	value *float64
+}
+
 // patchState is the Patches section's data: the catalog, and what the game says
 // is on right now.
 type patchState struct {
+	// want is what the user has ticked and typed but not yet applied, keyed by
+	// patch name. Only the ones that differ from the game are in it, so an
+	// empty map means there is nothing to apply.
+	want map[string]patchWant
+	// tab is the catalog section on screen, kept here because the section is
+	// rebuilt on every read and a rebuilt AppTabs opens on its first tab.
+	tab int
+	// apply is the button that writes what is pending, held so its label can
+	// change without rebuilding the controls around it.
+	apply *widget.Button
+
 	catalog  []client.Patch
 	sections []string
 	on       map[string]bool

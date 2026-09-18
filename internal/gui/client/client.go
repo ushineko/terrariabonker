@@ -520,6 +520,36 @@ func (r Recipe) Station(stations map[string]string) string {
 	return "tile " + strconv.Itoa(*r.Tile)
 }
 
+/*
+NamesArgv reads every item's display name.
+
+Static bundled data, so it works with the game closed -- which is the point. The
+names used to come from the compendium, which needs a running game, so a recipe
+book that works offline listed numbers.
+*/
+func NamesArgv() []string { return []string{"names", "--json"} }
+
+// ParseNames decodes the name table, keyed by item type.
+func ParseNames(raw string) (map[int]string, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var byID map[string]string
+	if err := json.Unmarshal([]byte(line), &byID); err != nil || len(byID) == 0 {
+		return nil, false
+	}
+	out := make(map[int]string, len(byID))
+	for id, name := range byID {
+		n, err := strconv.Atoi(id)
+		if err != nil {
+			continue
+		}
+		out[n] = name
+	}
+	return out, true
+}
+
 // PrefixesArgv reads the modifier catalog. Static, so it is read through a
 // one-shot run rather than the worker, which needs a game.
 func PrefixesArgv() []string { return []string{"prefixes", "--json"} }
@@ -891,6 +921,7 @@ func Samples() []Sample {
 		{"CompendiumArgv", "compendium", CompendiumArgv(false)},
 		{"CompendiumArgv/refresh", "compendium", CompendiumArgv(true)},
 		{"PrefixesArgv", "prefixes", PrefixesArgv()},
+		{"NamesArgv", "names", NamesArgv()},
 		{"SpawnNPCArgv", "spawn-npc", SpawnNPCArgv(50, 10)},
 		{"ExtractSpritesArgv", "extract-sprites", ExtractSpritesArgv(false)},
 		{"ExtractSpritesArgv/force", "extract-sprites", ExtractSpritesArgv(true)},

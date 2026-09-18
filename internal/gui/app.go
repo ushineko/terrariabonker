@@ -312,6 +312,7 @@ func (u *ui) start() {
 	u.pollStatus()
 	u.loadPatches()
 	u.loadSellList()
+	u.loadItemNames()
 	u.loadNames()
 	u.loadRecipes()
 	u.syncInventory()

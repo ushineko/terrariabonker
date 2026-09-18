@@ -771,6 +771,21 @@ def cmd_recipes(args) -> int:
     return 0
 
 
+def cmd_names(args) -> int:
+    """Every ItemID with its display name.
+
+    The fourth of these dumps, and the one the port needed most: without it a
+    front end in another language has no item names at all until it has read the
+    compendium, which needs a running game -- so a recipe book that works
+    offline listed numbers. The table is bundled data extracted from the game's
+    own executable; it needs no Service and no game.
+    """
+    from terrariabonker import names as nm
+
+    print(json.dumps({str(i): n for i, n in nm.all_names().items()}))
+    return 0
+
+
 def cmd_prefixes(args) -> int:
     """The modifier catalog: every prefix id with its name and quality.
 
@@ -1243,6 +1258,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("recipes", help="dump the cached crafting recipes")
     p.add_argument("--json", action="store_true", help="machine-readable catalog")
     p.set_defaults(func=cmd_recipes)
+
+    p = sub.add_parser("names", help="dump every ItemID with its display name")
+    p.add_argument("--json", action="store_true", help="machine-readable catalog")
+    p.set_defaults(func=cmd_names)
 
     p = sub.add_parser("prefixes", help="list item modifiers (id, name, quality)")
     p.add_argument("--json", action="store_true", help="machine-readable catalog")

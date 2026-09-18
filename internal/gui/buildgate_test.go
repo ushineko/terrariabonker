@@ -200,3 +200,102 @@ func TestTheCatalogsStandingCountsWhatIsWrong(t *testing.T) {
 	u.px.detail["mining"] = client.PatchDetail{Reason: "pattern moved"}
 	require.Contains(t, fynetest.Texts(u.patchVerdict()), "1 of 2 do not resolve here")
 }
+
+/*
+A switch is remembered, not written.
+
+Applying a code patch means scanning the running game for a byte pattern and
+allocating a cave for it, which takes tens of seconds. Writing one per switch
+meant sitting through that wait for each one, with no way to say "these five"
+and walk away.
+*/
+func TestSwitchesAreCollectedAndAppliedTogether(t *testing.T) {
+	u := testUI(t)
+	mining := client.Patch{Name: "mining", Label: "Fast mining"}
+	reach := client.Patch{Name: "reach", Label: "Long reach",
+		Value: &client.ValueSpec{Default: 5, Lo: 1, Hi: 100}}
+	u.px.catalog = []client.Patch{mining, reach}
+	u.px.on = map[string]bool{"mining": true}
+	u.px.values = map[string]float64{"reach": 5}
+
+	require.Empty(t, u.pending(), "nothing is waiting before anything is touched")
+	require.Equal(t, "Apply", applyText(0))
+
+	// Turning one off and another on is two changes, in the catalog's order.
+	u.recordPatch(mining, false, nil)
+	u.recordPatch(reach, true, ptrTo(20))
+	require.Equal(t, []string{"mining", "reach"}, names(u.pending()))
+	require.Equal(t, "Apply 2 changes", applyText(len(u.px.want)))
+
+	// And setting one back to what the game already has forgets it.
+	u.recordPatch(mining, true, nil)
+	require.Equal(t, []string{"reach"}, names(u.pending()))
+	require.Equal(t, "Apply 1 change", applyText(len(u.px.want)))
+}
+
+/*
+A control shows what was asked for, not what the game has, once it is asked.
+
+In between the tick and the press there is a wait of tens of seconds. A switch
+that sprang back to the game's state during it would look like a click that did
+not register.
+*/
+func TestASwitchShowsWhatWasAskedForWhileItWaits(t *testing.T) {
+	u := testUI(t)
+	reach := client.Patch{Name: "reach", Label: "Long reach",
+		Value: &client.ValueSpec{Default: 5, Lo: 1, Hi: 100}}
+	u.px.catalog = []client.Patch{reach}
+	u.px.on = map[string]bool{"reach": false}
+	u.px.values = map[string]float64{"reach": 5}
+
+	require.False(t, u.wanted(reach))
+	require.InDelta(t, 5, u.wantedValue(reach), 0.001)
+
+	u.recordPatch(reach, true, ptrTo(30))
+	require.True(t, u.wanted(reach), "the switch stays where it was put")
+	require.InDelta(t, 30, u.wantedValue(reach), 0.001, "and so does the number beside it")
+}
+
+// A value nobody changed is not a change: a patch with no value of its own, or
+// a box left alone, must not make the Apply button light up.
+func TestATypedValueOnlyCountsWhenItDiffers(t *testing.T) {
+	plain := client.Patch{Name: "mining"}
+	valued := client.Patch{Name: "reach", Value: &client.ValueSpec{Default: 5}}
+	require.True(t, sameValue(plain, ptrTo(99), 5), "a patch with no value cannot differ by one")
+	require.True(t, sameValue(valued, nil, 5), "an unreadable box is not a change")
+	require.True(t, sameValue(valued, ptrTo(5), 5))
+	require.False(t, sameValue(valued, ptrTo(6), 5))
+}
+
+/*
+The catalog section on screen survives the read that follows an apply.
+
+Ticking something in Combat and being put back in Movement is the kind of small
+wrongness that makes an interface feel unreliable.
+*/
+func TestTheCatalogSectionOnScreenSurvivesARebuild(t *testing.T) {
+	u := testUI(t)
+	u.px.catalog = []client.Patch{
+		{Name: "mining", Label: "Fast mining", Section: "Movement"},
+		{Name: "spawn", Label: "Spawn rate", Section: "World"},
+	}
+	u.px.sections = []string{"Movement", "World"}
+
+	require.Zero(t, u.px.tab)
+	u.px.tab = 1
+	require.Contains(t, fynetest.Texts(u.buildPatches()), "Spawn rate",
+		"the second section is the one built")
+	require.Equal(t, 1, u.px.tab, "and it is still the one remembered")
+}
+
+// names is the patch names of a list, for an assertion that reads as one.
+func names(list []client.Patch) []string {
+	out := make([]string, 0, len(list))
+	for _, p := range list {
+		out = append(out, p.Name)
+	}
+	return out
+}
+
+// ptrTo is a pointer to a value, for the optional numbers in a patch.
+func ptrTo(v float64) *float64 { return &v }
