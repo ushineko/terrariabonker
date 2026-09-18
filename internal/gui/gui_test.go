@@ -1,10 +1,15 @@
 package gui
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -110,38 +115,87 @@ func TestTheStatusBarReportsThePlayerAndRanksTheirHealth(t *testing.T) {
 }
 
 /*
-Every operation this window can send must be one the privileged worker will
-serve, or it silently falls back to a one-shot CLI run costing ~2.7 s instead of
-~2.5 ms -- which is the difference between a 1 Hz inventory sync and a window
-that stutters.
+Every argv this window can build must parse against the real CLI parser.
 
-SERVE_OPS is the Python CLI's whitelist and this reads it where it is declared,
-so adding a Go operation the worker will not take fails here rather than in the
-game. Spec 050 AC5; it grows into the full parity check in phase 6.
+This is the guardrail the Python side has had all along, reached from Go: the
+drift it exists to catch is a builder that emits something the CLI will not
+accept, which otherwise shows up as a button that does nothing in a running
+game. It caught two on its first run -- `long-reach 20`, written without the
+--tiles the parser requires, and a `version --json` that does not exist.
+
+Parsing only. build_parser().parse_args() reaches no Service, opens no process
+and writes nothing; a SystemExit out of it is the contract drift.
+*/
+func TestEveryArgvWeBuildParsesAgainstTheRealCLI(t *testing.T) {
+	samples := client.Samples()
+	require.NotEmpty(t, samples)
+
+	for _, s := range samples {
+		t.Run(s.Name, func(t *testing.T) {
+			require.Equalf(t, s.Cmd, s.Argv[0], "%s emits %q, declared as %q", s.Name, s.Argv[0], s.Cmd)
+
+			argv, err := json.Marshal(s.Argv)
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(t.Context(), parseTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "python3", "-c", parseCheck, string(argv)) //nolint:gosec // a fixed script and our own argv
+			// From the repository root, because that is where the package is
+			// importable from. go test runs in the package directory, and
+			// without this every case skipped -- which is how a guardrail
+			// silently stops guarding.
+			cmd.Dir = repoRoot
+			out, err := cmd.CombinedOutput()
+			if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
+				t.Skip("the Python CLI is not importable here")
+			}
+			require.NoErrorf(t, err, "%s: %s does not parse: %s", s.Name, s.Argv, out)
+			require.Equalf(t, s.Cmd, strings.TrimSpace(string(out)),
+				"%s reached a different subcommand", s.Name)
+		})
+	}
+}
+
+// repoRoot is where the Python package is importable from, relative to this
+// package's directory. parseTimeout bounds one interpreter start-up.
+const (
+	repoRoot     = "../.."
+	parseTimeout = 30 * time.Second
+)
+
+// parseCheck parses an argv with the real CLI parser and prints the subcommand
+// it reached, so the test can assert which handler it found rather than only
+// that it found one.
+const parseCheck = `
+import json, sys
+from terrariabonker.cli import build_parser
+argv = json.loads(sys.argv[1])
+args = build_parser().parse_args(argv)
+if getattr(args, "func", None) is None:
+    sys.exit("no handler")
+print(argv[0])
+`
+
+/*
+Every operation must also be one the privileged worker will serve, or it falls
+back to a one-shot CLI run costing ~2.7 s instead of ~2.5 ms -- the difference
+between a 1 Hz inventory sync and a window that stutters.
+
+SERVE_OPS is read where it is declared rather than copied, because a copy is a
+second spelling to keep in step.
 */
 func TestEveryOperationWeSendIsOneTheWorkerWillServe(t *testing.T) {
 	ops := serveOps(t)
 	require.NotEmpty(t, ops, "could not read SERVE_OPS from the CLI")
 
-	for _, argv := range [][]string{
-		client.StatusArgv(),
-		client.InventoryArgv(),
-		client.SetHPArgv("max"),
-		client.SetManaArgv("max"),
-		client.SetMaxHPArgv(400),
-		client.SetMaxManaArgv(200),
-		client.FastMiningArgv(),
-		client.LongReachArgv(20),
-		client.VersionArgv(),
-	} {
-		require.Containsf(t, ops, argv[0],
-			"%q is not in SERVE_OPS, so the warm worker would refuse it", argv[0])
+	for _, s := range client.Samples() {
+		require.Containsf(t, ops, s.Argv[0],
+			"%q is not in SERVE_OPS, so the warm worker would refuse it", s.Argv[0])
 	}
 }
 
-// serveOps reads the SERVE_OPS frozenset out of the Python CLI. Reading the
-// declaration rather than copying it is the point: a copy is a second spelling
-// to keep in step, which is exactly the failure this project has a rule about.
+// serveOps reads the SERVE_OPS frozenset out of the Python CLI, where it is
+// declared. Reading it rather than copying it is the point: a copy is a second
+// spelling to keep in step.
 func serveOps(t *testing.T) []string {
 	t.Helper()
 	src, err := os.ReadFile("../../terrariabonker/cli.py")

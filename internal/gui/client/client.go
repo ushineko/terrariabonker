@@ -104,14 +104,45 @@ func SetMaxManaArgv(value int) []string {
 // FastMiningArgv makes every pickaxe fast.
 func FastMiningArgv() []string { return []string{"fast-mining"} }
 
-// LongReachArgv extends block reach by n tiles.
+// LongReachArgv extends placement reach by n tiles. The count is a flag, not a
+// positional: `long-reach 20` does not parse.
 func LongReachArgv(tiles int) []string {
-	return []string{"long-reach", strconv.Itoa(tiles)}
+	return []string{"long-reach", "--tiles", strconv.Itoa(tiles)}
 }
 
-// VersionArgv is what the CLI reports about itself; used to check that the
-// binary the window found is the one it expects.
-func VersionArgv() []string { return []string{"version", "--json"} }
+/*
+Sample is one operation this package can emit, with the subcommand it is
+declared to reach.
+
+Samples() must list every builder. The parity test parses each argv with the
+real CLI parser, so a builder that emits an argv the CLI will not accept fails
+there instead of in the game -- which is how `long-reach 20` was caught, having
+been written without the --tiles the parser requires.
+
+The expected subcommand is written beside the sample rather than derived from
+argv[0], because deriving it only proves argv[0] equals itself: a builder that
+switched to a different valid subcommand would pass.
+*/
+type Sample struct {
+	Name string   // the builder, for the failure message
+	Cmd  string   // the subcommand it is declared to reach
+	Argv []string // a representative argv
+}
+
+// Samples is every operation this package builds. A new builder goes here, or
+// nothing checks it.
+func Samples() []Sample {
+	return []Sample{
+		{"StatusArgv", "status", StatusArgv()},
+		{"InventoryArgv", "inventory", InventoryArgv()},
+		{"SetHPArgv", "set-hp", SetHPArgv("max")},
+		{"SetManaArgv", "set-mana", SetManaArgv("max")},
+		{"SetMaxHPArgv", "set-max-hp", SetMaxHPArgv(400)},
+		{"SetMaxManaArgv", "set-max-mana", SetMaxManaArgv(200)},
+		{"FastMiningArgv", "fast-mining", FastMiningArgv()},
+		{"LongReachArgv", "long-reach", LongReachArgv(20)},
+	}
+}
 
 // lastLine returns the final non-empty line of a reply.
 func lastLine(raw string) (string, bool) {

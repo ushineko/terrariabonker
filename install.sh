@@ -9,6 +9,14 @@ APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_PATH="$APP_DIR/terrariabonker.py"
 ICON_PATH="$APP_DIR/assets/terrariabonker.svg"
 
+# The Go window (spec 050). Its desktop entry is named for the Wayland app_id it
+# sets, because that is what the compositor matches to find a window's icon: an
+# entry under any other basename leaves the titlebar showing a placeholder.
+GO_GUI="$APP_NAME-gui"
+GO_APPID="io.ushineko.$APP_NAME"
+GO_DESKTOP_FILE="$GO_APPID.desktop"
+ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+
 echo "Installing $APP_NAME..."
 
 # 1. Check runtime dependencies before installing anything.
@@ -51,8 +59,40 @@ if [ -f "$APP_DIR/$DESKTOP_FILE" ]; then
     echo "Installed desktop file: $INSTALL_DIR/$DESKTOP_FILE"
 fi
 
+# 4b. The Go window, when it has been built. Optional on purpose: the Qt panel is
+#     still the complete one, and a missing Go toolchain must not fail an install
+#     of the trainer itself.
+if [ -x "$APP_DIR/$GO_GUI" ] || command -v go >/dev/null; then
+    if [ ! -x "$APP_DIR/$GO_GUI" ]; then
+        echo "Building $GO_GUI..."
+        ( cd "$APP_DIR" && CGO_ENABLED=1 go build \
+            -ldflags "-X main.version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$APP_DIR/terrariabonker/__init__.py")" \
+            -o "$GO_GUI" ./cmd/terrariabonker-gui ) || echo "  skipped: the Go build failed"
+    fi
+    if [ -x "$APP_DIR/$GO_GUI" ]; then
+        ln -sfn "$APP_DIR/$GO_GUI" "$BIN_DIR/$GO_GUI"
+        echo "Installed GUI symlink: $BIN_DIR/$GO_GUI -> $APP_DIR/$GO_GUI"
+
+        # The icon goes into the theme under the name the desktop entry asks for.
+        mkdir -p "$ICON_DIR"
+        cp -f "$ICON_PATH" "$ICON_DIR/$APP_NAME.svg"
+        echo "Installed icon: $ICON_DIR/$APP_NAME.svg"
+
+        if [ -f "$APP_DIR/$GO_DESKTOP_FILE" ]; then
+            mkdir -p "$INSTALL_DIR"
+            sed -e "s|__EXEC__|$BIN_DIR/$GO_GUI|g" \
+                "$APP_DIR/$GO_DESKTOP_FILE" > "$INSTALL_DIR/$GO_DESKTOP_FILE"
+            chmod +x "$INSTALL_DIR/$GO_DESKTOP_FILE"
+            echo "Installed desktop file: $INSTALL_DIR/$GO_DESKTOP_FILE"
+        fi
+    fi
+fi
+
 if command -v update-desktop-database >/dev/null; then
     update-desktop-database "$INSTALL_DIR"
+fi
+if command -v gtk-update-icon-cache >/dev/null; then
+    gtk-update-icon-cache -q -t -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 fi
 
 # 5. Ask KWin to remember the panel's position. Qt cannot do this itself under Wayland:

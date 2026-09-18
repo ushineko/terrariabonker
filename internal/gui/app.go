@@ -159,6 +159,7 @@ func (u *ui) shellOptions(o Options) shell.Options {
 		AppID:        appID,
 		Name:         cliName,
 		Version:      o.Version,
+		Icon:         appIcon(),
 		Sections:     sections(u),
 		Section:      o.Section,
 		Scheme:       o.Scheme,
