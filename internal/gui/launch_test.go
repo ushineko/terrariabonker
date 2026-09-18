@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 	"github.com/stretchr/testify/require"
 
@@ -56,39 +57,27 @@ func TestAboutNamesTheRunningGame(t *testing.T) {
 }
 
 /*
-The output pane is divided by a bar the user can drag, and the position is the
-window's rather than the section's.
+The output pane is divided by a bar the user can drag.
 
-Sections rebuild on every refresh, and each rebuild makes a new split: without
-somewhere outside them to keep the position, a drag would be undone by the next
-status poll.
+The position is the shell's, not this window's: every section rebuilds on the
+two-second status poll and each rebuild makes a new split, so a drag kept here
+would be undone before anyone let go of the mouse.
 */
-func TestTheOutputDividerSurvivesASectionRebuild(t *testing.T) {
+func TestTheOutputDividerIsTheShellsToRemember(t *testing.T) {
 	u := testUI(t)
-	u.loadLogOffset()
-	require.InDelta(t, defaultLogOffset, u.logOffset, 0.001)
+	body := u.logSplit(widget.NewLabel("a section"))
+	split, ok := body.(*container.Split)
+	require.True(t, ok)
+	require.InDelta(t, defaultLogOffset, split.Offset, 0.001)
 
-	u.logSplit(widget.NewLabel("a section"))
-	require.NotNil(t, u.split)
-
-	u.split.SetOffset(0.42) // the user drags the bar down
-	u.logSplit(widget.NewLabel("the same section, rebuilt"))
-	require.InDelta(t, 0.42, u.logOffset, 0.001, "the drag is remembered")
-	require.InDelta(t, 0.42, u.split.Offset, 0.001, "and applied to the new split")
-
-	u.saveLogOffset()
-	u.logOffset = 0
-	u.loadLogOffset()
-	require.InDelta(t, 0.42, u.logOffset, 0.001, "and kept for the next run")
+	split.SetOffset(0.42) // the user drags the bar down
+	again, ok := u.logSplit(widget.NewLabel("the same section, rebuilt")).(*container.Split)
+	require.True(t, ok)
+	require.InDelta(t, 0.42, again.Offset, 0.001, "the drag survives the rebuild")
 }
 
-// A stored position outside the bar's range is ignored: obeying it would open
-// the window with one of the two panes invisible.
-func TestAnImpossibleDividerPositionIsIgnored(t *testing.T) {
-	u := testUI(t)
-	for _, bad := range []float64{0, 1, -0.5, 4} {
-		u.sh.App.Preferences().SetFloat(logOffsetKey, bad)
-		u.loadLogOffset()
-		require.InDeltaf(t, defaultLogOffset, u.logOffset, 0.001, "%v was obeyed", bad)
-	}
+// Every section's output is one pane as far as anyone using it is concerned, so
+// they share a key and the bar does not jump when the section changes.
+func TestEverySectionsOutputIsTheSamePane(t *testing.T) {
+	require.Equal(t, "output", logSplitKey)
 }

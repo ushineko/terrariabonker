@@ -45,8 +45,8 @@ share of the window the fixed pane used to take.
 const (
 	logMinHeight     float32 = 90
 	defaultLogOffset float64 = 0.78
-	// logOffsetKey is where the dragged position is remembered between runs.
-	logOffsetKey = "log.split"
+	// logSplitKey names the divider to the shell, which is what remembers it.
+	logSplitKey = "output"
 )
 
 /*
@@ -125,27 +125,13 @@ func (u *ui) logWidget() fyne.CanvasObject {
 /*
 logSplit puts a section over the output, with a bar between them to drag.
 
-The bar's position is the window's, not the section's: a section rebuild would
-otherwise put it back where it started, and the sections rebuild often. It is
-read off the live split before that split is thrown away, because Fyne's does not
-report a drag as it happens.
+The shell owns where the bar sits: a section is rebuilt on every status poll,
+and each rebuild makes a new split, so a position this window held would be
+undone twice a second. One key for every section, because the output is one pane
+as far as anyone using it is concerned.
 */
 func (u *ui) logSplit(body fyne.CanvasObject) fyne.CanvasObject {
-	u.rememberSplit()
-	split := container.NewVSplit(body, u.logWidget())
-	split.SetOffset(u.logOffset)
-	u.split = split
-	return split
-}
-
-// rememberSplit takes the bar's position off the split that is about to be
-// replaced.
-func (u *ui) rememberSplit() {
-	if u.split == nil {
-		return
-	}
-	u.logOffset = u.split.Offset
-	u.split = nil
+	return u.sh.VSplit(logSplitKey, defaultLogOffset, body, u.logWidget())
 }
 
 // spin is a whole-number entry with bounds, the counterpart of the Qt window's
