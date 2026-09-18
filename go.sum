@@ -72,6 +72,8 @@ github.com/ushineko/fynedesygn v0.1.16 h1:nGUobmy0UW/dWTjsA79lGNah9HVrSoTBx0iFE9
 github.com/ushineko/fynedesygn v0.1.16/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
 github.com/ushineko/fynedesygn v0.1.17 h1:t+Rv+MBAlxILv4x1hf0St7bSSQrPEEnmMJuxHrN2NJ4=
 github.com/ushineko/fynedesygn v0.1.17/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
+github.com/ushineko/fynedesygn v0.1.18 h1:qzWUVQplXWQAl4evOe+w1vlxo7ZSewAQhC0Pcu8eKjE=
+github.com/ushineko/fynedesygn v0.1.18/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
 github.com/yuin/goldmark v1.8.2 h1:kEGpgqJXdgbkhcOgBxkC0X0PmoPG1ZyoZ117rDVp4zE=
 github.com/yuin/goldmark v1.8.2/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
