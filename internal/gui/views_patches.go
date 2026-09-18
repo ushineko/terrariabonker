@@ -7,6 +7,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	fd "github.com/ushineko/fynedesygn"
 	"github.com/ushineko/fynedesygn/widgets"
@@ -44,16 +45,30 @@ func (u *ui) buildPatches() fyne.CanvasObject {
 		container.NewVScroll(body))
 }
 
-// patchCard is one of the catalog's sections.
+/*
+patchCard is one of the catalog's sections, laid out as a grid.
+
+A form layout rather than a row per patch. It is two columns and it sizes the
+first to the widest thing in it, so every value control in the section starts at
+the same x. Rows built independently cannot do that: each one is only as wide as
+its own contents, and the boxes step in and out down the section according to how
+long each label and unit happens to be.
+
+The note spans both columns by taking a row of its own with an empty first cell.
+*/
 func (u *ui) patchCard(section string) fyne.CanvasObject {
-	rows := []fyne.CanvasObject{}
+	grid := container.New(layout.NewFormLayout())
 	for _, p := range u.px.catalog {
 		if p.Section != section {
 			continue
 		}
-		rows = append(rows, u.patchRow(p))
+		label, value := u.patchRow(p)
+		grid.Add(label)
+		grid.Add(value)
+		grid.Add(widget.NewLabel("")) // the note's empty first cell
+		grid.Add(widgets.DimWrapped(p.Note))
 	}
-	return widgets.Card(section, rows...)
+	return widgets.Card(section, grid)
 }
 
 /*
@@ -63,16 +78,16 @@ The switch is set from the game's own state rather than from what was last
 clicked. A patch is in the running process, so a game restart clears it while
 the window still has the box ticked, and the status poll is what notices.
 */
-func (u *ui) patchRow(p client.Patch) fyne.CanvasObject {
+func (u *ui) patchRow(p client.Patch) (label, value fyne.CanvasObject) {
 	on := widget.NewCheck(p.Label, nil)
 	on.SetChecked(u.px.on[p.Name])
 
-	var value fyne.CanvasObject
 	var read func() *float64
 
 	switch {
 	case p.Value == nil:
 		read = func() *float64 { return nil }
+		value = widget.NewLabel("")
 	case len(p.Value.Presets) > 0:
 		labels := make([]string, 0, len(p.Value.Presets))
 		byLabel := map[string]float64{}
@@ -87,9 +102,10 @@ func (u *ui) patchRow(p client.Patch) fyne.CanvasObject {
 				u.setPatch(p, true, read())
 			}
 		}
-		value = container.NewHBox(
-			widgets.FixedWidth(sel, patchValueWidth),
-			widgets.FixedWidth(widgets.Dim(""), patchUnitWidth))
+		// Boxed the same way as a typed value. The grid's second column
+		// expands, and a Select left to fill it would stretch across the
+		// window while the entries beside it stayed 170 wide.
+		value = container.NewHBox(widgets.FixedWidth(sel, patchValueWidth))
 		read = func() *float64 {
 			v, ok := byLabel[sel.Selected]
 			if !ok {
@@ -101,12 +117,11 @@ func (u *ui) patchRow(p client.Patch) fyne.CanvasObject {
 		entry := widget.NewEntry()
 		entry.SetText(formatValue(p, u.px.values[p.Name]))
 		entry.Validator = numberIn(p.Value.Lo, p.Value.Hi)
-		// The unit is pinned too. Without it the right-hand group is as wide as
-		// whatever the unit happens to say, and the value boxes step raggedly
-		// down the section instead of forming a column.
+		// The unit follows the box rather than being pinned beside it. Pinning
+		// it set a minimum and not a maximum, so a long unit overflowed and
+		// pushed the box left, which is what made the column ragged.
 		value = container.NewHBox(
-			widgets.FixedWidth(entry, patchValueWidth),
-			widgets.FixedWidth(widgets.Dim(p.Value.Unit), patchUnitWidth))
+			widgets.FixedWidth(entry, patchValueWidth), widgets.Dim(p.Value.Unit))
 		read = func() *float64 {
 			v, err := strconv.ParseFloat(entry.Text, 64)
 			if err != nil || v < p.Value.Lo || v > p.Value.Hi {
@@ -117,18 +132,12 @@ func (u *ui) patchRow(p client.Patch) fyne.CanvasObject {
 	}
 
 	on.OnChanged = func(v bool) { u.setPatch(p, v, read()) }
-
-	row := container.NewBorder(nil, nil, nil, value, on)
-	return container.NewVBox(row, widgets.DimWrapped(p.Note))
+	return on, value
 }
 
-// patchValueWidth and patchUnitWidth pin the two halves of the right-hand
-// group, so the value boxes form a column rather than stepping in and out with
-// the length of each unit.
-const (
-	patchValueWidth float32 = 170
-	patchUnitWidth  float32 = 210
-)
+// patchValueWidth is the width of a value box. The grid aligns where they
+// start; this makes them the same size as each other.
+const patchValueWidth float32 = 170
 
 // setPatch writes one patch and then re-reads the game, because what a patch
 // did is reported by the status rather than by the command.
