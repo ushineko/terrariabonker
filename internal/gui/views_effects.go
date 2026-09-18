@@ -278,6 +278,11 @@ func (u *ui) startWatches() {
 	u.sell = newWatch(u, "sell", sellEvery,
 		client.SellTickArgv,
 		func(raw string) { u.readSell(raw) })
+
+	u.projectiles = newWatch(u, "projectile", projEvery,
+		func() []string { return client.ProjectileTickArgv(u.pj.overrides) },
+		func(raw string) { u.readProjectiles(raw) }).
+		onStop(client.ProjectileStopArgv)
 }
 
 // readPotions reports the buffs that came up, and the ones that had nowhere to go.

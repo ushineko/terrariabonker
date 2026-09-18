@@ -291,6 +291,92 @@ type Prefix struct {
 }
 
 /*
+The projectile editor.
+
+Nothing here is written into the game's data. Projectiles are transient objects
+and SetDefaults rebuilds each one from the game's own literals, so the edit has
+to be re-applied to whatever is in flight, several times a second, for as long as
+the cheat is on. Switching it off restores nothing because there is nothing to
+restore.
+*/
+
+// ProjectileKind is how wide a field is written, which decides what a value may
+// be: a bool is a byte, and a size is a float.
+const (
+	KindBool  = "b8"
+	KindInt   = "i32"
+	KindFloat = "f32"
+)
+
+// ProjectileField is one editable field of a projectile in flight. The names
+// and the limits are the CLI's own -- projectile_edit.FIELDS -- and a test
+// asks the Python for them rather than trusting this list.
+type ProjectileField struct {
+	Name   string
+	Label  string
+	Kind   string
+	Lo, Hi float64
+}
+
+// ProjectileFields is what the section offers, in the order the Qt panel had.
+var ProjectileFields = []ProjectileField{
+	{Name: "tileCollide", Label: "Pass through blocks", Kind: KindBool, Lo: 0, Hi: 1},
+	{Name: "penetrate", Label: "Enemies pierced", Kind: KindInt, Lo: -1, Hi: 999},
+	{Name: "extraUpdates", Label: "Extra ticks per frame", Kind: KindInt, Lo: 0, Hi: 16},
+	{Name: "scale", Label: "Size", Kind: KindFloat, Lo: 0.05, Hi: 10},
+	{Name: "timeLeft", Label: "Lifetime (ticks)", Kind: KindInt, Lo: 1, Hi: 216000},
+}
+
+// ProjectileOfArgv asks which projectile an item fires (Item.shoot).
+func ProjectileOfArgv(itemType int) []string {
+	return []string{"projectile-of", strconv.Itoa(itemType), "--json"}
+}
+
+/*
+ProjectileTickArgv is one slice of enforcement.
+
+overrides is {projectile type: {field: value}}. Emitted sorted, so the same
+overrides always produce the same argv: a command line that reorders itself
+between calls is miserable to compare in a log or in a test.
+*/
+func ProjectileTickArgv(overrides map[int]map[string]float64) []string {
+	argv := []string{"projectile-tick", "--json",
+		"--budget", strconv.FormatFloat(projectileBudget, 'g', -1, 64)}
+	types := make([]int, 0, len(overrides))
+	for t := range overrides {
+		types = append(types, t)
+	}
+	sort.Ints(types)
+	for _, t := range types {
+		fields := make([]string, 0, len(overrides[t]))
+		for name := range overrides[t] {
+			fields = append(fields, name)
+		}
+		sort.Strings(fields)
+		for _, name := range fields {
+			argv = append(argv, "--set", strconv.Itoa(t)+":"+name+"="+
+				strconv.FormatFloat(overrides[t][name], 'g', -1, 64))
+		}
+	}
+	return argv
+}
+
+/*
+projectileBudget is how long one slice may spend enforcing, in seconds.
+
+The worker answers one request at a time, so this is also how long everything
+else waits behind it. A quarter of a second is the Qt panel's own figure: long
+enough to sweep the slots that are in flight, short enough that the inventory
+sync does not visibly stutter behind it.
+*/
+const projectileBudget = 0.25
+
+// ProjectileStopArgv tells the worker to forget its per-projectile state. Sent
+// once when the cheat goes off: a slot it still remembers would keep it from
+// re-applying a once-per-projectile field to a slot the game has reused.
+func ProjectileStopArgv() []string { return []string{"projectile-stop", "--json"} }
+
+/*
 The build gate (spec 036).
 
 The patches are matched by byte pattern against one exact game build, so an
@@ -775,6 +861,14 @@ func Samples() []Sample {
 		{"ExtractSpritesArgv/force", "extract-sprites", ExtractSpritesArgv(true)},
 		{"ExtractRecipesArgv", "extract-recipes", ExtractRecipesArgv()},
 		{"RecipesArgv", "recipes", RecipesArgv()},
+		{"ProjectileOfArgv", "projectile-of", ProjectileOfArgv(3507)},
+		{"ProjectileTickArgv", "projectile-tick", ProjectileTickArgv(nil)},
+		{"ProjectileTickArgv/set", "projectile-tick", ProjectileTickArgv(
+			map[int]map[string]float64{
+				837: {"tileCollide": 0, "scale": 2.5},
+				14:  {"penetrate": -1},
+			})},
+		{"ProjectileStopArgv", "projectile-stop", ProjectileStopArgv()},
 		{"BuildCheckArgv", "build-check", BuildCheckArgv()},
 		{"AcceptBuildArgv", "accept-build", AcceptBuildArgv(DecisionAccepted, nil)},
 		{"AcceptBuildArgv/degraded", "accept-build",

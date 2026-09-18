@@ -101,6 +101,10 @@ type ui struct {
 	// gate is the build check: which builds have been asked about, and which
 	// cheats this one may not run.
 	gate gateState
+	// pj is the projectile editor, and projectiles is the loop that holds its
+	// edits on whatever is in flight.
+	pj          projState
+	projectiles *watch
 
 	mu        sync.Mutex
 	status    *client.Status
@@ -143,26 +147,13 @@ type sectionEntry struct {
 // rather than a silently different list.
 func sectionBuilders() map[string]sectionEntry {
 	return map[string]sectionEntry{
-		"Player":     {theme.AccountIcon, (*ui).buildPlayer},
-		"Effects":    {theme.MediaPlayIcon, (*ui).buildEffects},
-		"Patches":    {theme.SettingsIcon, (*ui).buildPatches},
-		"Inventory":  {theme.StorageIcon, (*ui).buildInventory},
-		"Recipes":    {theme.ListIcon, (*ui).buildRecipes},
-		"Compendium": {theme.HelpIcon, (*ui).buildCompendium},
-		// Phases 2-5 of spec 050 fill these in. Until then each says what it is
-		// for, rather than being absent from a navigation the flag help lists.
-		"Projectiles": {theme.MailSendIcon, placeholder("Projectiles", "Edit how projectiles behave.")},
-	}
-}
-
-// placeholder is a section that is not built yet. It states its purpose, so the
-// navigation entry is not blank.
-func placeholder(title, blurb string) func(*ui) fyne.CanvasObject {
-	return func(*ui) fyne.CanvasObject {
-		return widgets.Card(title,
-			widgets.Wrapped(blurb),
-			widgets.DimWrapped("Not ported yet. Use the Qt panel for this section."),
-		)
+		"Player":      {theme.AccountIcon, (*ui).buildPlayer},
+		"Effects":     {theme.MediaPlayIcon, (*ui).buildEffects},
+		"Patches":     {theme.SettingsIcon, (*ui).buildPatches},
+		"Inventory":   {theme.StorageIcon, (*ui).buildInventory},
+		"Projectiles": {theme.MailSendIcon, (*ui).buildProjectiles},
+		"Recipes":     {theme.ListIcon, (*ui).buildRecipes},
+		"Compendium":  {theme.HelpIcon, (*ui).buildCompendium},
 	}
 }
 
@@ -383,6 +374,7 @@ func (u *ui) shutdown() {
 	u.freeze.halt()
 	for _, w := range []*watch{
 		u.potions, u.fishing, u.buffs, u.catch, u.sell, u.inventory, u.statusPoll,
+		u.projectiles,
 	} {
 		if w != nil {
 			w.halt()
