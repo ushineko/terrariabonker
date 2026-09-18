@@ -6,3 +6,6 @@ __pycache__/
 # dotnet build output (tools/)
 bin/
 obj/
+
+# go build output
+/terrariabonker-gui
