@@ -125,9 +125,21 @@ build the differential habit this port depends on.
    failure mode AGENTS.md names. The comparison is what holds them together, and it was
    mutation-checked by moving the name pointer four bytes and counting bytes instead of
    code units.
-3. **`proc` and `locate`.** `process_vm_readv`/`writev` and `/proc/<pid>/maps` from Go,
-   then AOB/signature scanning and the player-block scan. Differential test: the same
-   image in, the same address out.
+3. **`proc` and `locate`.** `/proc/<pid>/mem` and `/proc/<pid>/maps` from Go, then
+   AOB/signature scanning and the player-block scan. Differential test: the same image
+   in, the same address out.
+
+   **The player scan is done.** `internal/locate` reads a Mem -- a real process for the
+   CLI, a planted buffer for a test -- and every rule in it is compared with the Python's
+   over the same bytes: what counts as a life and mana block, across fifteen cases
+   including each edge the rule has a reason for; what counts as a name; and a scan of a
+   region with two player copies and a near miss in it. Mutation-checked by requiring the
+   boosted cap to equal the permanent one, which is the bug the headroom exists for, and
+   by moving the name offset four bytes: eight failures.
+
+   What is left of this step is the plumbing -- opening a process, listing its regions,
+   the executable-region scan behind `Main.get_LocalPlayer`. None of it is testable
+   without a live game, so it lands with a live check rather than a differential one.
 4. **`layout`, `inventory`, `player`.** Offsets are declared once and imported —
    AGENTS.md is explicit that re-spelling a constant is the failure mode here (it was
    five spellings under four names once). In Go they are one package of typed constants,
