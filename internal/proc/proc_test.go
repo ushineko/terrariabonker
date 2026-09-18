@@ -181,23 +181,41 @@ maps it executable. Skipped when the game is not running, because there is
 nothing to agree about.
 */
 func TestFindingTheGameAgreesWithThePython(t *testing.T) {
-	var want any
+	/*
+		Which refusal it is matters, not just that there was one.
+
+		"No game" and "more than one game" are different answers and the second
+		really happens: a process can map Terraria.exe executable for a moment
+		while the game is up -- one did, mid-run, and was gone before it could be
+		looked at. Both implementations refuse in that case, which is right, but
+		a test that took any refusal for "no game" reported that as a
+		disagreement about a game that was plainly running.
+	*/
+	var want struct {
+		PID   *int   `json:"pid"`
+		Error string `json:"error"`
+	}
 	askPython(t, `
 import json
 from terrariabonker import proc
 try:
-    print(json.dumps(proc.find_pid()))
-except proc.ProcError:
-    print(json.dumps(None))
+    print(json.dumps({"pid": proc.find_pid()}))
+except proc.ProcError as e:
+    print(json.dumps({"error": "multiple" if "multiple" in str(e) else "none"}))
 `, &want)
 
 	pid, err := proc.FindPID()
-	if want == nil {
+	switch {
+	case want.Error == "none":
 		require.ErrorIs(t, err, proc.ErrNoGame, "the game is not running for either of us")
+		return
+	case want.Error == "multiple":
+		require.Error(t, err, "the Python saw more than one game and this saw one")
+		require.Contains(t, err.Error(), "multiple", "and refused for a different reason")
 		return
 	}
 	require.NoError(t, err)
-	require.Equal(t, int(want.(float64)), pid)
+	require.Equal(t, *want.PID, pid)
 
 	// And the same file behind it.
 	var path any

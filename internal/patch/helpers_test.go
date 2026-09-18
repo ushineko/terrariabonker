@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -22,12 +23,25 @@ var repoRoot = func() string {
 	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
 }()
 
+/*
+realHome is the maintainer's home directory as it was before any test moved it.
+
+Some tests here point Go at a scratch HOME so they never touch the real patch
+state. The Python child must not inherit that: its interpreter works out where
+the user's packages are at startup, from HOME, and a moved one makes numpy
+unimportable -- which the helper below reports as "the Python is not importable"
+and skips. Two comparisons skipped in silence is worse than either of them
+failing.
+*/
+var realHome = os.Getenv("HOME")
+
 func askPython(t *testing.T, script string, into any) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a fixed script
 	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "HOME="+realHome)
 	out, err := cmd.CombinedOutput()
 	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
 		t.Skip("the Python package is not importable here")
@@ -72,4 +86,40 @@ func pyBool(v bool) string {
 		return "True"
 	}
 	return "False"
+}
+
+// pyPairs is a list of address pairs as a Python literal.
+func pyPairs(pairs [][2]uint32) string {
+	parts := make([]string, len(pairs))
+	for i, p := range pairs {
+		parts[i] = fmt.Sprintf("(%d, %d)", p[0], p[1])
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// pyInts is a list of addresses as a Python literal.
+func pyInts(v []uint32) string {
+	parts := make([]string, len(v))
+	for i, n := range v {
+		parts[i] = fmt.Sprintf("%d", n)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// bytes is n copies of one byte, for planting a run of padding.
+func bytes(b byte, n int) []byte {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = b
+	}
+	return out
+}
+
+// pyBytes is a byte string as a Python literal.
+func pyBytes(b []byte) string {
+	parts := make([]string, len(b))
+	for i, v := range b {
+		parts[i] = fmt.Sprintf("%d", v)
+	}
+	return "bytes([" + strings.Join(parts, ", ") + "])"
 }

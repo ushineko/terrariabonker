@@ -278,8 +278,44 @@ build the differential habit this port depends on.
    and for keeping resolved sites. One of those found a test bug -- it swapped the anchor
    before planting the code, so it planted the pattern that was meant not to match.
 
-   Still to come: the arena, code caves, the stub bodies, the cheat catalog and
-   enable/disable -- the half that decides *what* gets written.
+   **The arena, the caves and the state file are done** -- everything that decides *where*
+   a stub goes and what is remembered about it between runs.
+
+   The arena is 64 KB of read-write-execute memory the game is persuaded to allocate for
+   itself, laid out so each stub's address falls out of an append-only list rather than
+   out of a search. Searching is what went wrong: a scan for cold bytes cannot tell free
+   space from a stub that has been disabled and scrubbed, and indexing by sorted name once
+   put a new stub straight over a live one. Both of those are carried across with the
+   comments that record them, and the slot table is compared for every name and every site
+   index rather than sampled.
+
+   The state file is shared: while both implementations exist the window can reach either,
+   and a record written by one and read by the other decides where a stub is and whether
+   it is installed. Losing that is a process full of live stubs that nothing remembers how
+   to remove. So it round-trips both ways in the tests.
+
+   **Checked against the live game**, on a session with fifteen cheats applied: the arena
+   it adopted (0x68000000), its stamp, all ten slot addresses, the thirteen installed
+   caves, the recorded cheat list and where a fresh arena would go were **identical** in
+   both.
+
+   `proc.Region` grew an executable flag and a third listing that keeps *every* mapping,
+   device mappings included. The scans skip those because reading one can stall, which is
+   not a reason to pretend the address space is free -- an arena placed inside one would
+   come back as an allocation that never happened, reported as "the game is not advancing
+   frames", which sends the reader somewhere else entirely.
+
+   Seventeen mutations checked. Two needed the tests strengthening: the planted process
+   map had no region the size of an arena, so the search for one was never exercised, and
+   it now carries two decoys -- one the right size but not executable and listed first.
+
+   One test was found to be flaky against a live machine rather than wrong: a second
+   process mapped `Terraria.exe` executable for a moment, both implementations correctly
+   refused to choose between them, and the test reported that as a disagreement about a
+   game that was plainly running. It now compares *which* refusal it was.
+
+   Still to come: the stub bodies, the cheat catalog and enable/disable -- the half that
+   decides *what* gets written.
 8. **`xnb` and `sprites`.** Decoding the game's containers and building the PNG cache.
    Pillow leaves with them; Go's `image/png` writes the cache. Differential test: decode
    the same `Item_<id>.xnb` in both and compare the PNG bytes, or the pixels.

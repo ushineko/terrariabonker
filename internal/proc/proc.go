@@ -39,6 +39,9 @@ type Region struct {
 	// for executable regions: a code cave is borrowed padding inside somebody
 	// else's mapping, and almost none of those are writable.
 	Writable bool
+	// Executable says the CPU may run what is here. An arena this program had
+	// the game allocate for it is the rare mapping that is both.
+	Executable bool
 }
 
 // Size is how many bytes the region covers.
@@ -55,7 +58,7 @@ that hangs rather than one that finds nothing.
 Parsing is separate from opening the file so it can be tested against a real
 listing without a process to point it at.
 */
-func ParseRegions(r io.Reader) []Region { return parseListing(r, "w") }
+func ParseRegions(r io.Reader) []Region { return parseListing(r, "w", false) }
 
 /*
 ParseExecRegions is the executable regions of the same listing.
@@ -65,15 +68,28 @@ reasons: the writable regions are the managed heap, where a player lives, and
 the executable ones are JIT'd code, where a method's compiled shape can be
 matched.
 */
-func ParseExecRegions(r io.Reader) []Region { return parseListing(r, "x") }
+func ParseExecRegions(r io.Reader) []Region { return parseListing(r, "x", false) }
 
-// parseListing keeps the regions whose permissions carry want.
-func parseListing(r io.Reader, want string) []Region {
+/*
+ParseAllRegions is every mapping, whatever its permissions, device mappings
+included.
+
+The two listings above answer "where could this be?"; this one answers "what is
+already taken". Finding somewhere to put an arena means looking at the gaps
+between *all* the mappings, and a graphics card's aperture occupies its addresses
+exactly as firmly as anything else -- the reason the other two skip it is that
+reading it can stall, which is not a reason to pretend the space is free.
+*/
+func ParseAllRegions(r io.Reader) []Region { return parseListing(r, "", true) }
+
+// parseListing keeps the regions whose permissions carry want, and device
+// mappings only when they are asked for.
+func parseListing(r io.Reader, want string, keepDevices bool) []Region {
 	var out []Region
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scan.Scan() {
-		region, ok := parseRegion(scan.Text(), want)
+		region, ok := parseRegion(scan.Text(), want, keepDevices)
 		if ok {
 			out = append(out, region)
 		}
@@ -83,7 +99,7 @@ func parseListing(r io.Reader, want string) []Region {
 
 // parseRegion reads one line of a maps listing, and reports whether it is a
 // region worth scanning.
-func parseRegion(line, want string) (Region, bool) {
+func parseRegion(line, want string, keepDevices bool) (Region, bool) {
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
 		return Region{}, false
@@ -92,7 +108,8 @@ func parseRegion(line, want string) (Region, bool) {
 		return Region{}, false
 	}
 	writable := strings.Contains(parts[1], "w")
-	if len(parts) > 5 && strings.HasPrefix(parts[5], "/dev/") {
+	executable := strings.Contains(parts[1], "x")
+	if !keepDevices && len(parts) > 5 && strings.HasPrefix(parts[5], "/dev/") {
 		return Region{}, false
 	}
 	lo, hi, ok := strings.Cut(parts[0], "-")
@@ -119,7 +136,8 @@ func parseRegion(line, want string) (Region, bool) {
 	if start > math.MaxUint32 || end > math.MaxUint32 {
 		return Region{}, false
 	}
-	return Region{Start: uint32(start), End: uint32(end), Writable: writable}, true
+	return Region{Start: uint32(start), End: uint32(end),
+		Writable: writable, Executable: executable}, true
 }
 
 // Mem is read and write access to one process, by pid.
@@ -139,6 +157,9 @@ A pattern search for a method's compiled shape looks here and nowhere else: the
 writable regions are the managed heap, and the heap does not hold instructions.
 */
 func (m *Mem) ExecRegions() []Region { return m.listing(ParseExecRegions) }
+
+// AllRegions is every mapping this process has.
+func (m *Mem) AllRegions() []Region { return m.listing(ParseAllRegions) }
 
 // listing parses this process's maps with one of the readers above.
 func (m *Mem) listing(parse func(io.Reader) []Region) []Region {
