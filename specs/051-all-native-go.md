@@ -189,11 +189,35 @@ build the differential habit this port depends on.
    five spellings under four names once). In Go they are one package of typed constants,
    and the Python and Go values are diffed by a test while both exist.
 
-   **`layout` is done.** `internal/layout` is the ten offsets, and its test compares
-   **both directions** against the Python module: every Python constant must exist in Go
-   with the same value, and every Go entry must exist in Python. A number added on one
-   side and missed on the other fails rather than diverging quietly, which is the failure
-   this module was written to end.
+   **This step is done.** `internal/layout` is every number: Main's block, a player's
+   fields and an item's, fifty-six of them. The Python spreads them over three modules and
+   re-exports some, so the test compares against the union of the three, **both
+   directions** -- every Python constant must exist in Go with the same value and every Go
+   entry must exist in Python -- and a name that disagrees with itself across the Python's
+   modules fails there too. A name declared twice on the Go side panics at startup rather
+   than letting one value quietly win.
+
+   `internal/player` and `internal/inventory` are the readers and writers. Neither caches
+   anything: the game writes to these fields continuously, and the `Item[]` pointer moves
+   when the managed heap collects, so a pointer held from a second ago addresses whatever
+   is there now.
+
+   The tests assert nothing either implementation produced. A write into a running game
+   that is one field out is not an error message -- it lands in whatever the game keeps
+   next door -- so every write case runs the same operations over the same planted image
+   in both languages and compares **the whole buffer**. The image is described once and
+   planted twice, each side looking its offsets up by name in its own table, so a fixture
+   cannot paper over an offset one of them has wrong.
+
+   Fourteen mutations were checked against the inventory and four against the player, and
+   two of them found real gaps rather than confirming coverage: a planted life block whose
+   values were not all distinct read the same from the wrong offset as from the right one,
+   and nothing had planted a held-slot value outside the hotbar.
+
+   One bug in the Python fell out of it. `_item_addr` returns 0 for a slot holding no
+   object, every caller tests it for truth, and `apply_prefix_stats` tested it for `None`
+   -- so a modifier applied to an empty slot took the writing path and wrote each field at
+   its own offset counted from address zero. Fixed there as well as here.
 5. **`service`.** The common layer, on top of the above. Subcommand by subcommand.
 6. **`cli`.** argparse to cobra, which the maintainer's other Go tools already use.
    `--json` output is diffed against the Python CLI's for every subcommand, and `serve`

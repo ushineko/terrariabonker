@@ -22,6 +22,7 @@ package memtest
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"math"
 	"unicode/utf16"
 
 	"github.com/ushineko/terrariabonker/internal/proc"
@@ -152,6 +153,21 @@ func (m *FakeMem) ReadI32(addr uint32) (int32, bool) {
 func (m *FakeMem) WriteI32(addr uint32, value int32) bool {
 	var b [4]byte
 	binary.LittleEndian.PutUint32(b[:], uint32(value)) //nolint:gosec // a word, as its bits
+	return m.Write(addr, b[:])
+}
+
+// ReadF32 is one single-precision float. Knockback, scale and shoot speed are
+// floats, and a modifier scales them, so they cannot go through the integer
+// path without losing the fraction.
+func (m *FakeMem) ReadF32(addr uint32) (float32, bool) {
+	v, ok := m.ReadU32(addr)
+	return math.Float32frombits(v), ok
+}
+
+// WriteF32 puts one single-precision float at addr.
+func (m *FakeMem) WriteF32(addr uint32, value float32) bool {
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], math.Float32bits(value))
 	return m.Write(addr, b[:])
 }
 

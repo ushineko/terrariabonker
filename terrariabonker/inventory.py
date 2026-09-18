@@ -143,7 +143,11 @@ class Inventory:
         arr = self.array_addr()
         if arr is None:
             return None
-        return self.mem.read_u32(arr + ARR_DATA_OFF + index * 4)
+        # `or None` because an empty array entry reads as 0, and every caller
+        # tests the result for truth. `apply_prefix_stats` tested it for None
+        # instead and so took the writing path on a slot holding no object,
+        # where each field landed at its own offset counted from address zero.
+        return self.mem.read_u32(arr + ARR_DATA_OFF + index * 4) or None
 
     #: Where each modifier-scaled field lives, for reading an item's base stats out of a
     #: ContentSamples template block.

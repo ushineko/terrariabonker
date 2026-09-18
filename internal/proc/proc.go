@@ -194,6 +194,21 @@ func (m *Mem) WriteI32(addr uint32, value int32) bool {
 	return m.Write(addr, b[:])
 }
 
+// ReadF32 is one single-precision float. Knockback, scale and shoot speed are
+// floats, and a modifier scales them, so they cannot go through the integer
+// path without losing the fraction.
+func (m *Mem) ReadF32(addr uint32) (float32, bool) {
+	v, ok := m.ReadU32(addr)
+	return math.Float32frombits(v), ok
+}
+
+// WriteF32 puts one single-precision float at addr.
+func (m *Mem) WriteF32(addr uint32, value float32) bool {
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], math.Float32bits(value))
+	return m.Write(addr, b[:])
+}
+
 // ExePath is where the mapped game came from, or "" when this process has not
 // got it mapped.
 func (m *Mem) ExePath() string {
