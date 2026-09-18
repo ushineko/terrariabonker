@@ -155,12 +155,45 @@ build the differential habit this port depends on.
    copy and its inert snapshot. Go took 1.01 s to the Python's 0.82 s, which is numpy's
    vectorised prefilter against a plain loop and is not worth anything yet.
 
-   What is left of this step is the executable-region scan behind `Main.get_LocalPlayer`:
-   the byte-pattern search that resolves the live player rather than every copy of it.
+   **The live-player resolver is done**, which finishes this step. `find_players` returns
+   the live player *and* one or two inert snapshots, and writing to a snapshot looks
+   exactly like the trainer not working: the number changes in memory and the game never
+   reads it. Telling them apart by watching which one moves needs the game running
+   frames, and it usually is not -- Terraria pauses when its window loses focus, which is
+   what happens the moment anyone clicks in the trainer. So the live one is resolved
+   instead: `Main.get_LocalPlayer` is `return Main.player[Main.myPlayer]`, its JIT'd tail
+   is a distinctive index-and-return shape, and the two `mov reg,[abs]` in front of it
+   carry the addresses of the two statics that lead to the player the game itself uses.
+   Found once and kept; re-read cheaply through the kept anchor, which self-corrects when
+   a collection moves the object.
+
+   That search reads executable memory, which the writable-region scan deliberately does
+   not cover, so `proc` grew a second region listing -- and the two are compared against
+   the game's own maps rather than the interpreter's, because a 64-bit interpreter maps
+   every scrap of its code above four gigabytes and the comparison would have had nothing
+   left in it.
+
+   **Checked against the live game.** Both implementations resolved the same anchor, the
+   same `Main` static base, the same player address, name and block, over the same 1,492
+   executable regions; Go's scan took 414 ms to the Python's 1,433 ms. The scan at that
+   moment found two candidates and the *first* was the inert one -- full life -- while
+   the live player was the second, which is the whole reason this path exists.
+
+   Mutation-checked on eight guards: the pattern bytes, the two static offsets, the
+   `statLife` offset, the array data offset, the index scale, the uniqueness rule that
+   makes two candidates a refusal rather than a coin toss, the check on the instructions
+   in front of the tail, and the bound on `myPlayer`. Each one breaks a differential test
+   when broken.
 4. **`layout`, `inventory`, `player`.** Offsets are declared once and imported —
    AGENTS.md is explicit that re-spelling a constant is the failure mode here (it was
    five spellings under four names once). In Go they are one package of typed constants,
    and the Python and Go values are diffed by a test while both exist.
+
+   **`layout` is done.** `internal/layout` is the ten offsets, and its test compares
+   **both directions** against the Python module: every Python constant must exist in Go
+   with the same value, and every Go entry must exist in Python. A number added on one
+   side and missed on the other fails rather than diverging quietly, which is the failure
+   this module was written to end.
 5. **`service`.** The common layer, on top of the above. Subcommand by subcommand.
 6. **`cli`.** argparse to cobra, which the maintainer's other Go tools already use.
    `--json` output is diffed against the Python CLI's for every subcommand, and `serve`

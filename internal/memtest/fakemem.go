@@ -58,6 +58,11 @@ tested.
 type FakeMem struct {
 	Base uint32
 	Buf  []byte
+	// Exec is the part of this buffer that stands for executable memory, which
+	// a pattern search for JIT'd code looks at. A fake maps one buffer and the
+	// caller says which slice of it is code, exactly as the Python's tests
+	// replace the real region listing with a pair of addresses.
+	Exec []proc.Region
 }
 
 // New is a fake of size bytes mapped at base.
@@ -69,6 +74,10 @@ func New(base uint32, size int) *FakeMem {
 func (m *FakeMem) Regions() []proc.Region {
 	return []proc.Region{{Start: m.Base, End: m.Base + count(len(m.Buf))}}
 }
+
+// ExecRegions is the code this fake maps, which is whatever the caller planted
+// code into and said so.
+func (m *FakeMem) ExecRegions() []proc.Region { return m.Exec }
 
 /*
 shift is an address at a signed offset from another.

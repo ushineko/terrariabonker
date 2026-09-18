@@ -110,6 +110,70 @@ func TestWhatIsNotAScannableRegion(t *testing.T) {
 }
 
 /*
+Both implementations make the same executable regions of the running game.
+
+The interpreter's own listing cannot carry this one: it is a 64-bit process and
+every executable mapping in it is above four gigabytes, so the comparison would
+have nothing left in it. The game is the 32-bit process this parser exists for,
+and its listing is the one being got wrong that would matter -- a region kept on
+one side and skipped on the other means the two find get_LocalPlayer in
+different places, or one of them does not find it and falls back to guessing
+which player is live.
+
+Skipped when the game is not running, because there is nothing to agree about.
+*/
+func TestTheGameGivesBothTheSameExecutableRegions(t *testing.T) {
+	var got struct {
+		Running bool       `json:"running"`
+		Maps    string     `json:"maps"`
+		Regions [][]uint64 `json:"regions"`
+	}
+	askPython(t, `
+import json
+from terrariabonker import locate as L
+from terrariabonker.proc import Mem, find_pid
+try:
+    pid = find_pid()
+except Exception:
+    print(json.dumps({"running": False}))
+else:
+    print(json.dumps({
+        "running": True,
+        "maps": open(f"/proc/{pid}/maps").read(),
+        "regions": L._exec_regions(Mem(pid)),
+    }))
+`, &got)
+	if !got.Running {
+		t.Skip("the game is not running")
+	}
+	require.NotEmpty(t, got.Regions, "the game maps no executable memory")
+
+	regions := proc.ParseExecRegions(strings.NewReader(got.Maps))
+	require.Len(t, regions, len(got.Regions), "a different number of regions was kept")
+	for i, r := range got.Regions {
+		require.Equalf(t, uint32(r[0]), regions[i].Start, "region %d starts elsewhere", i)
+		require.Equalf(t, uint32(r[1]), regions[i].End, "region %d ends elsewhere", i)
+	}
+}
+
+// The executable listing keeps what the writable one drops and drops what it
+// keeps, on the same lines.
+func TestWhatIsNotExecutableMemory(t *testing.T) {
+	listing := strings.Join([]string{
+		"08048000-08049000 r-xp 00000000 08:01 1  /usr/bin/thing", // code, file-backed
+		"08049000-0804a000 rw-p 00001000 08:01 1  /usr/bin/thing", // data, not code
+		"0804a000-0804b000 rwxp 00000000 00:00 0",                 // anonymous JIT output
+		"0804b000-0804c000 r-xs 00000000 00:06 9  /dev/nvidia0",   // a device, which can stall
+		"not a maps line",
+	}, "\n")
+
+	got := proc.ParseExecRegions(strings.NewReader(listing))
+	require.Len(t, got, 2)
+	require.Equal(t, uint32(0x08048000), got[0].Start)
+	require.Equal(t, uint32(0x0804a000), got[1].Start)
+}
+
+/*
 The game is found by what it maps, not by what it is called.
 
 Proton's wrapper scripts name Terraria.exe on their command lines; only the game

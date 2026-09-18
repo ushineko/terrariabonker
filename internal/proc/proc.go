@@ -49,12 +49,25 @@ that hangs rather than one that finds nothing.
 Parsing is separate from opening the file so it can be tested against a real
 listing without a process to point it at.
 */
-func ParseRegions(r io.Reader) []Region {
+func ParseRegions(r io.Reader) []Region { return parseListing(r, "w") }
+
+/*
+ParseExecRegions is the executable regions of the same listing.
+
+Separate from the writable ones because they are looked at for different
+reasons: the writable regions are the managed heap, where a player lives, and
+the executable ones are JIT'd code, where a method's compiled shape can be
+matched.
+*/
+func ParseExecRegions(r io.Reader) []Region { return parseListing(r, "x") }
+
+// parseListing keeps the regions whose permissions carry want.
+func parseListing(r io.Reader, want string) []Region {
 	var out []Region
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scan.Scan() {
-		region, ok := parseRegion(scan.Text())
+		region, ok := parseRegion(scan.Text(), want)
 		if ok {
 			out = append(out, region)
 		}
@@ -64,12 +77,12 @@ func ParseRegions(r io.Reader) []Region {
 
 // parseRegion reads one line of a maps listing, and reports whether it is a
 // region worth scanning.
-func parseRegion(line string) (Region, bool) {
+func parseRegion(line, want string) (Region, bool) {
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
 		return Region{}, false
 	}
-	if !strings.Contains(parts[1], "w") {
+	if !strings.Contains(parts[1], want) {
 		return Region{}, false
 	}
 	if len(parts) > 5 && strings.HasPrefix(parts[5], "/dev/") {
@@ -110,13 +123,24 @@ type Mem struct{ PID int }
 func New(pid int) *Mem { return &Mem{PID: pid} }
 
 // Regions is the process's writable, scannable memory.
-func (m *Mem) Regions() []Region {
+func (m *Mem) Regions() []Region { return m.listing(ParseRegions) }
+
+/*
+ExecRegions is the process's executable memory, which is where JIT'd code is.
+
+A pattern search for a method's compiled shape looks here and nowhere else: the
+writable regions are the managed heap, and the heap does not hold instructions.
+*/
+func (m *Mem) ExecRegions() []Region { return m.listing(ParseExecRegions) }
+
+// listing parses this process's maps with one of the readers above.
+func (m *Mem) listing(parse func(io.Reader) []Region) []Region {
 	f, err := os.Open(m.maps())
 	if err != nil {
 		return nil
 	}
 	defer func() { _ = f.Close() }()
-	return ParseRegions(f)
+	return parse(f)
 }
 
 // Read is size bytes at addr, or nothing. A short or failed read is ordinary:
