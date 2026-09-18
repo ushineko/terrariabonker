@@ -1,9 +1,8 @@
 # Spec 050: The GUI in Go, on fynedesygn
 
-**Status**: INCOMPLETE — phases 1-5 are done, installed, and run against the live
-game. Phase 6 (retiring the Qt window) is all that is left, and it is larger than
-"delete a directory": 272 of the Python suite's 739 tests import `terrariabonker.gui`,
-and some of them test the common layer through it rather than testing the window.
+**Status**: COMPLETE. Phases 1-5 are done, installed, and run against the live game.
+Phase 6 -- retiring the Qt window -- moved to spec 051 by decision and was done there:
+the Python it would have had to keep working is the Python that spec deletes.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -144,8 +143,9 @@ is in `SERVE_OPS`. Losing this check is not an acceptable outcome of the port.
   single-instance guard (the CLI creates that directory under sudo).
 - [x] AC8 `go test ./...`, `go vet ./...` and the pinned golangci-lint are clean; the
   Python suite still passes unchanged.
-- [ ] AC9 `terrariabonker/gui/` is deleted, PyQt6 is out of `requirements.txt`, and
-  `install.sh` installs and launches the Go window (phase 6).
+- [x] AC9 `terrariabonker/gui/` is deleted, PyQt6 is out of `requirements.txt`, and
+  `install.sh` installs and launches the Go window. Done as step 0 of spec 051 rather
+  than as phase 6 here; the criterion is met either way.
 - [x] AC10 The maintainer runs it against the live game and reports what is wrong.
   Five things, all fixed: a shape menu that opened in the corner, tips that took
   every click in the window, a banner that did the same for twelve seconds after

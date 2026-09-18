@@ -95,14 +95,14 @@ def test_guard_checks_before_any_field_write():
 
 def test_argv_builder_carries_expect_type():
     """The GUI's argv contract: every slot write states what it believed."""
-    from terrariabonker.gui import client
+    from terrariabonker import argv as client
     argv = client.set_item_argv(5, DIRT, stack=1, expect_type=SWORD)
     assert argv[:3] == ["set-item", "5", str(DIRT)]
     assert "--expect-type" in argv and argv[argv.index("--expect-type") + 1] == str(SWORD)
 
 
 def test_argv_builder_omits_expect_type_when_not_given():
-    from terrariabonker.gui import client
+    from terrariabonker import argv as client
     assert "--expect-type" not in client.set_item_argv(5, DIRT, stack=1)
 
 

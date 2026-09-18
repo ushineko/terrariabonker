@@ -1,13 +1,16 @@
-"""The one place that knows the CLI subprocess contract the GUI depends on.
+"""The CLI's own argument contract: one function per operation, returning its argv.
 
-The GUI cannot call ``service`` in-process (it is unprivileged; memory access
-needs root), so it reaches the same operations across a sudo subprocess boundary.
-This module is the single definition of that boundary: each function returns the
-CLI argv for an operation, and the parsers decode the ``--json`` replies. It is
-deliberately toolkit-free (no PyQt) and imports nothing from the shell, so
-``tests/test_view_parity.py`` can check every command it emits against the real
-CLI parser — turning a contract drift (like a missing ``--json`` flag) into a
-test failure instead of a runtime gap.
+This was ``gui/client.py``, written for the PyQt6 panel that has been replaced by
+the Go window (spec 050). The panel is gone; the contract is not. An unprivileged
+front end cannot call ``service`` in-process -- memory access needs root -- so it
+reaches these operations across a sudo subprocess boundary, and this is the single
+definition of that boundary in Python. The Go window has its own copy of it in
+``internal/gui/client``, checked against the real parser by a test on that side.
+
+It stays here, out of ``gui/``, because most of what used it was never testing a
+window: the suite drives the common layer through these argv and through the
+parsers below, and that is worth keeping while the Python is still the thing
+being driven. It leaves with the rest of the Python (spec 051).
 """
 
 from __future__ import annotations

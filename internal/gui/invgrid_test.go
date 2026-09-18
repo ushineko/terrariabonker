@@ -1,11 +1,7 @@
 package gui
 
 import (
-	"context"
-	"encoding/json"
 	"image/color"
-	"os/exec"
-	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -65,54 +61,30 @@ func TestTheStackBadgeOnlyCountsWhatIsWorthCounting(t *testing.T) {
 }
 
 /*
-The fallback label must shorten a name the same way the Qt panel does.
+The fallback label shortens a name the way the Qt panel did.
 
-Both windows are installed during the port, and a cell reading "Cop.Pic" in one
-and something else in the other is a difference someone has to stop and work
-out. So this asks the Python for the answer rather than trusting a written-down
-expectation -- which is how it was caught: the expectations here came from
-invgrid.py's docstring, and the docstring is wrong. It says "Copper Pickaxe"
-becomes "Cop.Pick"; the code it documents produces "Cop.Pic".
+These expectations were taken from the Python while both existed, not written
+from the implementation: the test that produced them asked `gui/invgrid.py` for
+each answer, and that is how the Qt panel's own docstring was found to be wrong.
+It says "Copper Pickaxe" becomes "Cop.Pick"; the code it documented produced
+"Cop.Pic", and so does this.
+
+The Python is gone with the panel (spec 051), so the differential check goes with
+it and what it established stays.
 */
-func TestNamesAreShortenedTheSameWayThePythonDoes(t *testing.T) {
-	names := []string{
-		"Wood", "Copper Pickaxe", "Meteoritebar", "Molten Pickaxe",
-		"Terra Blade", "Chlorophyte Warhammer", "Zenith",
-	}
-	want := pythonAbbrev(t, names)
-	for _, n := range names {
-		require.Equalf(t, want[n], abbrev(n, abbrevWidth), "%q is shortened differently", n)
+func TestNamesAreShortenedTheWayTheQtPanelDidIt(t *testing.T) {
+	for name, want := range map[string]string{
+		"Wood":                  "Wood",
+		"Copper Pickaxe":        "Cop.Pic",
+		"Meteoritebar":          "Meteori…",
+		"Molten Pickaxe":        "Mol.Pic",
+		"Terra Blade":           "Ter.Bla",
+		"Chlorophyte Warhammer": "Chl.War",
+		"Zenith":                "Zenith",
+	} {
+		require.Equalf(t, want, abbrev(name, abbrevWidth), "%q is shortened differently", name)
 	}
 }
-
-// pythonAbbrev asks invgrid.py what each name shortens to.
-func pythonAbbrev(t *testing.T, names []string) map[string]string {
-	t.Helper()
-	argv, err := json.Marshal(names)
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithTimeout(t.Context(), parseTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", abbrevCheck, string(argv)) //nolint:gosec // a fixed script and our own names
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python panel is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-
-	var got map[string]string
-	require.NoError(t, json.Unmarshal(out, &got))
-	return got
-}
-
-// abbrevCheck shortens each name with the Qt panel's own function.
-const abbrevCheck = `
-import json, sys
-from terrariabonker.gui import invgrid
-names = json.loads(sys.argv[1])
-print(json.dumps({n: invgrid.abbrev(n) for n in names}))
-`
 
 // The tip is where a slot's detail lives, because the cell has room for an icon
 // and a number and nothing else.

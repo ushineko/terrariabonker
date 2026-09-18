@@ -199,59 +199,10 @@ def test_stop_forgets_the_located_array_and_drops_a_pending_press(monkeypatch):
 
 # --- the panel switch ---------------------------------------------------------
 
-def test_panel_switch_starts_and_stops_the_watch(gui_window, monkeypatch):
-    """Unticking stops the arming and touches nothing else.
-
-    Auto-use is a separate cheat on the Patches tab; this switch decides *when* to arm
-    it, so switching off must not reach into the game and change what the player set.
-    """
-    w = gui_window()
-    try:
-        sent = []
-        w.helper.available = True
-        monkeypatch.setattr(w.helper, "request",
-                            lambda argv, cb: (sent.append(argv), cb("{}"), True)[-1])
-        w.cb_catch.setChecked(True)
-        assert w._catch_timer.isActive()
-        w.cb_catch.setChecked(False)
-        assert not w._catch_timer.isActive()
-        assert sent[-1] == ["catch-stop", "--json"], sent
-        assert not any("patch" in a for argv in sent for a in argv), sent
-    finally:
-        w.close()
 
 
-def test_panel_unticks_itself_when_auto_use_is_off(gui_window, monkeypatch):
-    """The commonest mistake: ticking this without the cheat that presses the button.
-
-    Say it once and untick, rather than logging the same error every 50 ms.
-    """
-    w = gui_window()
-    try:
-        w.helper.available = True
-        monkeypatch.setattr(
-            w.helper, "request",
-            lambda argv, cb: (cb("[ERROR] the auto-use cheat is not enabled"), True)[-1])
-        w.cb_catch.setChecked(True)
-        w._tick_catch()
-        assert not w.cb_catch.isChecked()
-        lines = [ln for ln in w.log.toPlainText().splitlines() if "[catch]" in ln]
-        assert len(lines) == 1 and "auto-use" in lines[0]
-    finally:
-        w.close()
 
 
-def test_panel_logs_what_was_caught(gui_window, monkeypatch):
-    w = gui_window()
-    try:
-        w.helper.available = True
-        monkeypatch.setattr(
-            w.helper, "request",
-            lambda argv, cb: (cb('{"events": [{"what": "reel", "catch": 2290}]}'), True)[-1])
-        w._tick_catch()
-        assert "Bass" in w.log.toPlainText()
-    finally:
-        w.close()
 
 
 def test_a_cast_is_not_attempted_straight_after_a_reel(monkeypatch):
@@ -269,48 +220,10 @@ def test_a_cast_is_not_attempted_straight_after_a_reel(monkeypatch):
     assert p.arms == 0 and got["events"] == []
 
 
-def test_the_cast_box_is_dead_until_reeling_is_on(gui_window, monkeypatch):
-    """"and cast" does nothing on its own — it is a modifier on the watch, not a cheat."""
-    w = gui_window()
-    try:
-        assert not w.cb_recast.isEnabled()
-        w.cb_catch.setChecked(True)
-        assert w.cb_recast.isEnabled()
-        w.cb_catch.setChecked(False)
-        assert not w.cb_recast.isEnabled()
-    finally:
-        w.close()
 
 
-def test_the_cast_box_reaches_the_worker(gui_window, monkeypatch):
-    w = gui_window()
-    try:
-        sent = []
-        w.helper.available = True
-        monkeypatch.setattr(w.helper, "request",
-                            lambda argv, cb: (sent.append(argv), cb("{}"), True)[-1])
-        w.cb_catch.setChecked(True)
-        w._tick_catch()
-        assert "--recast" not in sent[-1]
-        w.cb_recast.setChecked(True)
-        w._tick_catch()
-        assert "--recast" in sent[-1]
-    finally:
-        w.close()
 
 
-def test_the_panel_logs_a_cast_only_when_the_line_went_out(gui_window, monkeypatch):
-    w = gui_window()
-    try:
-        w.helper.available = True
-        monkeypatch.setattr(
-            w.helper, "request",
-            lambda argv, cb: (cb('{"events": [{"what": "cast", "confirmed": false}]}'),
-                              True)[-1])
-        w._tick_catch()
-        assert "no line went out" in w.log.toPlainText()
-    finally:
-        w.close()
 
 
 def test_a_cast_that_goes_nowhere_stops_the_casting(monkeypatch):

@@ -262,8 +262,9 @@ hooks belongs to the ReGrind authors.
 - Terraria running under **Proton**. Force it in Steam under Properties → Compatibility.
   The cheats are derived against Proton's **wine-mono** runtime and require it.
 - Python 3.10+ (the system one, `/usr/bin/python3`, not conda).
-- `numpy`, `PyQt6`, `Pillow` — on Arch/CachyOS `python-numpy python-pyqt6 python-pillow`,
-  otherwise `pip install -r requirements.txt`.
+- `numpy`, `Pillow` — on Arch/CachyOS `python-numpy python-pillow`, otherwise
+  `pip install -r requirements.txt`.
+- A Go toolchain, to build the control panel. The CLI works without one.
 - **Passwordless sudo.** Reading another process's memory needs root. The GUI itself stays
   unprivileged and shells each action out, so it cannot answer a password prompt — without
   a NOPASSWD rule the trainer and inventory do nothing (the panel says so, and the browser
@@ -419,7 +420,9 @@ terrariabonker/
 │   ├── prefixes.py             modifier names
 │   ├── data/                   name and tooltip tables, extracted from the game
 │   ├── cli.py                  the command line
-│   └── gui/                    the control panel
+│   └── argv.py                 the CLI's argument contract, shared with the panel
+├── cmd/terrariabonker-gui/     the control panel (Go)
+├── internal/gui/               its sections, and the client that drives the CLI
 ├── tools/                      helpers: sprite extraction, screenshots
 ├── docs/discovery.md           how the offsets were found, and how to rebuild them
 ├── ce/                         notes from the reverse-engineering work

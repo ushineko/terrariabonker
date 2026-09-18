@@ -3,7 +3,7 @@
 A thin adapter over ``terrariabonker.service``: every subcommand elevates (once,
 via sudo), builds a Service, and calls one operation, then formats the result as
 text or ``--json``. All game logic lives in the service so the CLI and GUI cannot
-drift; ``--json`` is the contract the GUI's ``gui.client`` consumes.
+drift; ``--json`` is the contract the GUI consumes (see ``argv.py``).
 """
 
 from __future__ import annotations
@@ -927,15 +927,6 @@ def cmd_extract_sprites(args) -> int:
     return 0
 
 
-def cmd_gui(args) -> int:
-    try:
-        from terrariabonker.gui.main_window import run
-    except ImportError as e:
-        print(f"[ERROR] GUI unavailable (is PyQt6 installed?): {e}", file=sys.stderr)
-        return 1
-    return run()
-
-
 def cmd_read(args) -> int:
     print(_svc().mem.read_i32(int(args.addr, 16)))
     return 0
@@ -976,9 +967,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("serve",
                        help="long-lived JSON worker for the GUI (stdin/stdout protocol)")
     p.set_defaults(func=cmd_serve)
-
-    p = sub.add_parser("gui", help="launch the graphical control panel")
-    p.set_defaults(func=cmd_gui)
 
     p = sub.add_parser("extract-sprites",
                        help="decode item icons from the game into a local cache")
@@ -1303,12 +1291,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    # Bare `terrariabonker` reports what is running. It used to launch the panel,
+    # and the panel is a separate program now -- `terrariabonker-gui` -- so the
+    # CLI is a CLI.
     if len(sys.argv) == 1:
-        try:
-            import PyQt6.QtWidgets  # noqa: F401
-            sys.argv.append("gui")
-        except ImportError:
-            sys.argv.append("status")
+        sys.argv.append("status")
     parser = build_parser()
     args = parser.parse_args()
     if not getattr(args, "func", None):

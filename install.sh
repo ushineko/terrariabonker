@@ -2,14 +2,13 @@
 
 # Configuration
 APP_NAME="terrariabonker"
-DESKTOP_FILE="$APP_NAME.desktop"
 INSTALL_DIR="$HOME/.local/share/applications"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_PATH="$APP_DIR/terrariabonker.py"
 ICON_PATH="$APP_DIR/assets/terrariabonker.svg"
 
-# The Go window (spec 050). Its desktop entry is named for the Wayland app_id it
+# The window (spec 050). Its desktop entry is named for the Wayland app_id it
 # sets, because that is what the compositor matches to find a window's icon: an
 # entry under any other basename leaves the titlebar showing a placeholder.
 GO_GUI="$APP_NAME-gui"
@@ -21,7 +20,7 @@ echo "Installing $APP_NAME..."
 
 # 1. Check runtime dependencies before installing anything.
 MISSING=""
-for mod in numpy PyQt6 PIL; do
+for mod in numpy PIL; do
     if ! /usr/bin/python3 -c "import $mod" 2>/dev/null; then
         MISSING="$MISSING $mod"
     fi
@@ -29,7 +28,7 @@ done
 if [ -n "$MISSING" ]; then
     echo "Error: missing Python modules:$MISSING"
     echo "On Arch/CachyOS install them with:"
-    echo "  sudo pacman -S python-numpy python-pyqt6 python-pillow"
+    echo "  sudo pacman -S python-numpy python-pillow"
     echo "or, from this directory:  pip install -r requirements.txt"
     exit 1
 fi
@@ -48,20 +47,9 @@ chmod +x "$SCRIPT_PATH"
 ln -sfn "$SCRIPT_PATH" "$BIN_DIR/$APP_NAME"
 echo "Installed CLI symlink: $BIN_DIR/$APP_NAME -> $SCRIPT_PATH"
 
-# 4. Install desktop file, resolving Exec/Icon to this install location so the
-#    entry works regardless of where the repo is cloned.
-if [ -f "$APP_DIR/$DESKTOP_FILE" ]; then
-    mkdir -p "$INSTALL_DIR"
-    sed -e "s|__SCRIPT__|$SCRIPT_PATH|g" \
-        -e "s|__ICON__|$ICON_PATH|g" \
-        "$APP_DIR/$DESKTOP_FILE" > "$INSTALL_DIR/$DESKTOP_FILE"
-    chmod +x "$INSTALL_DIR/$DESKTOP_FILE"
-    echo "Installed desktop file: $INSTALL_DIR/$DESKTOP_FILE"
-fi
-
-# 4b. The Go window, when it has been built. Optional on purpose: the Qt panel is
-#     still the complete one, and a missing Go toolchain must not fail an install
-#     of the trainer itself.
+# 4. The window. It is the only control panel now (the PyQt6 one is gone, spec
+#    050), but a missing Go toolchain still must not fail an install of the CLI:
+#    the trainer works from a terminal and a prebuilt binary may already be here.
 if [ -x "$APP_DIR/$GO_GUI" ] || command -v go >/dev/null; then
     # Rebuilt on every install rather than only when missing: an install after a
     # change that left the old binary in place would report success and start
@@ -91,6 +79,9 @@ if [ -x "$APP_DIR/$GO_GUI" ] || command -v go >/dev/null; then
             chmod +x "$INSTALL_DIR/$GO_DESKTOP_FILE"
             echo "Installed desktop file: $INSTALL_DIR/$GO_DESKTOP_FILE"
         fi
+    else
+        echo "Note: no $GO_GUI binary and no Go toolchain -- the CLI is installed,"
+        echo "      the control panel is not. Install Go and re-run this."
     fi
 fi
 

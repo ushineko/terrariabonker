@@ -16,7 +16,7 @@ external contributors — see `CONTRIBUTING.md`.
 A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.7** (the Windows
 build under Proton/wine-mono). It locates the player in `/proc/<pid>/mem` with no hardcoded
 addresses, then reads and edits player state, inventory, and applies code-patch cheats. A
-PyQt6 control panel and a CLI share one common layer. Cheat sites are derived with Cheat
+Go control panel and a Python CLI share one common layer. Cheat sites are derived with Cheat
 Engine's mono dissector (see `ce/README.md`); nothing needs CE at runtime.
 
 Some code-patch cheats are ported from the FearLess Forums "TerrariaReGrind" Cheat Engine
@@ -32,9 +32,12 @@ reverse-engineering credit for those hooks belongs to the ReGrind authors.
   All game logic lives here so the CLI and GUI cannot drift.
 - **CLI** — `terrariabonker/cli.py`: a thin argparse front end; `--json` is the contract the
   GUI consumes. Memory operations self-elevate via `sudo` (`proc.elevate`).
-- **GUI** — `terrariabonker/gui/`: runs **unprivileged** (Qt must not run as root) and reaches
-  the common layer by shelling each action to the CLI under sudo (`gui/client.py` builds the
-  argv and parses the JSON). Do not add in-process root memory access to the GUI.
+- **GUI** — `internal/gui/`, in Go on fynedesygn (spec 050): runs **unprivileged** (a window
+  must not run as root) and reaches the common layer by shelling each action to the CLI under
+  sudo, either through a long-lived `serve` worker or a one-shot run.
+  `internal/gui/client` builds the argv and parses the JSON; `terrariabonker/argv.py` is the
+  same contract on the Python side, which the suite uses to drive the common layer. Do not
+  add in-process root memory access to the GUI.
 - **State** — per-pid live patch state (`~/.config/terrariabonker/patches.json`) is
   concurrency-safe (flock + atomic write). The pid-independent desired-config profile
   (`~/.config/terrariabonker/profile.json`) drives auto-restore. Sprite icons cache under
@@ -123,7 +126,7 @@ for explaining a measurement — not for standing in place of one.
 
 **Python**
 - Target the system interpreter (`/usr/bin/python3`), not conda/miniforge. Python 3.10+.
-- Runtime deps: `numpy`, `PyQt6`, `Pillow` (see `requirements.txt`). Ask before adding a new
+- Runtime deps: `numpy`, `Pillow` (see `requirements.txt`). Ask before adding a new
   runtime dependency; prefer the standard library.
 - Style: PEP 8, 4-space indent, ~100-col soft limit, double-quoted strings to match the
   codebase. Keep changes surgical — edit only what the task needs; do not reformat unrelated
@@ -211,7 +214,7 @@ already carry it.
   stubs, anchors, or byte patterns.
 - **No discarded or alternate approaches.** "We tried X and it didn't work" is spec
   material. The README says what the thing does now.
-- **No implementation names as features.** "A GUI control panel", not "a PyQt6 control
+- **No implementation names as features.** "A GUI control panel", not "a Fyne control
   panel". Frameworks appear only where you must install them.
 - **No defensive framing.** Not "no Cheat Engine required"; just say what it uses.
   Generalise tool names where the specific one doesn't matter.

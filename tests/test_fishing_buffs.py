@@ -117,64 +117,12 @@ def test_a_watch_interval_that_would_let_it_lapse_is_refused(game):
 
 # --- the panel switches -------------------------------------------------------
 
-def test_the_boxes_run_independently_of_the_fishing_cheat(gui_window, monkeypatch):
-    """They are separate effects, so they must not need the rod-and-bait cheat on."""
-    w = gui_window()
-    try:
-        assert not w._buff_timer.isActive()
-        w.cb_buff_sonar.setChecked(True)
-        assert w._buff_timer.isActive()
-        assert not w.cb_fishing.isChecked(), "it turned the fishing cheat on by itself"
-    finally:
-        w.close()
 
 
-def test_the_watch_stops_only_when_all_three_are_clear(gui_window, monkeypatch):
-    w = gui_window()
-    try:
-        w.cb_buff_power.setChecked(True)
-        w.cb_buff_crate.setChecked(True)
-        w.cb_buff_power.setChecked(False)
-        assert w._buff_timer.isActive(), "it stopped while Crates was still ticked"
-        w.cb_buff_crate.setChecked(False)
-        assert not w._buff_timer.isActive()
-    finally:
-        w.close()
 
 
-def test_the_ticked_boxes_reach_the_worker(gui_window, monkeypatch):
-    w = gui_window()
-    try:
-        sent = []
-        w.helper.available = True
-        monkeypatch.setattr(w.helper, "request",
-                            lambda argv, cb: (sent.append(argv), cb("{}"), True)[-1])
-        w.cb_buff_power.setChecked(True)
-        w.cb_buff_crate.setChecked(True)
-        w._tick_fishing_buffs()
-        assert "--power" in sent[-1] and "--crate" in sent[-1]
-        assert "--sonar" not in sent[-1]
-    finally:
-        w.close()
 
 
-def test_a_deferral_is_logged_once_not_every_second(gui_window, monkeypatch):
-    """It defers on every round for as long as the potion runs -- eight minutes of it
-    would bury the panel, which is the bug spec 042 already fixed once for bait."""
-    w = gui_window()
-    try:
-        w.helper.available = True
-        reply = ('{"held": [], "deferred": [{"effect": "power", "buff": 121, '
-                 '"name": "Fishing Potion", "what": "kept"}]}')
-        monkeypatch.setattr(w.helper, "request",
-                            lambda argv, cb: (cb(reply), True)[-1])
-        w.cb_buff_power.setChecked(True)
-        for _ in range(5):
-            w._tick_fishing_buffs()
-        lines = [ln for ln in w.log.toPlainText().splitlines() if "Fishing Potion" in ln]
-        assert len(lines) == 1, lines
-    finally:
-        w.close()
 
 
 def test_our_own_renewal_is_not_mistaken_for_a_potion(game):

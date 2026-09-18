@@ -1,8 +1,9 @@
 # Spec 051: The rest of it in Go
 
-**Status**: NOT STARTED — planning only. Nothing in this spec is implemented until the
-maintainer has run the Go window from spec 050 against the live game and is satisfied
-with it.
+**Status**: IN PROGRESS. The window from spec 050 has been run against the live game and
+what it found is fixed, so this starts. Spec 050's phase 6 — retiring the Qt window —
+moves here as step 0, because the Python it would have to keep working is the Python this
+spec deletes.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -69,18 +70,41 @@ Go. It is the single most valuable asset in this port and the first thing to mov
 
 ### Order of work
 
-1. **The test fixture.** Whatever builds the synthetic memory image for `pytest` becomes
+Ordered so that each step is verifiable on its own and the dangerous one is last. The
+first two steps need no memory access at all, which makes them the cheapest place to
+build the differential habit this port depends on.
+
+0. **Retire the Qt window** (spec 050's phase 6). `terrariabonker/gui/` is 3,912 lines
+   of PyQt6 that nothing runs any more. It does not come here on its own: 272 of the
+   suite's 739 tests import it, and most of those are not testing a window — they use
+   `gui/client.py`, which is 476 lines of argv builders with no PyQt6 in it, as the
+   vocabulary for driving the common layer.
+
+   So the window goes and that vocabulary stays, as `terrariabonker/argv.py`: the CLI's
+   own argument contract, which is what it always was. The tests that test a window go
+   with the window; the tests that drive the service through it keep working. PyQt6
+   leaves `requirements.txt` in the same commit.
+
+1. **The data tables.** `names`, `prefixes`, `recipes`, `npcs`, `tiles`, `content`,
+   `projectiles` — loaders over the unchanged JSON in `terrariabonker/data/`. No memory,
+   no privilege, no fixture needed, and a differential test per table per row.
+
+   This is also the step that pays immediately: the Go window shells out to the CLI four
+   times at start-up for names, prefixes, recipes and the patch catalog, and those four
+   round trips have no reason to exist once Go can read the same files. The window keeps
+   working through the CLI until each one lands.
+
+2. **The test fixture.** Whatever builds the synthetic memory image for `pytest` becomes
    a file format both languages read, or a Go generator producing the identical bytes.
-   Nothing else starts until a Go test can load the image the Python tests use.
-2. **`proc` and `locate`.** `process_vm_readv`/`writev` and `/proc/<pid>/maps` from Go,
+   Nothing that touches memory starts until a Go test can load the image the Python
+   tests use.
+3. **`proc` and `locate`.** `process_vm_readv`/`writev` and `/proc/<pid>/maps` from Go,
    then AOB/signature scanning and the player-block scan. Differential test: the same
    image in, the same address out.
-3. **`layout`, `inventory`, `player`.** Offsets are declared once and imported —
+4. **`layout`, `inventory`, `player`.** Offsets are declared once and imported —
    AGENTS.md is explicit that re-spelling a constant is the failure mode here (it was
    five spellings under four names once). In Go they are one package of typed constants,
    and the Python and Go values are diffed by a test while both exist.
-4. **`content`, `recipes`, `npcs`, `tiles`, `prefixes`, `projectiles`.** Table loaders
-   over the unchanged JSON. Differential test: every table, every row.
 5. **`service`.** The common layer, on top of the above. Subcommand by subcommand.
 6. **`cli`.** argparse to cobra, which the maintainer's other Go tools already use.
    `--json` output is diffed against the Python CLI's for every subcommand, and `serve`
@@ -94,6 +118,22 @@ Go. It is the single most valuable asset in this port and the first thing to mov
    the same `Item_<id>.xnb` in both and compare the PNG bytes, or the pixels.
 9. **Retire Python.** Delete the package and `requirements.txt`, rework `install.sh`,
    and move whatever remains of the 48 test files that is still meaningful.
+
+### What this port will not make faster
+
+Worth writing down before anyone expects it. Applying a patch takes tens of seconds, and
+measurement through the warm worker says the language is not why. With the game running:
+`status` 3 ms, `inventory` 3 ms, `patch status` 2 ms, `build-check` 3 ms — and 3.7 s for
+the first status, which is the player scan, and 1.4 s for the 3.2 MB compendium.
+
+The wait when a patch is applied is the arena bootstrap: it hangs a springboard on a
+per-frame path and waits up to 20 s for the game to run it. Terraria pauses in
+single-player whenever its window loses focus, which is exactly what clicking in the
+trainer does. A Go patcher waits for the same frame.
+
+Two things do help, and neither is a rewrite: applying several patches on one press,
+which spec 050 added, and saying *while waiting* that the game is paused rather than
+after the wait fails. `Patcher.arena` already takes an `on_wait` callback for it.
 
 ### What the tests become
 

@@ -97,16 +97,6 @@ def test_the_static_base_is_scanned_once_not_per_call():
     assert len(calls) == 1
 
 
-def _settle(w, status):
-    """Report the same status until the panel accepts it as settled.
-
-    A world load is the most turbulent moment in the game's lifetime, so nothing is
-    written until the same world has been seen for a few consecutive polls.
-    """
-    from terrariabonker.gui.main_window import WORLD_SETTLE_POLLS
-    for _ in range(WORLD_SETTLE_POLLS):
-        w._note_world(status)
-        w._maybe_restore(status)
 
 
 # --- the two callers --------------------------------------------------------
@@ -137,129 +127,18 @@ def test_auto_sell_rescans_when_the_world_changes_but_the_size_does_not():
     assert Tiles.scans == 2, "different world: rescanned"
 
 
-def test_restore_fires_on_a_world_change_with_the_same_pid(gui_window):
-    """The reported bug: the trigger keyed on the pid, and a world switch keeps it."""
-    w = gui_window()
-    done = []
-    w._do_restore = lambda: done.append(1)
-    import terrariabonker.gui.main_window as mw
-    mw.profile.cheats = lambda: {"god": None}
-    mw.profile.item_edits = lambda: {}
-
-    _settle(w, {"pid": 42, "name": "P", "world": ["A", 4200, 1200]})
-    assert len(done) == 1
-    _settle(w, {"pid": 42, "name": "P", "world": ["A", 4200, 1200]})
-    assert len(done) == 1, "same world, same pid: no repeat"
-    _settle(w, {"pid": 42, "name": "P", "world": ["B", 4200, 1200]})
-    assert len(done) == 2, "world changed with the pid unchanged"
 
 
-def test_an_unreadable_world_does_not_restore_every_poll(gui_window):
-    """world=None must not read as "a different world" or the profile is re-applied
-    several times a second."""
-    w = gui_window()
-    done = []
-    w._do_restore = lambda: done.append(1)
-    import terrariabonker.gui.main_window as mw
-    mw.profile.cheats = lambda: {"god": None}
-    mw.profile.item_edits = lambda: {}
-
-    for _ in range(5):
-        st = {"pid": 42, "name": "P", "world": None}
-        w._note_world(st)
-        w._maybe_restore(st)
-    assert len(done) == 1
 
 
-def test_a_world_that_briefly_cannot_be_read_is_not_a_world_change(gui_window):
-    """The load-screen case, and the one that separates `world is not None and ...` from a
-    plain inequality: mid-load the name may not read, and treating that as a change would
-    re-apply the profile on the way out and again on the way back.
-
-    (An earlier version of the test above fed only None, so a mutant dropping the
-    None-guard survived it -- both versions settle after one restore if the value never
-    goes back.)"""
-    w = gui_window()
-    done = []
-    w._do_restore = lambda: done.append(1)
-    import terrariabonker.gui.main_window as mw
-    mw.profile.cheats = lambda: {"god": None}
-    mw.profile.item_edits = lambda: {}
-
-    _settle(w, {"pid": 42, "name": "P", "world": ["A", 4200, 1200]})
-    _settle(w, {"pid": 42, "name": "P", "world": None})                # mid-load
-    _settle(w, {"pid": 42, "name": "P", "world": ["A", 4200, 1200]})
-    assert len(done) == 1, "the same world, briefly unreadable, is not a new world"
 
 
-def test_the_retry_budget_resets_on_a_world_change(gui_window):
-    """A lazily-JIT'd cheat needs its retries in the new world too."""
-    w = gui_window()
-    w._do_restore = lambda: None
-    import terrariabonker.gui.main_window as mw
-    mw.profile.cheats = lambda: {"god": None}
-    mw.profile.item_edits = lambda: {}
-
-    _settle(w, {"pid": 42, "name": "P", "world": ["A", 4200, 1200]})
-    w._restore_attempts = 7
-    _settle(w, {"pid": 42, "name": "P", "world": ["B", 4200, 1200]})
-    assert w._restore_attempts == 0
 
 
-def test_nothing_is_written_until_the_world_has_settled(gui_window):
-    """The reason this exists: a player becomes locatable partway through a world load,
-    while the arrays the restore writes into are still being built."""
-    from terrariabonker.gui.main_window import WORLD_SETTLE_POLLS
-    w = gui_window()
-    done = []
-    w._do_restore = lambda: done.append(1)
-    import terrariabonker.gui.main_window as mw
-    mw.profile.cheats = lambda: {"god": None}
-    mw.profile.item_edits = lambda: {}
-
-    assert WORLD_SETTLE_POLLS >= 2, "one poll is no settle at all"
-    st = {"pid": 42, "name": "P", "world": ["A", 4200, 1200]}
-    w._note_world(st)
-    w._maybe_restore(st)
-    assert done == [], "the first sighting of a world must not write to it"
-    for _ in range(WORLD_SETTLE_POLLS - 1):
-        w._note_world(st)
-        w._maybe_restore(st)
-    assert len(done) == 1
 
 
-def test_a_world_flickering_during_a_load_never_settles(gui_window):
-    """While the game is still loading, the reported world can change poll to poll. None
-    of those is stable, so none of them is written to."""
-    w = gui_window()
-    done = []
-    w._do_restore = lambda: done.append(1)
-    import terrariabonker.gui.main_window as mw
-    mw.profile.cheats = lambda: {"god": None}
-    mw.profile.item_edits = lambda: {}
-
-    for world in (["A", 4200, 1200], None, ["B", 4200, 1200], None, ["A", 4200, 1200]):
-        st = {"pid": 42, "name": "P", "world": world}
-        w._note_world(st)
-        w._maybe_restore(st)
-    assert done == [], "nothing held still long enough to be written to"
 
 
-def test_auto_sell_also_waits_for_the_world_to_settle(gui_window):
-    """Auto-sell is the heaviest writer the panel has -- it copies template blocks into
-    bank and inventory slots twice a second. Mid-load those are being rebuilt."""
-    w = gui_window()
-    sent = []
-    w.helper.available = True
-    w.helper.request = lambda argv, done: (sent.append(argv), True)[1]
-
-    w._note_world({"world": ["A", 4200, 1200]})       # first sighting: not settled
-    w._tick_sell()
-    assert sent == [], "no sale into a world that has not settled"
-
-    w._note_world({"world": ["A", 4200, 1200]})
-    w._tick_sell()
-    assert len(sent) == 1, "settled: the round runs"
 
 
 # --- restore progress (measured: ~80s on a cold game) -----------------------
@@ -269,7 +148,7 @@ def test_auto_sell_also_waits_for_the_world_to_settle(gui_window):
 # first pass, so a legitimate wait was indistinguishable from a hang.
 
 def test_progress_names_what_is_still_waiting():
-    from terrariabonker.gui import client
+    from terrariabonker import argv as client
     line = client.restore_progress(
         {"cheats": ["mining", "reach"], "pending": ["fast_place"], "items": []}, 2)
     assert "2 applied" in line and "1 waiting" in line
@@ -277,7 +156,7 @@ def test_progress_names_what_is_still_waiting():
 
 
 def test_progress_is_quiet_once_everything_is_applied():
-    from terrariabonker.gui import client
+    from terrariabonker import argv as client
     line = client.restore_progress({"cheats": ["mining"], "pending": [], "items": []}, 3)
     assert "1 cheats applied" in line
     assert client.restore_progress({"cheats": [], "pending": [], "items": []}, 1) is None
@@ -293,29 +172,5 @@ def _run_restore(w, rep):
     captured["cb"](json.dumps(rep))
 
 
-def test_the_panel_reports_every_pass_not_only_the_first(gui_window):
-    """The first pass always logged; later ones said nothing, so a cold restore went
-    quiet for the ~80s it actually takes."""
-    w = gui_window()
-    rep = {"cheats": ["mining"], "pending": ["fast_place"], "items": [], "skipped": []}
-    w._restore_attempts = 3            # a later pass, not the first
-    w.log.clear()
-    _run_restore(w, rep)
-    assert "waiting on the game" in w.log.toPlainText()
 
 
-def test_the_same_progress_line_is_not_repeated(gui_window):
-    """It retries every 2s; repeating an unchanged line would bury the log.
-
-    Only the PROGRESS line is suppressed. A second pass with the same leftovers is the
-    existing "no progress, here is why" case and still reports -- that line is a
-    conclusion, not a heartbeat.
-    """
-    w = gui_window()
-    rep = {"cheats": ["mining"], "pending": ["fast_place"], "items": [], "skipped": []}
-    w._restore_attempts = 3
-    _run_restore(w, rep)
-    w.log.clear()
-    w._restore_attempts = 3            # same state, next pass
-    _run_restore(w, rep)
-    assert "waiting on the game" not in w.log.toPlainText()

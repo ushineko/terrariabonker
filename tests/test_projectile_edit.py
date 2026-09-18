@@ -191,7 +191,7 @@ def test_a_malformed_pair_is_refused():
 
 def test_the_argv_is_stable_for_the_same_overrides():
     """Sorted, so the same request does not reorder itself between calls."""
-    from terrariabonker.gui.client import projectile_tick_argv
+    from terrariabonker.argv import projectile_tick_argv
 
     a = projectile_tick_argv({837: {"timeLeft": 3000, "tileCollide": 0}})
     b = projectile_tick_argv({837: {"tileCollide": 0, "timeLeft": 3000}})
@@ -202,7 +202,7 @@ def test_the_argv_is_stable_for_the_same_overrides():
 def test_the_argv_round_trips_through_the_parser():
     """The GUI's argv and the CLI's parser are the two halves of one contract."""
     from terrariabonker.cli import _parse_overrides
-    from terrariabonker.gui.client import projectile_tick_argv
+    from terrariabonker.argv import projectile_tick_argv
 
     want = {837: {"tileCollide": 0, "timeLeft": 3000}, 532: {"scale": 2.5}}
     argv = projectile_tick_argv(want)

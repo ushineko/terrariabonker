@@ -80,36 +80,6 @@ def qt_app():
     yield QApplication.instance() or QApplication([])
 
 
-@pytest.fixture
-def gui_window(qt_app, monkeypatch):
-    """Factory for a MainWindow with every privileged path stubbed out.
-
-    Returns a callable: ``gui_window()`` gives a window, ``gui_window(record_calls=True)``
-    gives ``(window, calls)`` where `calls` collects ``(argv, on_output)`` from `_call`.
-    Windows are closed at teardown, so tests do not need try/finally.
-    """
-    made = []
-
-    def make(record_calls: bool = False):
-        from terrariabonker.gui import main_window as mw
-
-        calls: list = []
-        monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-        monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-        monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-        if record_calls:
-            monkeypatch.setattr(mw.MainWindow, "_call",
-                                lambda self, argv, on_output=None:
-                                calls.append((argv, on_output)))
-        else:
-            monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-        w = mw.MainWindow()
-        made.append(w)
-        return (w, calls) if record_calls else w
-
-    yield make
-    for w in made:
-        w.close()
 
 
 # --- keep the suite out of the user's real state ------------------------------
@@ -118,20 +88,17 @@ def gui_window(qt_app, monkeypatch):
 def _isolate_user_state(tmp_path, monkeypatch):
     """Point every on-disk state file at a tmp copy, for every test.
 
-    The suite writes to these without meaning to: any test that builds a MainWindow and
-    closes it runs `closeEvent`, which saves the window size and the Effects panel. That
-    was overwriting the developer's own `~/.cache/terrariabonker/window.json` -- with the
-    window at whatever size the test happened to make it and every effect switched off.
-
     A test that wants to drive one of these still monkeypatches it itself; this only makes
     the default harmless. `~/.config` is worse than untidy: it can be root-owned from sudo
     memory commands, so a stray write there fails in a way that has nothing to do with the
     test that caused it (which is how one build-ledger test came to fail with
     PermissionError).
+
+    The window's own state used to be here too, when the panel was PyQt6 and the suite
+    could build one. The Go window keeps its settings through the shell's store and its
+    tests sandbox the home directory themselves.
     """
     from terrariabonker import builds, profile
-    from terrariabonker.gui import uistate
 
-    monkeypatch.setattr(uistate, "_PATH", str(tmp_path / "window.json"))
     monkeypatch.setattr(profile, "_PATH", str(tmp_path / "profile.json"))
     monkeypatch.setattr(builds, "_PATH", str(tmp_path / "accepted-builds.json"))

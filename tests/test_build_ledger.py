@@ -10,7 +10,7 @@ import pytest
 
 from terrariabonker import patcher as P
 from terrariabonker import version as ver
-from terrariabonker.gui import client
+from terrariabonker import argv as client
 from terrariabonker.patcher import ANCHORS, CHEATS, Patcher
 
 BASE = 0x40000000

@@ -180,7 +180,7 @@ def test_the_fishing_command_exists_and_the_worker_may_run_it():
 
 def test_the_gui_asks_for_a_round_the_cli_can_parse():
     from terrariabonker.cli import build_parser
-    from terrariabonker.gui import client
+    from terrariabonker import argv as client
 
     argv = client.fishing_argv(50, kit=False)
     args = build_parser().parse_args(argv)          # the real argv, not a rebuilt one
@@ -189,94 +189,10 @@ def test_the_gui_asks_for_a_round_the_cli_can_parse():
     assert build_parser().parse_args(client.fishing_argv()).no_kit is False
 
 
-def test_the_checkbox_drives_the_bait_timer(qt_app, monkeypatch):
-    """The checkbox is the whole interface to the cheat. Wired to nothing it looks exactly
-    like a cheat whose bait quietly runs out."""
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    w = mw.MainWindow()
-    try:
-        assert not w._fishing_timer.isActive()
-        w.cb_fishing.setChecked(True)
-        assert w._fishing_timer.isActive()
-        assert not w._fishing_kit_done, "the kit must be asked for on the first round"
-        w.cb_fishing.setChecked(False)
-        assert not w._fishing_timer.isActive()
-    finally:
-        w.close()
 
 
-def test_the_first_round_asks_for_the_kit_and_later_ones_do_not(qt_app, monkeypatch):
-    """The kit is what makes the cheat usable to someone with no gear. A GUI that never
-    asks for it leaves them with a checkbox that does nothing until they go shopping."""
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    w = mw.MainWindow()
-    try:
-        sent = []
-
-        def fake_request(argv, cb):
-            sent.append(list(argv))
-            cb('{"kit": {"gave": {}}, "bait": {"topped": []}}')
-            return True
-
-        w.helper.available = True
-        monkeypatch.setattr(w.helper, "request", fake_request)
-
-        w._tick_fishing()
-        assert "--no-kit" not in sent[0], "the first round did not ask for the kit"
-        w._tick_fishing()
-        assert "--no-kit" in sent[1], "kept asking for the kit after it was handled"
-    finally:
-        w.close()
 
 
-def test_a_refilled_stack_is_logged_once_not_on_every_bait(qt_app, monkeypatch):
-    """Reported from the game: every bait consumed produced its own "29 -> 30" line, so
-    a few minutes of fishing buried everything else in the panel."""
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    w = mw.MainWindow()
-    try:
-        reply = ('{"bait": {"topped": [{"slot": 17, "power": 30, '
-                 '"was": 29, "now": 30}]}}')
-
-        def fake_request(argv, cb):
-            cb(reply)
-            return True
-
-        w.helper.available = True
-        monkeypatch.setattr(w.helper, "request", fake_request)
-
-        for _ in range(5):
-            w._tick_fishing()
-        lines = [ln for ln in w.log.toPlainText().splitlines() if "[fishing]" in ln]
-        assert len(lines) == 1, lines
-        assert "slot 17" in lines[0]
-
-        # a fresh session says it again: the player has been told nothing this time
-        w._set_fishing_watch(False)
-        w._set_fishing_watch(True)
-        w._tick_fishing()
-        assert len([ln for ln in w.log.toPlainText().splitlines()
-                    if "[fishing]" in ln]) == 2
-    finally:
-        w.close()
 
 
 # --- fishing power: raise it, and be able to put it back ----------------------
@@ -379,54 +295,5 @@ def test_the_original_is_recorded_before_the_rod_is_written(profile_tmp, monkeyp
         "the rod was raised before its original was safely recorded"
 
 
-def test_switching_the_cheat_off_asks_for_the_rod_back(qt_app, monkeypatch):
-    """Rod power is the only thing on this tab written into the save. Leaving it raised
-    would make one cheat in a group of held effects quietly permanent."""
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    w = mw.MainWindow()
-    try:
-        sent = []
-        w.helper.available = True
-        monkeypatch.setattr(w.helper, "request",
-                            lambda argv, cb: (sent.append(list(argv)), True)[1])
-
-        w.sp_power.setValue(200)
-        w.cb_fishing.setChecked(True)
-        assert ["--power", "200"] == sent[-1][-2:], sent
-        w.cb_fishing.setChecked(False)
-        assert "--restore" in sent[-1], sent
-    finally:
-        w.close()
 
 
-def test_a_rod_left_raised_by_a_killed_trainer_is_put_back_on_the_next_start(
-        qt_app, monkeypatch):
-    """The reason the record is on disk rather than in memory."""
-    from terrariabonker.gui import main_window as mw
-
-    monkeypatch.setattr(mw, "_passwordless_sudo", lambda: True)
-    monkeypatch.setattr(mw.MainWindow, "_call", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn", lambda self, *a, **k: None)
-    monkeypatch.setattr(mw.MainWindow, "_spawn_user", lambda self, *a, **k: None)
-
-    sent = []
-    real = mw.MainWindow.refresh_patches
-
-    def spy(self):
-        self.helper.available = True
-        monkeypatch.setattr(self.helper, "request",
-                            lambda argv, cb: (sent.append(list(argv)), True)[1])
-        return real(self)
-
-    monkeypatch.setattr(mw.MainWindow, "refresh_patches", spy)
-    w = mw.MainWindow()
-    try:
-        assert any("--restore" in a for a in sent), sent
-    finally:
-        w.close()
