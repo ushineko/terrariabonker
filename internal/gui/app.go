@@ -129,8 +129,7 @@ type effectState struct {
 	// find gear and do nothing, so the round trip is not worth making again.
 	kitDone   bool
 	whitelist []int
-	sellPick  int
-	sellList  *widget.List
+	sellList  *widgets.PickList
 }
 
 // sectionTitles is the navigation in order, which is the order the Qt window's

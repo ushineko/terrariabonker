@@ -12,6 +12,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/fynedesygn/fynetest"
@@ -270,11 +271,53 @@ func TestTheSellCardSaysHowMuchIsOnTheList(t *testing.T) {
 	require.Equal(t, "The sell list: 12 items", sellListLabel(12))
 }
 
-// Removing with nothing picked says so rather than doing nothing, which reads
-// as a button that is broken.
+// Removing with nothing ticked says so rather than doing nothing, which reads
+// as a button that is broken. And with no list open there is nothing to remove.
 func TestRemovingNothingSaysSo(t *testing.T) {
 	u := testUI(t)
 	u.fx.whitelist = []int{757}
-	u.fx.sellPick = -1
-	require.NotPanics(t, func() { u.removeFromSellList() })
+	require.NotPanics(t, func() { u.removeFromSellList() }, "no list has been opened")
+
+	u.sh.Window.Resize(fyne.NewSize(900, 700))
+	u.showSellList()
+	require.NotPanics(t, func() { u.removeFromSellList() }, "the list is open and nothing is ticked")
+	require.Equal(t, []int{757}, u.fx.whitelist, "and nothing was taken off")
+}
+
+/*
+Several items can be ticked and removed in one go.
+
+The list is edited in bursts -- whitelist a few things, change your mind about
+several -- and taking them off one at a time meant a reload between each, with
+the list jumping under the pointer.
+
+This drives the ticks the dialog actually drew, which is also the check that a
+PickList's rows reach the screen at all: the widget's own tests build rows
+directly, because a list draws none until something lays it out.
+*/
+func TestSeveralSellListItemsCanBeRemovedAtOnce(t *testing.T) {
+	u := testUI(t)
+	u.startWatches()
+	t.Cleanup(u.shutdown)
+	u.iv.names = map[int]string{757: "Terra Blade", 9: "Wood", 29: "Life Crystal"}
+	u.fx.whitelist = []int{757, 9, 29}
+
+	u.sh.Window.Resize(fyne.NewSize(900, 700))
+	u.showSellList()
+	overlay := u.sh.Window.Canvas().Overlays().Top()
+	require.NotNil(t, overlay)
+
+	boxes := fynetest.All[*widget.Check](overlay)
+	require.Len(t, boxes, 3, "a tick per row, drawn by the dialog")
+	require.Contains(t, fynetest.Texts(overlay), "Remove", "and nothing to remove yet")
+
+	boxes[0].SetChecked(true)
+	boxes[2].SetChecked(true)
+	require.Equal(t, []int{0, 2}, u.fx.sellList.Picked())
+	require.Contains(t, fynetest.Texts(overlay), "Remove 2 items",
+		"the button says what it is about to do")
+
+	// Removing sends one command per item and reads the list back once.
+	u.removeFromSellList()
+	require.Empty(t, u.fx.sellList.Picked(), "the picks are row numbers, and the rows changed")
 }

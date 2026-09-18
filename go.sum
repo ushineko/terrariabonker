@@ -80,6 +80,14 @@ github.com/ushineko/fynedesygn v0.1.20 h1:Epm8U/NerVOY72CFQkDdRNN8cLX01Gz2159IlJ
 github.com/ushineko/fynedesygn v0.1.20/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
 github.com/ushineko/fynedesygn v0.1.21 h1:Z5Hf9MBXHPbzOVUB/lKyMOrL2GfOmcjZ8be+AcVgO6k=
 github.com/ushineko/fynedesygn v0.1.21/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
+github.com/ushineko/fynedesygn v0.1.22 h1:dEzjwh2p7JFqEv0Iw835yUMmHXLVCRgNKIYDjtx8ea8=
+github.com/ushineko/fynedesygn v0.1.22/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
+github.com/ushineko/fynedesygn v0.1.23 h1:5SngURIu8lp1q163Bjvb/8nysLVu2Iqbkz0jTLB2zDs=
+github.com/ushineko/fynedesygn v0.1.23/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
+github.com/ushineko/fynedesygn v0.1.24 h1:M11IQ7XtVng7MDEe4I3/ejlJpT+8TpSndjW2dEkCiuo=
+github.com/ushineko/fynedesygn v0.1.24/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
+github.com/ushineko/fynedesygn v0.1.25 h1:9hJBbqMyUW3k4dw/DwGGRBEcdXkFhXJ6TsDxv8KK3wE=
+github.com/ushineko/fynedesygn v0.1.25/go.mod h1:B+VDYk2VtBT+DkKto27aEa8pt2qhCUHpoH9GWG1aACY=
 github.com/yuin/goldmark v1.8.2 h1:kEGpgqJXdgbkhcOgBxkC0X0PmoPG1ZyoZ117rDVp4zE=
 github.com/yuin/goldmark v1.8.2/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=

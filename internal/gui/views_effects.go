@@ -250,18 +250,18 @@ enough to right-click a second time, which is why taking one off has to be
 possible here.
 */
 func (u *ui) showSellList() {
-	list := widget.NewList(
+	list := widgets.NewPickList(
 		func() int { return len(u.fx.whitelist) },
 		func() fyne.CanvasObject {
 			return container.NewHBox(u.itemIcon(0, rowIconSize), widget.NewLabel(""))
 		},
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			row, ok := o.(*fyne.Container)
-			if !ok || len(row.Objects) != 2 || i < 0 || i >= len(u.fx.whitelist) {
+		func(i int, row fyne.CanvasObject) {
+			box, ok := row.(*fyne.Container)
+			if !ok || len(box.Objects) != 2 || i < 0 || i >= len(u.fx.whitelist) {
 				return
 			}
-			icon, _ := row.Objects[0].(*canvas.Image)
-			label, _ := row.Objects[1].(*widget.Label)
+			icon, _ := box.Objects[0].(*canvas.Image)
+			label, _ := box.Objects[1].(*widget.Label)
 			if icon == nil || label == nil {
 				return
 			}
@@ -271,25 +271,63 @@ func (u *ui) showSellList() {
 			label.SetText(fmt.Sprintf("%s (#%d)", u.itemName(itemType), itemType))
 		},
 	)
-	list.OnSelected = func(i widget.ListItemID) { u.fx.sellPick = i }
 	u.fx.sellList = list
 
-	remove := widget.NewButton("Remove selected", func() { u.removeFromSellList() })
-	body := container.NewBorder(nil, remove, nil, nil, list)
+	remove := widget.NewButton(removeLabel(0), func() { u.removeFromSellList() })
+	remove.Disable()
+	list.OnPicked = func(n int) {
+		remove.SetText(removeLabel(n))
+		if n == 0 {
+			remove.Disable()
+			return
+		}
+		remove.Enable()
+	}
 
+	body := container.NewBorder(nil, remove, nil, nil, list.Widget())
 	dialogs.ShowDetail(u.sh.Window, "The sell list", body, sellDialogW, sellDialogH)
 }
 
-// removeFromSellList takes the picked item off, and says so when nothing is
-// picked rather than doing nothing.
+// removeLabel says how many items the button is about to take off, so pressing
+// it is not a guess.
+func removeLabel(n int) string {
+	switch n {
+	case 0:
+		return "Remove"
+	case 1:
+		return "Remove 1 item"
+	}
+	return fmt.Sprintf("Remove %d items", n)
+}
+
+/*
+removeFromSellList takes every ticked item off.
+
+One command per item, because that is what the CLI offers, but one decision and
+one reload: the list is read back once at the end rather than after each, so
+removing six things is not six round trips with the list jumping under the
+pointer between them.
+
+The picks are row numbers, so they are cleared here -- the list about to be read
+back is a different one.
+*/
 func (u *ui) removeFromSellList() {
-	i := u.fx.sellPick
-	if i < 0 || i >= len(u.fx.whitelist) {
-		u.note("[sell] pick a row to remove")
+	if u.fx.sellList == nil {
 		return
 	}
-	itemType := u.fx.whitelist[i]
-	u.once("Removing from the sell list", client.SellListArgv(nil, &itemType))
+	picked := u.fx.sellList.Picked()
+	if len(picked) == 0 {
+		u.note("[sell] tick a row to remove")
+		return
+	}
+	for _, i := range picked {
+		if i < 0 || i >= len(u.fx.whitelist) {
+			continue
+		}
+		itemType := u.fx.whitelist[i]
+		u.once("Removing from the sell list", client.SellListArgv(nil, &itemType))
+	}
+	u.fx.sellList.ClearPicks()
 	u.loadSellList()
 }
 
