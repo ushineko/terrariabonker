@@ -1,6 +1,10 @@
 package patch
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/ushineko/terrariabonker/internal/locate"
+)
 
 /*
 Injection is a cheat that does not fit where it goes.
@@ -63,11 +67,8 @@ type Injection struct {
 		the like -- rather than from a value. Such a stub reproduces its own
 		displaced bytes, so RerunOverwrite does not apply to it.
 
-		The builders themselves arrive with the enable path; until something can
-		install a stub, an entry here with neither body builder cannot mislead
-		anybody, and leaving the entry out would hide the cheat from the catalog.
 	*/
-	BuildBody func(*Builder) ([]byte, error)
+	BuildBody func(*Builder, Injection) ([]byte, error)
 
 	/*
 		WritesCave says the stub's own code writes somewhere inside its cave.
@@ -108,11 +109,24 @@ type Edit struct {
 	Patched []byte
 }
 
-// Builder is what a stub built from live state is given: somewhere to resolve
-// anchors and something to read. It is filled in with the enable path.
+/*
+Builder is what a stub built from live state is given: somewhere to resolve
+anchors, something to read, and the arena its data lives in.
+
+The memory is the locator's kind because two of these stubs need the statics that
+lead to the live player, which is the locator's business and not this package's.
+*/
 type Builder struct {
 	Scanner *Scanner
-	Mem     ArenaMem
+	Mem     BuilderMem
+	Arena   uint32
+}
+
+// BuilderMem is memory a stub can be built against: readable, writable, and
+// listable the several ways the pieces of this need.
+type BuilderMem interface {
+	ArenaMem
+	locate.ExecMem
 }
 
 /*
@@ -262,14 +276,20 @@ var Injections = map[string]Injection{
 	"inventory_accs": {
 		Name: "inventory_accs", Label: "Accessories work from inventory",
 		Anchor: "inventory_scan", InjectOff: 22,
-		Overwrite:      []byte{0x8B, 0x00, 0x8B, 0x40, 0x6C},
+		Overwrite: []byte{0x8B, 0x00, 0x8B, 0x40, 0x6C},
+		BuildBody: func(b *Builder, _ Injection) ([]byte, error) {
+			return InventoryAccsBody(b)
+		},
 		RerunOverwrite: false, Arena: true,
 		Note: "Accessories work from your inventory, without being equipped.",
 	},
 	"ore_extract": {
 		Name: "ore_extract", Label: "Ore extractor (vein mining)",
 		Anchor: "grabitems_call", InjectOff: 21,
-		Overwrite:      []byte{0x89, 0x04, 0x24, 0x8B, 0xC0},
+		Overwrite: []byte{0x89, 0x04, 0x24, 0x8B, 0xC0},
+		BuildBody: func(b *Builder, inj Injection) ([]byte, error) {
+			return OreExtractBody(b, inj.Overwrite)
+		},
 		RerunOverwrite: false, Arena: true,
 		Note: "Mines the rest of an ore vein while you mine it. Whitelisted ores only.",
 	},
@@ -278,6 +298,9 @@ var Injections = map[string]Injection{
 		Anchor: "borders_movement", InjectOff: 5,
 		Overwrite: []byte{0x8B, 0x45, 0x08, 0xC7, 0x80, 0xFC, 0x03, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00},
+		BuildBody: func(b *Builder, inj Injection) ([]byte, error) {
+			return AutoUseBody(b.Arena, inj.Overwrite), nil
+		},
 		RerunOverwrite: false, WritesCave: true, Arena: true,
 		Note: "Lets a cheat press your use button. Ships off; nothing presses it on its own.",
 	},

@@ -338,8 +338,26 @@ build the differential habit this port depends on.
    only reach zero for a percentage above 100, which the declared range does not allow but
    the arithmetic does.
 
-   Still to come: the three stubs built from live state, the managed-call stub, and
-   enable/disable -- everything that actually writes to the game.
+   **Every stub body is done**, including the four that cannot be constants: they bake
+   resolved method entries, the statics that lead to the live player, and this program's
+   own arena. Each is an address written into an instruction, and an address written wrong
+   is a call into the middle of something. All four assemble byte-for-byte identically
+   over a planted game that carries the anchors and call sites they resolve through.
+
+   One deliberate divergence. The Python's auto-use builder *writes* two words of the
+   arena while assembling the body, so building a stub modifies the running game. In Go
+   that initialisation belongs to the enable path, which means the bytes can be built and
+   compared without touching anything -- and that is exactly what these tests do.
+
+   Nine mutations checked against the bodies, including the jump distances, the batch
+   clamp, the tile-to-pixel conversion and the pick power that once left every hardmode ore
+   from orichalcum up silently unmineable.
+
+   **Not yet checked live**: the game exited before the stub bytes could be compared
+   against a running process. That comparison is read-only and is the next thing to do
+   when it is up.
+
+   Still to come: enable and disable -- everything that actually writes to the game.
 8. **`xnb` and `sprites`.** Decoding the game's containers and building the PNG cache.
    Pillow leaves with them; Go's `image/png` writes the cache. Differential test: decode
    the same `Item_<id>.xnb` in both and compare the PNG bytes, or the pixels.

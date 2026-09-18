@@ -132,3 +132,32 @@ func pyI32(v []int32) string {
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
 }
+
+// pyCalls is a list of (anchor, offset) pairs as a Python literal.
+func pyCalls(cases []struct {
+	anchor string
+	off    int
+}) string {
+	parts := make([]string, len(cases))
+	for i, c := range cases {
+		parts[i] = fmt.Sprintf("(%q, %d)", c.anchor, c.off)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// u32 is an address as the game stores it.
+func u32(v uint32) []byte {
+	return []byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)}
+}
+
+/*
+localPlayerTail is the JIT'd shape of Main.get_LocalPlayer, which two of the
+stubs resolve the live player through.
+
+The locate package pins these bytes against the Python; here they are only
+planting material, so that the stubs have something to find.
+*/
+var localPlayerTail = []byte{
+	0x39, 0x48, 0x0C, 0x0F, 0x86, 0x07, 0x00, 0x00, 0x00,
+	0x8D, 0x44, 0x88, 0x10, 0x8B, 0x00, 0xC3,
+}
