@@ -1,6 +1,8 @@
 # Spec 050: The GUI in Go, on fynedesygn
 
-**Status**: INCOMPLETE
+**Status**: INCOMPLETE — phases 1-5 are done and installed. Phase 6 (retiring the Qt
+window) waits on AC10: the maintainer's live session. Until then both panels are
+installed and they exclude each other, so the Qt one is still there to fall back to.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -121,24 +123,25 @@ is in `SERVE_OPS`. Losing this check is not an acceptable outcome of the port.
 
 ## Acceptance criteria
 
-- [ ] AC1 `cmd/terrariabonker-gui` builds with `CGO_ENABLED=1` against fynedesygn
-  v0.1.5, and `go.mod` names no `replace`.
-- [ ] AC2 The window runs unprivileged. No Go file reads or writes another process's
+- [x] AC1 `cmd/terrariabonker-gui` builds with `CGO_ENABLED=1` against fynedesygn
+  v0.1.9 — the port drove five library releases, four of them fixes it found — and
+  `go.mod` names no `replace`.
+- [x] AC2 The window runs unprivileged. No Go file reads or writes another process's
   memory, opens `/proc/*/mem`, or names a game offset; every privileged action is a
   `sudo terrariabonker …` subprocess (AGENTS.md architecture rule).
-- [ ] AC3 The seven sections are present in the Qt window's order — Player, Effects,
+- [x] AC3 The seven sections are present in the Qt window's order — Player, Effects,
   Projectiles, Patches, Inventory, Recipes, Compendium — and each renders headlessly in
   every colour scheme.
-- [ ] AC4 The `serve` transport works: one worker under sudo, requests keyed by id,
+- [x] AC4 The `serve` transport works: one worker under sudo, requests keyed by id,
   replies matched to their request, EOF on exit. When the worker will not start or
   refuses an op, the same call runs as a one-shot CLI and the window says so.
-- [ ] AC5 Every argv the Go client builds is accepted by the real CLI parser, and every
+- [x] AC5 Every argv the Go client builds is accepted by the real CLI parser, and every
   op it sends to the worker is in `SERVE_OPS` — asserted by a test, not by reading.
-- [ ] AC6 Inventory syncs at 1 Hz off the warm worker without blocking the UI thread,
+- [x] AC6 Inventory syncs at 1 Hz off the warm worker without blocking the UI thread,
   and the icon grid draws from the existing PNG cache with no Python at runtime.
-- [ ] AC7 A root-owned `~/.config/terrariabonker` does not break UI state or the
+- [x] AC7 A root-owned `~/.config/terrariabonker` does not break UI state or the
   single-instance guard (the CLI creates that directory under sudo).
-- [ ] AC8 `go test ./...`, `go vet ./...` and the pinned golangci-lint are clean; the
+- [x] AC8 `go test ./...`, `go vet ./...` and the pinned golangci-lint are clean; the
   Python suite still passes unchanged.
 - [ ] AC9 `terrariabonker/gui/` is deleted, PyQt6 is out of `requirements.txt`, and
   `install.sh` installs and launches the Go window (phase 6).
@@ -159,3 +162,20 @@ is in `SERVE_OPS`. Losing this check is not an acceptable outcome of the port.
   no offsets move — but a wrong argv is a wrong write. AC5 exists for that.
 - **Rollback**: until phase 6 the Qt window is untouched and still installed; after it,
   `git revert` of the phase-6 commit brings it back.
+
+## What the port found
+
+Three behaviours the phase list did not name, each found by reading the Qt window rather
+than `client.py`, because `client.py` is the boundary for operations and not for data:
+
+- **The build gate** (spec 036). The patches are byte patterns derived against one exact
+  build, so a game update has three outcomes and the window has to know which before it
+  writes anything. It needed a two-second status poll, which the Go window did not have.
+- **Auto-restore** (spec 049). A patch lives in the running process, so a restart or a
+  world load clears every one of them. It hangs off the same poll.
+- **The single-instance lock**. Two panels start two privileged workers and two
+  auto-restore loops on one game, and they fight.
+
+And three tables the Qt window imported in-process, which a Go window cannot: the patch
+catalog, the modifier list and the recipe book. Each became a read-only CLI dump rather
+than a second spelling of a table this repository already holds once.
