@@ -25,28 +25,33 @@ Grouped by the catalog's own sections rather than listed flat. The flat list
 needed scrolling at twelve patches and the catalog only grows.
 */
 func (u *ui) buildPatches() fyne.CanvasObject {
-	body := container.NewVBox(widgets.Heading("Patches", "Code written into the running game."))
+	head := widgets.Heading("Patches", "Code written into the running game.")
 
-	switch {
-	case len(u.px.catalog) == 0:
-		body.Add(widgets.Card("Catalog",
-			widgets.Wrapped("The patch catalog has not been read yet."),
-			widgets.DimWrapped("It comes from the CLI. If this stays empty, "+cliName+
-				" is not on PATH or it failed to run."),
-		))
-	default:
-		for _, section := range u.px.sections {
-			body.Add(u.patchCard(section))
-		}
+	if len(u.px.catalog) == 0 {
+		return container.NewBorder(nil, widgets.FixedHeight(u.logWidget(), logHeight), nil, nil,
+			container.NewVScroll(container.NewVBox(head, widgets.Card("Catalog",
+				widgets.Wrapped("The patch catalog has not been read yet."),
+				widgets.DimWrapped("It comes from the CLI. If this stays empty, "+cliName+
+					" is not on PATH or it failed to run."),
+			))))
 	}
 
-	body.Add(u.restoreCard())
-	return container.NewBorder(nil, widgets.FixedHeight(u.logWidget(), logHeight), nil, nil,
-		container.NewVScroll(body))
+	// A tab per section, as the Qt panel has. One flat list needed scrolling at
+	// twelve patches and the catalog only grows; tabs keep the section a fixed
+	// height however many are added.
+	tabs := container.NewAppTabs()
+	for _, section := range u.px.sections {
+		tabs.Append(container.NewTabItem(section, u.patchGrid(section)))
+	}
+
+	return container.NewBorder(
+		head,
+		container.NewVBox(u.restoreCard(), widgets.FixedHeight(u.logWidget(), logHeight)),
+		nil, nil, tabs)
 }
 
 /*
-patchCard is one of the catalog's sections, laid out as a grid.
+patchGrid is one of the catalog's sections, laid out as a grid.
 
 A form layout rather than a row per patch. It is two columns and it sizes the
 first to the widest thing in it, so every value control in the section starts at
@@ -54,21 +59,20 @@ the same x. Rows built independently cannot do that: each one is only as wide as
 its own contents, and the boxes step in and out down the section according to how
 long each label and unit happens to be.
 
-The note spans both columns by taking a row of its own with an empty first cell.
+What each patch does is a hover tip rather than a line under it. Printed under
+every row it tripled the height of the section and buried the controls.
 */
-func (u *ui) patchCard(section string) fyne.CanvasObject {
+func (u *ui) patchGrid(section string) fyne.CanvasObject {
 	grid := container.New(layout.NewFormLayout())
 	for _, p := range u.px.catalog {
 		if p.Section != section {
 			continue
 		}
 		label, value := u.patchRow(p)
-		grid.Add(label)
+		grid.Add(widgets.WithTip(label, p.Note))
 		grid.Add(value)
-		grid.Add(widget.NewLabel("")) // the note's empty first cell
-		grid.Add(widgets.DimWrapped(p.Note))
 	}
-	return widgets.Card(section, grid)
+	return container.NewVScroll(container.NewPadded(grid))
 }
 
 /*
@@ -194,10 +198,12 @@ func (u *ui) restoreCard() fyne.CanvasObject {
 		verdict = widgets.StatusText("not read", fd.StatusInfo)
 	}
 
-	return widgets.Card("Saved patches",
-		container.NewHBox(run, widgets.Dim("build"), widget.NewLabel(build), verdict),
-		widgets.DimWrapped("A game restart clears every patch. Restore puts back what the "+
+	// One row. This sits under the tabs and every pixel it takes is one the
+	// patch list does not get.
+	return container.NewHBox(
+		widgets.WithTip(run, "A game restart clears every patch. This puts back what the "+
 			"profile says should be on."),
+		widgets.Dim("build"), widget.NewLabel(build), verdict,
 	)
 }
 

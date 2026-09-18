@@ -71,9 +71,11 @@ func (u *ui) freezeCard() fyne.CanvasObject {
 	god.OnChanged, mana.OnChanged = apply, apply
 
 	return widgets.Card("Freezes",
-		container.NewHBox(god, mana),
-		widgets.DimWrapped("Held by a loop of its own. Both switches drive it, so changing "+
-			"either restarts it."),
+		container.NewHBox(
+			widgets.WithTip(god, "Pins HP to maximum. Held by a loop of its own, so it "+
+				"stops when the trainer closes."),
+			widgets.WithTip(mana, "Pins mana to maximum."),
+		),
 	)
 }
 
@@ -125,19 +127,26 @@ func (u *ui) fishingCard() fyne.CanvasObject {
 		u.catch.set(on)
 	}
 
+	// One row, as the Qt panel has it. What each control does is on hover.
 	return widgets.Card("Fishing",
-		container.NewVBox(
-			kit,
-			container.NewHBox(
-				widgets.Dim("keep bait at"), widgets.FixedWidth(bait, 90),
-				widgets.Dim("rod power"), widgets.FixedWidth(power, 90),
-			),
-			container.NewHBox(catch, recast),
+		container.NewHBox(
+			widgets.WithTip(kit, "Hands you a rod and bait if you have none, and tops any bait "+
+				"stack back up as you fish. Your own gear is left alone. Water under 300 tiles "+
+				"cuts fishing power, so fish in a lake."),
+			widgets.WithTip(widgets.Dim("keep bait at"), "Any bait stack below this is topped "+
+				"back up to it."),
+			widgets.FixedWidth(bait, 90),
+			widgets.WithTip(widgets.Dim("rod power"), "Every rod you carry is raised to this "+
+				"while the cheat is on, and put back when you switch it off. High power also "+
+				"makes fish bite quickly."),
+			widgets.FixedWidth(power, 90),
 		),
-		widgets.DimWrapped("Bait is topped back up as you fish. Your own gear is left alone. "+
-			"Water under 300 tiles cuts fishing power, so fish in a lake."),
-		widgets.DimWrapped("Reeling in needs Auto-use on the Patches section, which is what "+
-			"presses the button. Casting waits until you have cast once yourself."),
+		container.NewHBox(
+			widgets.WithTip(catch, "Takes every fish that bites, one press per bite. You still "+
+				"cast. Needs Auto-use on the Patches section, which is what presses the button."),
+			widgets.WithTip(recast, "Casts again after each catch. It waits until you have cast "+
+				"once yourself, and stops when you untick Reel in for me."),
+		),
 	)
 }
 
@@ -157,9 +166,14 @@ func (u *ui) buffCard() fyne.CanvasObject {
 	crate.SetChecked(u.fx.buffCrate)
 
 	return widgets.Card("Fishing potion effects",
-		container.NewHBox(power, sonar, crate),
-		widgets.DimWrapped("Fishing power adds 15. Sonar names what is biting. Crates come up "+
-			"more often."),
+		container.NewHBox(
+			widgets.WithTip(power, "A Fishing Potion's effect without the potion: +15 fishing "+
+				"power while it is ticked."),
+			widgets.WithTip(sonar, "A Sonar Potion's effect without the potion: what is biting "+
+				"is named before you reel it in."),
+			widgets.WithTip(crate, "A Crate Potion's effect without the potion: crates come up "+
+				"more often."),
+		),
 	)
 }
 
@@ -176,9 +190,14 @@ func (u *ui) potionCard() fyne.CanvasObject {
 	}
 
 	return widgets.Card("Passive potions",
-		container.NewHBox(on, widgets.Dim("min stack"), widgets.FixedWidth(stack, 90)),
-		widgets.DimWrapped("Alt-click a potion to favorite it. The potion is not used and the "+
-			"stack does not shrink. Only favorited potions count."),
+		container.NewHBox(
+			widgets.WithTip(on, "Alt-click a potion to favorite it and its effect stays up "+
+				"while it sits in your bag. The potion is not used and the stack does not "+
+				"shrink. Only favorited potions count."),
+			widgets.WithTip(widgets.Dim("min stack"), "Only potions with at least this many in "+
+				"the stack take effect."),
+			widgets.FixedWidth(stack, 90),
+		),
 	)
 }
 
@@ -218,9 +237,11 @@ func (u *ui) sellCard() fyne.CanvasObject {
 	list.OnSelected = func(i widget.ListItemID) { u.fx.sellPick = i }
 
 	return widgets.Card("Auto-sell",
-		on,
-		widgets.DimWrapped("Coins go to your piggy bank when you can reach one. Favorited "+
-			"stacks are never sold. Selling is permanent once the world saves."),
+		widgets.WithTip(on, "Anything on the list below is sold for coins as it arrives. The "+
+			"coins go to your piggy bank if you can reach one. Favorited stacks are never "+
+			"sold. Selling is permanent once your world saves."),
+		widgets.WithTip(widgets.Dim("on the sell list"),
+			"Add an item by right-clicking it in the Inventory section."),
 		widgets.FixedHeight(list, sellListHeight),
 		remove,
 	)

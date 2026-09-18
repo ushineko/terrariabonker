@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"fyne.io/fyne/v2/container"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/fynedesygn/fynetest"
@@ -111,9 +112,17 @@ func TestPatchesSaysSoBeforeTheCatalogIsRead(t *testing.T) {
 	require.Contains(t, texts, "The patch catalog has not been read yet.")
 }
 
-// With a catalog it draws one card per section, in the catalog's order: related
-// patches are grouped by it, and sorting would scatter them.
-func TestPatchesGroupsBySectionInCatalogOrder(t *testing.T) {
+/*
+With a catalog it draws a tab per section, in the catalog's order.
+
+Tabs rather than one list: the Qt panel moved away from a flat list because it
+needed scrolling at twelve patches and the catalog only grows. The order is the
+catalog's, which groups related patches; sorting would scatter them.
+
+What each patch does is a hover tip, so it is deliberately not in the rendered
+text -- printed under every row it tripled the height of the section.
+*/
+func TestPatchesDrawsATabPerSectionInCatalogOrder(t *testing.T) {
 	u := testUI(t)
 	u.px.catalog = []client.Patch{
 		{Name: "mining", Label: "Global mining speed", Note: "faster", Section: "Build",
@@ -125,11 +134,21 @@ func TestPatchesGroupsBySectionInCatalogOrder(t *testing.T) {
 	u.px.sections = []string{"Build", "Misc"}
 	u.px.on = map[string]bool{"pylons": true}
 
-	texts := fynetest.Texts(u.buildPatches())
-	for _, want := range []string{"Build", "Misc", "Global mining speed", "Placement reach",
-		"Multiple pylons", "one per biome", "extra tiles"} {
+	built := u.buildPatches()
+	tabs := fynetest.Find[*container.AppTabs](built)
+	require.NotNil(t, tabs, "the sections are tabs")
+	var titles []string
+	for _, item := range tabs.Items {
+		titles = append(titles, item.Text)
+	}
+	require.Equal(t, []string{"Build", "Misc"}, titles)
+
+	texts := fynetest.Texts(built)
+	for _, want := range []string{"Global mining speed", "Placement reach", "Multiple pylons",
+		"extra tiles"} {
 		require.Containsf(t, texts, want, "%q is missing from the section", want)
 	}
+	require.NotContains(t, texts, "one per biome", "the note is a hover tip, not a printed line")
 }
 
 // A value is shown as the game reports it, and as its own default when the game
