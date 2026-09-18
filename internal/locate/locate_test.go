@@ -219,3 +219,75 @@ func quote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+/*
+The guess at which copy is live is the Python's guess.
+
+It is only reached when the resolver cannot answer, and it is wrong often enough
+that the comments say so -- but "wrong the same way in both languages" is what
+this port owes, because a caller that changed its mind about which copy to write
+to would start editing a corpse.
+
+Nothing here moves while it is sampled: a planted buffer is as frozen as a
+paused game, which is the case the fallbacks exist for and the one that actually
+happens.
+*/
+func TestPickingTheLiveCopyMatchesThePython(t *testing.T) {
+	cases := []struct {
+		name   string
+		python string
+		plant  func(mem *memtest.FakeMem)
+	}{
+		{"one copy", `
+mem.plant_player(0x10000800, [400, 400, 400, 200, 200, 200], 0x10000040)`,
+			func(mem *memtest.FakeMem) {
+				mem.PlantPlayer(0x10000800, []int32{400, 400, 400, 200, 200, 200}, 0x10000040)
+			}},
+		// Two frozen copies, one of them hurt: the only one below its cap wins.
+		{"one below its cap", `
+mem.plant_player(0x10000800, [400, 400, 400, 200, 200, 200], 0x10000040)
+mem.plant_player(0x10001800, [400, 400, 137, 200, 200, 200], 0x10000040)`,
+			func(mem *memtest.FakeMem) {
+				mem.PlantPlayer(0x10000800, []int32{400, 400, 400, 200, 200, 200}, 0x10000040)
+				mem.PlantPlayer(0x10001800, []int32{400, 400, 137, 200, 200, 200}, 0x10000040)
+			}},
+		// Both hurt: there is nothing to tell them apart, so neither is picked.
+		{"both below", `
+mem.plant_player(0x10000800, [400, 400, 300, 200, 200, 200], 0x10000040)
+mem.plant_player(0x10001800, [400, 400, 137, 200, 200, 200], 0x10000040)`,
+			func(mem *memtest.FakeMem) {
+				mem.PlantPlayer(0x10000800, []int32{400, 400, 300, 200, 200, 200}, 0x10000040)
+				mem.PlantPlayer(0x10001800, []int32{400, 400, 137, 200, 200, 200}, 0x10000040)
+			}},
+		// Both at full life, which is the paused idle player: give up.
+		{"neither below", `
+mem.plant_player(0x10000800, [400, 400, 400, 200, 200, 200], 0x10000040)
+mem.plant_player(0x10001800, [400, 400, 400, 200, 200, 200], 0x10000040)`,
+			func(mem *memtest.FakeMem) {
+				mem.PlantPlayer(0x10000800, []int32{400, 400, 400, 200, 200, 200}, 0x10000040)
+				mem.PlantPlayer(0x10001800, []int32{400, 400, 400, 200, 200, 200}, 0x10000040)
+			}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var want any
+			askPython(t, preamble+`
+mem.plant_mono_string(0x10000040, "Nakama")`+c.python+`
+got = locate.pick_live(mem, locate.find_players(mem), samples=2, dt=0)
+print(json.dumps(None if got is None else got.life_addr))`, &want)
+
+			mem := memtest.New(0x10000000, 0x4000)
+			mem.PlantMonoString(0x10000040, "Nakama")
+			c.plant(mem)
+
+			got, ok := locate.PickLive(mem, locate.FindPlayers(mem), 2, 0)
+			if want == nil {
+				require.False(t, ok, "a copy was picked here and not there")
+				return
+			}
+			require.True(t, ok, "a copy was picked there and not here")
+			require.Equal(t, uint32(want.(float64)), got.LifeAddr, "a different copy")
+		})
+	}
+}

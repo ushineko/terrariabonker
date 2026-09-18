@@ -20,6 +20,7 @@ package locate
 
 import (
 	"encoding/binary"
+	"time"
 	"unicode/utf16"
 
 	"github.com/ushineko/terrariabonker/internal/proc"
@@ -225,4 +226,75 @@ func blockAt(mem Mem, lifeAddr uint32, fields []int32) (Block, bool) {
 		StatLife: fields[2], StatMana: fields[3], StatManaMax: fields[4],
 		StatManaMax2: fields[5], Name: name,
 	}, true
+}
+
+/*
+PickLive is a best-effort guess at which copy is the live player.
+
+The fallback for when ResolveLocalPlayer cannot answer -- the pattern is gone
+after a game update, or Main.player[myPlayer] is null part-way through a load.
+It is a guess, and the comments below say why each step of it is unreliable;
+prefer the resolver.
+
+The live player has fields that tick, regeneration and buff and breath timers,
+while a snapshot is frozen. So statLife is sampled over a short window and the
+copy that moves wins. If nothing moves -- the game is paused, which it usually
+is, or the player is idle at full life -- it falls back to the single copy whose
+life is below its cap, and then gives up rather than picking one.
+
+samples and gap are how the window is spent. A caller with no time to spare, and
+a test, passes a gap of zero.
+*/
+func PickLive(mem Mem, players []Block, samples int, gap time.Duration) (Block, bool) {
+	switch len(players) {
+	case 0:
+		return Block{}, false
+	case 1:
+		return players[0], true
+	}
+	moved := make([]bool, len(players))
+	first := make([]int32, len(players))
+	for round := range samples {
+		for i, p := range players {
+			v, _ := readI32(mem, p.LifeAddr)
+			if round == 0 {
+				first[i] = v
+			} else if v != first[i] {
+				moved[i] = true
+			}
+		}
+		time.Sleep(gap)
+	}
+	if only, ok := theOne(players, moved); ok {
+		return only, true
+	}
+	below := make([]bool, len(players))
+	for i, p := range players {
+		below[i] = p.StatLife < p.StatLifeMax
+	}
+	return theOne(players, below)
+}
+
+// theOne is the single player the flags mark, and reports false when that is
+// none of them or more than one of them. Two candidates is not a tie to break:
+// writing to the wrong copy is silent.
+func theOne(players []Block, mark []bool) (Block, bool) {
+	var found Block
+	seen := false
+	for i, p := range players {
+		if !mark[i] {
+			continue
+		}
+		if seen {
+			return Block{}, false
+		}
+		found, seen = p, true
+	}
+	return found, seen
+}
+
+// readI32 is one signed word, and whether it was readable.
+func readI32(mem Mem, addr uint32) (int32, bool) {
+	v, ok := readU32(mem, addr)
+	return int32(v), ok //nolint:gosec // a word read as the signed field it is
 }

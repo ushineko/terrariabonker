@@ -219,6 +219,33 @@ build the differential habit this port depends on.
    -- so a modifier applied to an empty slot took the writing path and wrote each field at
    its own offset counted from address zero. Fixed there as well as here.
 5. **`service`.** The common layer, on top of the above. Subcommand by subcommand.
+
+   **The core is done**: locating, believing a copy, reading it, writing to all of them.
+   That is the part where being wrong is silent. The game keeps the live player and one or
+   two load-time snapshots; writes go to all of them so the live one is always hit, and
+   reads come from the live one alone, because a snapshot holds whatever the slot held
+   when it was taken and reporting that is reporting fiction. `locate.PickLive` came over
+   with it, as the fallback for when the resolver cannot answer.
+
+   The differential fixture is a game with **three** player copies, one live and a
+   snapshot either side of it, and their inventories all differ. Both of those placements
+   are load-bearing. The live copy in the middle means a reader that takes the first copy
+   is caught and a writer that reports whichever copy it finished with is caught; with the
+   live copy at either end, both of those pass by accident. Neither fallback can reach the
+   live copy either -- every copy is below its life cap, so the activity guess refuses, and
+   the snapshots are no poorer, so the inventory guess picks one of them -- so the tests
+   fail if ground truth stops being consulted.
+
+   That mattered. The first fixture had an extra pointer hop in its planted
+   `get_LocalPlayer`, so the resolver never resolved anything and the activity fallback
+   was quietly returning the right answer; every test passed. The mutation check found it.
+
+   Eight mutations checked, four of which needed the tests strengthening rather than
+   confirming them: the resolver being consulted at all, the cache being re-validated, a
+   missing anchor forcing a rescan, and a copy that becomes somebody else being dropped.
+
+   Still to come here: the build gate, the world and tile operations, fishing, auto-catch,
+   selling and the rest, which all sit on modules that arrive in the later steps.
 6. **`cli`.** argparse to cobra, which the maintainer's other Go tools already use.
    `--json` output is diffed against the Python CLI's for every subcommand, and `serve`
    is reimplemented last so the GUI's wire is the final thing to change hands.
