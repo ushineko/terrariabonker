@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"errors"
 	"os"
 	"regexp"
 	"testing"
@@ -182,4 +183,35 @@ func TestLogLinesDropTheTrailingBlank(t *testing.T) {
 // segments wraps the status bar's objects so the text walker can read them.
 func segments(objs []fyne.CanvasObject) fyne.CanvasObject {
 	return container.NewHBox(objs...)
+}
+
+/*
+A failed operation is an answer, not a transport problem.
+
+The worker says both with ok:false, and the difference decides whether the
+window pays 2.7 s to be told the same thing a second time. Getting this wrong is
+invisible -- everything still works, just slowly -- which is why it is pinned.
+*/
+func TestOnlyARefusalSendsUsBackToTheSlowPath(t *testing.T) {
+	require.True(t, declined(errors.New("[ERROR] frobnicate is not served here")))
+	require.True(t, declined(errors.New("[ERROR] malformed request: bad")))
+	require.True(t, declined(errors.New("the privileged worker is not running")))
+	require.True(t, declined(errors.New("the privileged worker exited")))
+
+	require.False(t, declined(errors.New("[ERROR] no running Terraria.exe found")),
+		"the game not running is the answer; asking again costs 2.7s to hear it twice")
+	require.False(t, declined(errors.New("[ERROR] no player loaded")))
+	require.False(t, declined(nil))
+}
+
+// The status bar is a row of short facts. The CLI's advice is good and long, so
+// the bar gets the verdict and the log gets the advice.
+func TestTheStatusBarGetsAVerdictAndTheLogGetsTheAdvice(t *testing.T) {
+	out := "[ERROR] no running Terraria.exe found. Is Terraria launched (Windows build under Proton)?"
+	require.Equal(t, "not running", shortReason(out, nil))
+	require.Equal(t, out, detail(out, nil), "the log keeps every word of it")
+
+	require.Equal(t, "sudo refused", shortReason("sudo: a password is required", nil))
+	require.Equal(t, "unreadable", shortReason("", nil))
+	require.Equal(t, "boom", detail("", errors.New("boom")))
 }

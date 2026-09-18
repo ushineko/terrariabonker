@@ -251,13 +251,19 @@ func (u *ui) run(ctx context.Context, argv []string) (string, error) {
 	}
 	if u.work.Available() {
 		out, err := u.work.Do(argv)
-		if err == nil {
+		switch {
+		case err == nil:
 			return out, nil
+		case !declined(err):
+			// The operation ran and failed -- the game is not up, the player is
+			// not loaded, the write was refused. That is the answer, not a
+			// transport problem, and running it again costs 2.7 s to be told
+			// the same thing.
+			return out, err
 		}
-		// The worker refused it, or died. Fall back rather than failing: the
-		// serve whitelist does not cover everything, and a dead worker must not
-		// take the window with it.
-		u.note("worker declined " + argv[0] + ", running it directly: " + err.Error())
+		// Refused or dead: the serve whitelist does not cover everything, and a
+		// worker that has gone must not take the window with it.
+		u.note("the worker will not take " + argv[0] + "; running it directly")
 	}
 	cmd := exec.CommandContext(ctx, "sudo", append(sudoPrefix(u.cli), argv...)...) //nolint:gosec // argv comes from the client package
 	out, err := cmd.CombinedOutput()
@@ -265,6 +271,27 @@ func (u *ui) run(ctx context.Context, argv []string) (string, error) {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return string(out), nil
+}
+
+/*
+declined reports whether the worker turned the command away rather than running
+it and failing.
+
+The protocol says both with ok:false, so the text is the only thing that
+distinguishes them -- cmd_serve answers "<op> is not served here" for an op
+outside SERVE_OPS, and a malformed request likewise. Everything else with
+ok:false is the operation's own verdict, which is an answer and not a reason to
+run it a second time.
+*/
+func declined(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "is not served here") ||
+		strings.Contains(msg, "malformed request") ||
+		strings.Contains(msg, "worker is not running") ||
+		strings.Contains(msg, "worker exited")
 }
 
 // note writes one line to the window's log. Safe from any goroutine.
@@ -287,22 +314,65 @@ func (u *ui) loadStatus() {
 	u.sh.Load("Reading the game...", func(ctx context.Context) error {
 		out, err := u.run(ctx, client.StatusArgv())
 		st, ok := client.ParseStatus(out)
-		msg := ""
-		if !ok && err != nil {
-			msg = firstLine(err.Error())
-		}
 		fyne.Do(func() {
 			u.mu.Lock()
-			u.status, u.statusOK, u.statusMsg = st, ok, msg
+			was := u.statusMsg
+			u.status, u.statusOK = st, ok
+			u.statusMsg = ""
+			if !ok {
+				u.statusMsg = shortReason(out, err)
+			}
+			said := was == u.statusMsg
 			u.mu.Unlock()
+			// The full text goes to the log once, not on every poll: this runs
+			// every couple of seconds and "Terraria is not running" is not news
+			// the second time.
+			if !ok && !said {
+				u.note(firstLine(detail(out, err)))
+			}
 			u.sh.RedrawStatus()
 		})
 		return nil
 	})
 }
 
-// firstLine trims a subprocess failure to the part worth putting in a status
-// bar. sudo and the CLI both say useful things in their first line and less
+/*
+shortReason is the status bar's verdict: a few words, because the bar is a row of
+short facts and a sentence in it pushes everything else off the end.
+
+The CLI's own message is the useful one and it is long -- "no running
+Terraria.exe found. Is Terraria launched (Windows build under Proton)?" is good
+advice in a log and unreadable in a status bar -- so the bar gets the verdict and
+the log gets the advice.
+*/
+func shortReason(out string, err error) string {
+	text := detail(out, err)
+	switch {
+	case strings.Contains(text, "no running Terraria"):
+		return "not running"
+	case strings.Contains(text, "not served here"):
+		return "unavailable"
+	case strings.Contains(text, "sudo"), strings.Contains(text, "password"):
+		return "sudo refused"
+	case text == "":
+		return "unreadable"
+	}
+	return "unreadable"
+}
+
+// detail is the fullest description of a failed read: what the CLI printed if it
+// printed anything, and the process error otherwise.
+func detail(out string, err error) string {
+	if s := strings.TrimSpace(out); s != "" {
+		return s
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// firstLine trims a subprocess failure to the part worth putting in a log. sudo and the CLI both say useful things in their first line and less
 // useful things after it.
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
