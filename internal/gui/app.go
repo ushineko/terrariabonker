@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -30,6 +31,8 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	fd "github.com/ushineko/fynedesygn"
@@ -192,9 +195,44 @@ type Options struct {
 
 // Run opens the window and blocks until it is closed.
 func Run(o Options) {
+	release, holder, ok := takeLock(lockPath())
+	if !ok {
+		refuse(alreadyRunning(holder))
+		return
+	}
+	defer release()
+
 	u := &ui{version: o.Version}
 	shell.Run(u.shellOptions(o))
 }
+
+/*
+refuse says why the window is not opening, and then closes.
+
+Its own small window rather than a line on stderr: this is usually launched from
+a desktop icon, and a message printed to a terminal nobody is looking at is the
+same as no message. Printed as well, for the times it is started from a shell.
+*/
+func refuse(why string) {
+	fmt.Fprintln(os.Stderr, why)
+	a := app.NewWithID(appID)
+	a.SetIcon(appIcon())
+	w := a.NewWindow(cliName)
+	w.SetContent(container.NewPadded(container.NewVBox(
+		widgets.Heading(cliName+" is already running", ""),
+		widgets.Wrapped(why),
+		widget.NewButton("Close", w.Close),
+	)))
+	w.Resize(fyne.NewSize(refuseWidth, refuseHeight))
+	w.CenterOnScreen()
+	w.ShowAndRun()
+}
+
+// The refusal window is sized to hold its two paragraphs without scrolling.
+const (
+	refuseWidth  float32 = 520
+	refuseHeight float32 = 260
+)
 
 // shellOptions describes this program to the shell.
 func (u *ui) shellOptions(o Options) shell.Options {
