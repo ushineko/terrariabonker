@@ -754,6 +754,23 @@ def cmd_freeze(args) -> int:
     return 0
 
 
+def cmd_prefixes(args) -> int:
+    """The modifier catalog: every prefix id with its name and quality.
+
+    Static data, and read without a Service so it works with the game closed.
+    It exists for the same reason `patch catalog` does: the Qt panel imports
+    terrariabonker.prefixes in-process, which a front end in another language
+    cannot do, and copying the table would be a second spelling of every name.
+    """
+    from terrariabonker import prefixes as px
+
+    print(json.dumps([
+        {"id": pid, "name": px.name(pid), "quality": px.quality(pid)}
+        for pid in px.all_ids()
+    ]))
+    return 0
+
+
 def cmd_patch(args) -> int:
     # The catalog is static: labels, notes, sections and value ranges, known
     # without a game to look at. Answered before _svc so `patch catalog --json`
@@ -1205,6 +1222,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tiles", type=int, default=20, help="extra tiles of reach (default 20)")
     force_flag(p)
     p.set_defaults(func=cmd_long_reach)
+
+    p = sub.add_parser("prefixes", help="list item modifiers (id, name, quality)")
+    p.add_argument("--json", action="store_true", help="machine-readable catalog")
+    p.set_defaults(func=cmd_prefixes)
 
     p = sub.add_parser("patch", help="code-patch cheats (mining/reach/placement)")
     p.add_argument("action", choices=["status", "catalog", "enable", "disable", "on", "off"])

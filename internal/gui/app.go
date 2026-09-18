@@ -33,6 +33,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	fd "github.com/ushineko/fynedesygn"
+	"github.com/ushineko/fynedesygn/dialogs"
 	"github.com/ushineko/fynedesygn/logpane"
 	"github.com/ushineko/fynedesygn/shell"
 	"github.com/ushineko/fynedesygn/widgets"
@@ -83,6 +84,14 @@ type ui struct {
 	fx effectState
 	// px is the Patches section's catalog and the game's current state.
 	px patchState
+	// iv is the Inventory grid: the slots, what each cell was last drawn from,
+	// and the catalogs the cells read names out of.
+	iv inventoryState
+	// inventory is the 1 Hz sync. A watch like the others, because that is what
+	// it is: a loop the window holds up while it is open.
+	inventory *watch
+	// sprites is the item icon cache on disk.
+	sprites *sprites
 
 	mu        sync.Mutex
 	status    *client.Status
@@ -125,13 +134,13 @@ type sectionEntry struct {
 // rather than a silently different list.
 func sectionBuilders() map[string]sectionEntry {
 	return map[string]sectionEntry{
-		"Player":  {theme.AccountIcon, (*ui).buildPlayer},
-		"Effects": {theme.MediaPlayIcon, (*ui).buildEffects},
-		"Patches": {theme.SettingsIcon, (*ui).buildPatches},
+		"Player":    {theme.AccountIcon, (*ui).buildPlayer},
+		"Effects":   {theme.MediaPlayIcon, (*ui).buildEffects},
+		"Patches":   {theme.SettingsIcon, (*ui).buildPatches},
+		"Inventory": {theme.StorageIcon, (*ui).buildInventory},
 		// Phases 2-5 of spec 050 fill these in. Until then each says what it is
 		// for, rather than being absent from a navigation the flag help lists.
 		"Projectiles": {theme.MailSendIcon, placeholder("Projectiles", "Edit how projectiles behave.")},
-		"Inventory":   {theme.StorageIcon, placeholder("Inventory", "Edit carried items.")},
 		"Recipes":     {theme.ListIcon, placeholder("Recipes", "Browse craftable items.")},
 		"Compendium":  {theme.HelpIcon, placeholder("Compendium", "Browse every item and NPC.")},
 	}
@@ -215,6 +224,10 @@ func (u *ui) onCreate(s *shell.Shell, o Options) {
 	u.sh = s
 	u.resolve(o)
 	u.fx.bait, u.fx.power, u.fx.stack = defaultBait, defaultPower, defaultStack
+	u.iv.slots = map[int]client.ItemSlot{}
+	u.iv.shown = map[int]client.ItemSlot{}
+	u.iv.cells = map[int]*fyne.Container{}
+	u.sprites = newSprites()
 	u.startWatches()
 }
 
@@ -245,9 +258,12 @@ func (u *ui) start() {
 	}
 	u.startWorker()
 	u.loadCatalog()
+	u.loadPrefixes()
 	u.loadStatus()
 	u.loadPatches()
 	u.loadSellList()
+	u.loadNames()
+	u.syncInventory()
 }
 
 // startWorker brings up one `serve` process. Failing is not fatal: every
@@ -351,7 +367,7 @@ sends it one more command.
 */
 func (u *ui) shutdown() {
 	u.freeze.halt()
-	for _, w := range []*watch{u.potions, u.fishing, u.buffs, u.catch, u.sell} {
+	for _, w := range []*watch{u.potions, u.fishing, u.buffs, u.catch, u.sell, u.inventory} {
 		if w != nil {
 			w.halt()
 		}
@@ -405,6 +421,12 @@ func (u *ui) runDirect(ctx context.Context, argv []string) (string, error) {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return string(out), nil
+}
+
+// prompt asks for something in a dialog, using the library's shape so every
+// dialog in the window looks the same.
+func (u *ui) prompt(title, confirm string, body fyne.CanvasObject, do func()) {
+	dialogs.Prompt(u.sh.Window, title, confirm, body, do)
 }
 
 // note writes one line to the window's log. Safe from any goroutine.

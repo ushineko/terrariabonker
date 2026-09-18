@@ -110,6 +110,173 @@ func LongReachArgv(tiles int) []string {
 	return []string{"long-reach", "--tiles", strconv.Itoa(tiles)}
 }
 
+// --- the inventory ------------------------------------------------------------
+
+// ItemSlot is one slot of the player's inventory, as `inventory --all --json`
+// reports it. An empty slot has Type 0 and is still a slot the grid draws.
+type ItemSlot struct {
+	Slot      int            `json:"slot"`
+	Type      int            `json:"type"`
+	Stack     int            `json:"stack"`
+	Damage    int            `json:"damage"`
+	AutoReuse int            `json:"auto_reuse"`
+	UseTime   int            `json:"use_time"`
+	Pick      int            `json:"pick"`
+	TileBoost int            `json:"tile_boost"`
+	UseAnim   int            `json:"use_anim"`
+	Rare      int            `json:"rare"`
+	Defense   int            `json:"defense"`
+	Prefix    int            `json:"prefix"`
+	Flags     map[string]any `json:"flags"`
+}
+
+// Empty reports whether a slot holds nothing. Type 0 is the game's own way of
+// saying so.
+func (s ItemSlot) Empty() bool { return s.Type == 0 }
+
+// ParseSlots decodes an inventory reply.
+func ParseSlots(raw string) ([]ItemSlot, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var out []ItemSlot
+	if err := json.Unmarshal([]byte(line), &out); err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// SetStackArgv changes how many of a thing a slot holds.
+func SetStackArgv(slot, value int) []string {
+	return []string{"set-stack", strconv.Itoa(slot), strconv.Itoa(value)}
+}
+
+/*
+ItemEdit is what set-item may change about a slot. A nil field is left alone,
+which is why they are pointers: zero is a value the game accepts for most of
+these, so "unset" cannot be spelled as 0.
+
+ExpectType guards the write. The grid re-reads once a second, so an edit is
+built on a snapshot that may already be stale; naming the type the editor was
+opened on makes the CLI refuse a write aimed at whatever has since replaced it.
+*/
+type ItemEdit struct {
+	Stack      *int
+	Damage     *int
+	AutoReuse  *int
+	UseTime    *int
+	UseAnim    *int
+	Pick       *int
+	TileBoost  *int
+	Defense    *int
+	Prefix     *int
+	ExpectType *int
+}
+
+// SetItemArgv places or edits an item in a slot.
+func SetItemArgv(slot, itemType int, e ItemEdit) []string {
+	argv := []string{"set-item", strconv.Itoa(slot), strconv.Itoa(itemType)}
+	// --expect-type first, as the Python builder emits it, so the two argvs are
+	// comparable line for line while both exist.
+	for _, f := range []struct {
+		flag string
+		v    *int
+	}{
+		{"--expect-type", e.ExpectType},
+		{"--stack", e.Stack},
+		{"--damage", e.Damage},
+		{"--auto-reuse", e.AutoReuse},
+		{"--use-time", e.UseTime},
+		{"--use-anim", e.UseAnim},
+		{"--pick", e.Pick},
+		{"--tile-boost", e.TileBoost},
+		{"--defense", e.Defense},
+		{"--prefix", e.Prefix},
+	} {
+		if f.v != nil {
+			argv = append(argv, f.flag, strconv.Itoa(*f.v))
+		}
+	}
+	return argv
+}
+
+// GiveArgv puts an item into the first free slot.
+func GiveArgv(itemType, stack int) []string {
+	return []string{"give", strconv.Itoa(itemType), "--stack", strconv.Itoa(stack)}
+}
+
+// --- static catalogs -----------------------------------------------------------
+
+// Item is one entry of the item catalog.
+type Item struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Tooltip string `json:"tooltip"`
+	Wiki    string `json:"wiki"`
+}
+
+// NPC is one entry of the NPC catalog.
+type NPC struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	NetID int    `json:"net_id"`
+}
+
+// Compendium is the full catalog: every item, and every NPC.
+type Compendium struct {
+	Items []Item `json:"items"`
+	NPCs  []NPC  `json:"npcs"`
+}
+
+// CompendiumArgv reads the catalog. It needs the game: item stats come from the
+// game's own template objects, and the result is cached per build.
+func CompendiumArgv(refresh bool) []string {
+	argv := []string{"compendium", "--json"}
+	if refresh {
+		argv = append(argv, "--refresh")
+	}
+	return argv
+}
+
+// ParseCompendium decodes the catalog.
+func ParseCompendium(raw string) (*Compendium, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var c Compendium
+	if err := json.Unmarshal([]byte(line), &c); err != nil || c.Items == nil {
+		return nil, false
+	}
+	return &c, true
+}
+
+// Prefix is one item modifier: what it is called and whether it helps.
+type Prefix struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Quality string `json:"quality"` // "good", "bad" or "neutral"
+}
+
+// PrefixesArgv reads the modifier catalog. Static, so it is read through a
+// one-shot run rather than the worker, which needs a game.
+func PrefixesArgv() []string { return []string{"prefixes", "--json"} }
+
+// ParsePrefixes decodes the modifier catalog.
+func ParsePrefixes(raw string) ([]Prefix, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var out []Prefix
+	if err := json.Unmarshal([]byte(line), &out); err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
 // --- code patches ------------------------------------------------------------
 
 // Patch is one entry of the patch catalog: what it is called, what it does, and
@@ -400,6 +567,17 @@ func Samples() []Sample {
 		{"PatchSetArgv/value", "patch", PatchSetArgv("mining", true, fptr(0.2))},
 		{"PatchSetArgv/off", "patch", PatchSetArgv("mining", false, nil)},
 		{"RestoreArgv", "restore", RestoreArgv()},
+		{"SetStackArgv", "set-stack", SetStackArgv(3, 99)},
+		{"SetItemArgv", "set-item", SetItemArgv(3, 29, ItemEdit{})},
+		{"SetItemArgv/full", "set-item", SetItemArgv(3, 29, ItemEdit{
+			Stack: ptr(1), Damage: ptr(50), AutoReuse: ptr(1), UseTime: ptr(10),
+			UseAnim: ptr(10), Pick: ptr(100), TileBoost: ptr(5), Defense: ptr(2),
+			Prefix: ptr(27), ExpectType: ptr(29),
+		})},
+		{"GiveArgv", "give", GiveArgv(29, 1)},
+		{"CompendiumArgv", "compendium", CompendiumArgv(false)},
+		{"CompendiumArgv/refresh", "compendium", CompendiumArgv(true)},
+		{"PrefixesArgv", "prefixes", PrefixesArgv()},
 	}
 }
 

@@ -183,19 +183,19 @@ print(argv[0])
 `
 
 /*
-Every operation must also be one the privileged worker will serve, or it falls
-back to a one-shot CLI run costing ~2.7 s instead of ~2.5 ms -- the difference
-between a 1 Hz inventory sync and a window that stutters.
+Every operation the window sends to the worker must be one the worker will
+serve, or it falls back to a one-shot CLI run costing ~2.7 s instead of ~2.5 ms
+-- the difference between a 1 Hz inventory sync and a window that stutters.
 
 SERVE_OPS is read where it is declared rather than copied, because a copy is a
 second spelling to keep in step.
 */
-func TestEveryOperationWeSendIsOneTheWorkerWillServe(t *testing.T) {
+func TestEveryOperationWeSendToTheWorkerIsOneItWillServe(t *testing.T) {
 	ops := serveOps(t)
 	require.NotEmpty(t, ops, "could not read SERVE_OPS from the CLI")
 
 	for _, s := range client.Samples() {
-		if notServed[s.Argv[0]] {
+		if _, direct := sentDirectly[s.Name]; direct {
 			continue
 		}
 		require.Containsf(t, ops, s.Argv[0],
@@ -204,22 +204,33 @@ func TestEveryOperationWeSendIsOneTheWorkerWillServe(t *testing.T) {
 }
 
 /*
-notServed is the operations that must not go through the worker.
+sentDirectly is the operations the window deliberately does not send to the
+worker, and why.
 
-freeze is a blocking loop. Sending it to the worker would stop the worker
-answering anything else for as long as the cheat is on, which is why the window
-runs it as a process of its own. Listed rather than inferred, so that adding an
-operation the worker cannot take is a decision someone wrote down.
+Keyed by builder rather than by subcommand, because `patch catalog` is sent
+directly while `patch status` is not -- listing "patch" would excuse both. Every
+entry is a decision someone wrote down rather than something inferred.
 */
-var notServed = map[string]bool{"freeze": true}
+var sentDirectly = map[string]string{
+	"FreezeArgv": "a blocking loop; through the worker it would stop the worker " +
+		"answering anything else for as long as the cheat is on",
+	"FreezeArgv/none": "as above",
+	"PatchCatalogArgv": "static data; the worker connects to a Service before it " +
+		"dispatches, so through it this would need a running game -- and the controls " +
+		"it describes are drawn before one is attached",
+	"PrefixesArgv": "static data, for the same reason as the patch catalog",
+}
 
-// The one exception has to be real: if freeze ever becomes servable, this list
-// is stale and the reason above no longer holds.
-func TestTheOnlyUnservedOperationIsTheBlockingOne(t *testing.T) {
-	ops := serveOps(t)
-	for op := range notServed {
-		require.NotContainsf(t, ops, op,
-			"%q is servable now, so it should not be run as its own process", op)
+// Each exception must name a builder that exists, or the list is stale and
+// quietly excusing nothing.
+func TestEveryDirectExceptionNamesARealBuilder(t *testing.T) {
+	have := map[string]bool{}
+	for _, s := range client.Samples() {
+		have[s.Name] = true
+	}
+	for name, why := range sentDirectly {
+		require.Truef(t, have[name], "%q is not a builder any more", name)
+		require.NotEmptyf(t, why, "%q is excused without a reason", name)
 	}
 }
 
