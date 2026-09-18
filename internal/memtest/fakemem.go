@@ -22,6 +22,8 @@ package memtest
 import (
 	"encoding/binary"
 	"unicode/utf16"
+
+	"github.com/ushineko/terrariabonker/internal/proc"
 )
 
 /*
@@ -64,8 +66,8 @@ func New(base uint32, size int) *FakeMem {
 }
 
 // Regions is the one region this fake maps, as a real Mem reports its own.
-func (m *FakeMem) Regions() [][2]uint32 {
-	return [][2]uint32{{m.Base, m.Base + count(len(m.Buf))}}
+func (m *FakeMem) Regions() []proc.Region {
+	return []proc.Region{{Start: m.Base, End: m.Base + count(len(m.Buf))}}
 }
 
 /*

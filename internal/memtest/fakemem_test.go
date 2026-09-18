@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/memtest"
+	"github.com/ushineko/terrariabonker/internal/proc"
 )
 
 /*
@@ -138,7 +139,7 @@ func TestReadingOutsideTheMappingFails(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint32(0xFFFFFFFF), value, "a signed word is written little-endian")
 
-	require.Equal(t, [][2]uint32{{base, base + size}}, mem.Regions())
+	require.Equal(t, []proc.Region{{Start: base, End: base + size}}, mem.Regions())
 }
 
 // quote is a Python string literal, so a name with anything awkward in it

@@ -137,9 +137,20 @@ build the differential habit this port depends on.
    boosted cap to equal the permanent one, which is the bug the headroom exists for, and
    by moving the name offset four bytes: eight failures.
 
-   What is left of this step is the plumbing -- opening a process, listing its regions,
-   the executable-region scan behind `Main.get_LocalPlayer`. None of it is testable
-   without a live game, so it lands with a live check rather than a differential one.
+   **`proc` is done too**, and more of it was testable than expected. A maps listing is
+   messier than anything that would be written by hand -- device mappings, guard pages,
+   and under Proton a mixture of 32-bit and 64-bit addresses in one process -- so the
+   parser is handed a real listing and compared with the Python's reading of the same
+   text. Finding the game is compared against the running one.
+
+   **Checked against the live game**, which is the only evidence that matters here: both
+   implementations scanned the same Terraria process (1,466 regions) and returned the
+   same two player copies -- the same addresses, the same names, the same blocks, the live
+   copy and its inert snapshot. Go took 1.01 s to the Python's 0.82 s, which is numpy's
+   vectorised prefilter against a plain loop and is not worth anything yet.
+
+   What is left of this step is the executable-region scan behind `Main.get_LocalPlayer`:
+   the byte-pattern search that resolves the live player rather than every copy of it.
 4. **`layout`, `inventory`, `player`.** Offsets are declared once and imported —
    AGENTS.md is explicit that re-spelling a constant is the failure mode here (it was
    five spellings under four names once). In Go they are one package of typed constants,

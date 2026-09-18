@@ -21,13 +21,15 @@ package locate
 import (
 	"encoding/binary"
 	"unicode/utf16"
+
+	"github.com/ushineko/terrariabonker/internal/proc"
 )
 
 // Mem is the memory a locator reads: which parts of it exist, and what is in
 // them.
 type Mem interface {
-	// Regions is the writable, scannable memory as (start, end) pairs.
-	Regions() [][2]uint32
+	// Regions is the writable, scannable memory.
+	Regions() []proc.Region
 	// Read is size bytes at addr, or nothing when they are not readable. A
 	// short answer is ordinary: a region can end mid-read.
 	Read(addr uint32, size int) []byte
@@ -147,8 +149,8 @@ snapshots ignore what is written to them.
 func FindPlayers(mem Mem) []Block {
 	var found []Block
 	for _, region := range mem.Regions() {
-		start, end := region[0], region[1]
-		buf := mem.Read(start, int(end-start))
+		start := region.Start
+		buf := mem.Read(start, region.Size())
 		words := len(buf) / 4
 		if words < BlockLen {
 			continue
