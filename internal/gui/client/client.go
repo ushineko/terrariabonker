@@ -110,6 +110,108 @@ func LongReachArgv(tiles int) []string {
 	return []string{"long-reach", "--tiles", strconv.Itoa(tiles)}
 }
 
+// --- code patches ------------------------------------------------------------
+
+// Patch is one entry of the patch catalog: what it is called, what it does, and
+// the number it takes when it takes one.
+type Patch struct {
+	Name    string     `json:"name"`
+	Label   string     `json:"label"`
+	Note    string     `json:"note"`
+	Section string     `json:"section"`
+	Kind    string     `json:"kind"`
+	Value   *ValueSpec `json:"value"`
+}
+
+// ValueSpec is the number a patch takes: its kind, its range, and either a unit
+// or a set of presets to choose from.
+type ValueSpec struct {
+	Kind    string   `json:"kind"` // "i32" or "f32"
+	Default float64  `json:"default"`
+	Lo      float64  `json:"lo"`
+	Hi      float64  `json:"hi"`
+	Unit    string   `json:"unit"`
+	Presets []Preset `json:"presets"`
+}
+
+// Preset is one named value for a patch that offers a choice rather than a
+// range.
+type Preset struct {
+	Label string  `json:"label"`
+	Value float64 `json:"value"`
+}
+
+/*
+PatchCatalogArgv reads the catalog: every patch, its label, its note and its
+range.
+
+Static data, and the one thing the Qt panel got by importing the Python
+in-process rather than through this contract. It must be read through a one-shot
+CLI run and not the warm worker: the worker connects to a Service before it
+dispatches, so through it this would need Terraria running, and the controls are
+built before anything is attached.
+*/
+func PatchCatalogArgv() []string { return []string{"patch", "catalog", "--json"} }
+
+// ParsePatchCatalog decodes the catalog.
+func ParsePatchCatalog(raw string) ([]Patch, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var out []Patch
+	if err := json.Unmarshal([]byte(line), &out); err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// PatchStatus is which patches are on and what they are set to.
+type PatchStatus struct {
+	On     map[string]bool    `json:"on"`
+	Values map[string]float64 `json:"values"`
+	Build  string             `json:"build"`
+	// BuildVerified is whether every AOB matched on this game build. False
+	// means at least one patch is aimed at a signature that has moved.
+	BuildVerified bool `json:"build_verified"`
+}
+
+// PatchStatusArgv asks what is currently patched into the running game.
+func PatchStatusArgv() []string { return []string{"patch", "status", "--json"} }
+
+// ParsePatchStatus decodes a status reply.
+func ParsePatchStatus(raw string) (*PatchStatus, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var st PatchStatus
+	if err := json.Unmarshal([]byte(line), &st); err != nil {
+		return nil, false
+	}
+	if st.On == nil {
+		return nil, false
+	}
+	return &st, true
+}
+
+// PatchSetArgv turns one patch on or off. A nil value takes the patch's own
+// default.
+func PatchSetArgv(name string, on bool, value *float64) []string {
+	if !on {
+		return []string{"patch", "disable", name}
+	}
+	argv := []string{"patch", "enable", name}
+	if value != nil {
+		argv = append(argv, "--value", strconv.FormatFloat(*value, 'g', -1, 64))
+	}
+	return argv
+}
+
+// RestoreArgv puts back what the saved profile says should be on, after a game
+// restart or a world change has cleared it.
+func RestoreArgv() []string { return []string{"restore", "--json"} }
+
 // --- the trainer-held watches ------------------------------------------------
 //
 // None of these is the CLI's own --watch form. The worker must not block, so
@@ -292,12 +394,20 @@ func Samples() []Sample {
 		{"SellListArgv/remove", "sell-list", SellListArgv(nil, ptr(29))},
 		{"FreezeArgv", "freeze", FreezeArgv(true, true)},
 		{"FreezeArgv/none", "freeze", FreezeArgv(false, false)},
+		{"PatchCatalogArgv", "patch", PatchCatalogArgv()},
+		{"PatchStatusArgv", "patch", PatchStatusArgv()},
+		{"PatchSetArgv/on", "patch", PatchSetArgv("mining", true, nil)},
+		{"PatchSetArgv/value", "patch", PatchSetArgv("mining", true, fptr(0.2))},
+		{"PatchSetArgv/off", "patch", PatchSetArgv("mining", false, nil)},
+		{"RestoreArgv", "restore", RestoreArgv()},
 	}
 }
 
 // ptr is a sample helper: the optional arguments above are pointers so that
 // "not given" is distinct from zero.
 func ptr(n int) *int { return &n }
+
+func fptr(f float64) *float64 { return &f }
 
 // lastLine returns the final non-empty line of a reply.
 func lastLine(raw string) (string, bool) {

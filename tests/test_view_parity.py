@@ -111,3 +111,48 @@ def test_the_panel_does_not_parse_worker_replies_itself():
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             assert "[ERROR]" not in node.value, \
                 "main_window matches the error prefix itself; use client.error_in"
+
+
+def test_patch_catalog_is_readable_without_a_game():
+    """`patch catalog --json` is static data and must not need Terraria running.
+
+    The Go panel reads it while building its controls, which happens before
+    anything is attached -- and through the one-shot CLI rather than the warm
+    worker, because the worker connects to a Service before it dispatches. A
+    catalog that needed a game would leave that section empty until one was
+    launched.
+
+    It exists because the catalog was never part of the CLI contract: the Qt
+    panel imports PATCH_CATALOG in-process, which a front end in another
+    language cannot do.
+    """
+    import io
+    import json
+    from contextlib import redirect_stdout
+
+    from terrariabonker.patcher import PATCH_CATALOG
+
+    args = build_parser().parse_args(["patch", "catalog", "--json"])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = args.func(args)          # no Service, no sudo, no game
+    assert rc == 0
+
+    cat = json.loads(buf.getvalue().strip().splitlines()[-1])
+    assert [c["name"] for c in cat] == list(PATCH_CATALOG), \
+        "the dump must be every patch, in catalog order"
+
+    for c in cat:
+        info = PATCH_CATALOG[c["name"]]
+        assert c["label"] == info.label and c["note"] == info.note
+        assert c["section"] == info.section and c["kind"] == info.kind
+        if info.value is None:
+            assert c["value"] is None
+        else:
+            assert c["value"]["kind"] == info.value.kind
+            assert c["value"]["default"] == info.value.default
+            assert c["value"]["lo"] == info.value.lo
+            assert c["value"]["hi"] == info.value.hi
+            assert c["value"]["unit"] == info.value.unit
+            assert [(p["label"], p["value"]) for p in c["value"]["presets"]] == \
+                list(info.value.presets or [])

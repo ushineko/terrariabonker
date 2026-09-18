@@ -755,6 +755,39 @@ def cmd_freeze(args) -> int:
 
 
 def cmd_patch(args) -> int:
+    # The catalog is static: labels, notes, sections and value ranges, known
+    # without a game to look at. Answered before _svc so `patch catalog --json`
+    # works with Terraria closed -- the Go panel reads it while building its
+    # controls, which happens before anything is attached.
+    #
+    # It exists because the catalog was never part of the CLI contract: the Qt
+    # panel imports PATCH_CATALOG in-process, which a front end in another
+    # language cannot do. Copying it would be a second spelling of every label
+    # and range to keep in step.
+    if args.action == "catalog":
+        print(json.dumps([
+            {
+                "name": name,
+                "label": info.label,
+                "note": info.note,
+                "section": info.section,
+                "kind": info.kind,
+                "value": None if info.value is None else {
+                    "kind": info.value.kind,
+                    "default": info.value.default,
+                    "lo": info.value.lo,
+                    "hi": info.value.hi,
+                    "unit": info.value.unit,
+                    "presets": [
+                        {"label": label, "value": val}
+                        for label, val in (info.value.presets or [])
+                    ],
+                },
+            }
+            for name, info in PATCH_CATALOG.items()
+        ]))
+        return 0
+
     svc = _svc(guard=True, force=args.force)
     p = svc.patcher()
     try:
@@ -1174,7 +1207,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_long_reach)
 
     p = sub.add_parser("patch", help="code-patch cheats (mining/reach/placement)")
-    p.add_argument("action", choices=["status", "enable", "disable", "on", "off"])
+    p.add_argument("action", choices=["status", "catalog", "enable", "disable", "on", "off"])
     p.add_argument("cheat", nargs="?", choices=list(PATCH_CATALOG))
     p.add_argument("--value", type=float, default=None,
                    help="override the enabled value (mining pickSpeed, reach tiles)")

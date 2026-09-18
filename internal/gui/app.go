@@ -81,6 +81,8 @@ type ui struct {
 	// window for the same reason: a section rebuild must not reset a running
 	// cheat's settings.
 	fx effectState
+	// px is the Patches section's catalog and the game's current state.
+	px patchState
 
 	mu        sync.Mutex
 	status    *client.Status
@@ -125,10 +127,10 @@ func sectionBuilders() map[string]sectionEntry {
 	return map[string]sectionEntry{
 		"Player":  {theme.AccountIcon, (*ui).buildPlayer},
 		"Effects": {theme.MediaPlayIcon, (*ui).buildEffects},
+		"Patches": {theme.SettingsIcon, (*ui).buildPatches},
 		// Phases 2-5 of spec 050 fill these in. Until then each says what it is
 		// for, rather than being absent from a navigation the flag help lists.
 		"Projectiles": {theme.MailSendIcon, placeholder("Projectiles", "Edit how projectiles behave.")},
-		"Patches":     {theme.SettingsIcon, placeholder("Patches", "Code written into the running game.")},
 		"Inventory":   {theme.StorageIcon, placeholder("Inventory", "Edit carried items.")},
 		"Recipes":     {theme.ListIcon, placeholder("Recipes", "Browse craftable items.")},
 		"Compendium":  {theme.HelpIcon, placeholder("Compendium", "Browse every item and NPC.")},
@@ -242,7 +244,9 @@ func (u *ui) start() {
 			"passwordless sudo is set up for "+cliName+".", fd.StatusWarn)
 	}
 	u.startWorker()
+	u.loadCatalog()
 	u.loadStatus()
+	u.loadPatches()
 	u.loadSellList()
 }
 
@@ -381,6 +385,27 @@ func (u *ui) once(what string, argv []string) {
 
 // onceTimeout bounds a background one-off.
 const onceTimeout = 60 * time.Second
+
+/*
+runDirect performs one CLI operation as a one-shot run, never through the worker.
+
+For static reads. The worker connects to a Service before it dispatches anything,
+so everything sent through it needs Terraria running -- which is right for the
+operations that touch the game and wrong for the ones that do not. The patch
+catalog is labels and ranges; asking for it should not depend on whether a game
+is up, because the controls it describes are built before one is.
+*/
+func (u *ui) runDirect(ctx context.Context, argv []string) (string, error) {
+	if u.cli == "" {
+		return "", fmt.Errorf("%s is not on PATH", cliName)
+	}
+	cmd := exec.CommandContext(ctx, "sudo", append(sudoPrefix(u.cli), argv...)...) //nolint:gosec // argv comes from the client package
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return string(out), nil
+}
 
 // note writes one line to the window's log. Safe from any goroutine.
 func (u *ui) note(msg string) {
