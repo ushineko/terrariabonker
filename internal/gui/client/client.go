@@ -657,6 +657,41 @@ func PatchSetArgv(name string, on bool, value *float64) []string {
 // restart or a world change has cleared it.
 func RestoreArgv() []string { return []string{"restore", "--json"} }
 
+/*
+Restore is what one pass of auto-restore managed.
+
+Four outcomes, and they are not interchangeable. A cheat in Pending is waiting
+for the game to compile the method it hooks and will apply on a later pass; one
+in Skipped was refused and will not. Absent is an item edit whose item the player
+is not carrying, which is ordinary rather than a failure (spec 038).
+*/
+type Restore struct {
+	Cheats  []string `json:"cheats"`
+	Items   []int    `json:"items"`
+	Pending []string `json:"pending"`
+	Skipped []string `json:"skipped"`
+	Absent  []int    `json:"absent"`
+}
+
+// Did reports whether the pass actually put anything back, or had anything left
+// over. A pass with nothing to say is not worth a line.
+func (r *Restore) Did() bool {
+	return len(r.Cheats) > 0 || len(r.Items) > 0 || len(r.Pending) > 0 || len(r.Skipped) > 0
+}
+
+// ParseRestore decodes a restore report.
+func ParseRestore(raw string) (*Restore, bool) {
+	line, ok := lastLine(raw)
+	if !ok {
+		return nil, false
+	}
+	var r Restore
+	if err := json.Unmarshal([]byte(line), &r); err != nil {
+		return nil, false
+	}
+	return &r, true
+}
+
 // --- the trainer-held watches ------------------------------------------------
 //
 // None of these is the CLI's own --watch form. The worker must not block, so

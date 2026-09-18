@@ -105,6 +105,9 @@ type ui struct {
 	// edits on whatever is in flight.
 	pj          projState
 	projectiles *watch
+	// rs is auto-restore: which game the profile was last put back into, and
+	// how far the current attempt has got.
+	rs restoreState
 
 	mu        sync.Mutex
 	status    *client.Status
@@ -509,6 +512,8 @@ func (u *ui) takeStatus(out string, err error) {
 	u.sh.RedrawStatus()
 	if ok {
 		u.maybeGateBuild(st)
+		u.noteWorld(st)
+		u.maybeRestore(st)
 	}
 }
 
