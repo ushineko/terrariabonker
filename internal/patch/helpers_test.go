@@ -123,3 +123,12 @@ func pyBytes(b []byte) string {
 	}
 	return "bytes([" + strings.Join(parts, ", ") + "])"
 }
+
+// pyI32 is a list of signed values as a Python literal.
+func pyI32(v []int32) string {
+	parts := make([]string, len(v))
+	for i, n := range v {
+		parts[i] = fmt.Sprintf("%d", n)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}

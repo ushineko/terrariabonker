@@ -314,8 +314,32 @@ build the differential habit this port depends on.
    refused to choose between them, and the test reported that as a disagreement about a
    game that was plainly running. It now compares *which* refusal it was.
 
-   Still to come: the stub bodies, the cheat catalog and enable/disable -- the half that
-   decides *what* gets written.
+   **The catalog is done**: all fifteen patches, the five that are applied in place and
+   the ten that need a stub, with their anchors, their displaced bytes, their tunables and
+   the groups the window shows them in. Compared whole and in both directions -- a patch
+   that went missing from the table would not fail, it would stop being offered, and the
+   one already installed in a running game would have nothing left that knows how to
+   remove it.
+
+   The instruction fragments the stubs are assembled from came over too, and are compared
+   across their whole range plus the encoding boundaries: an immediate that fits a byte is
+   encoded shorter, and getting that wrong changes the length of a stub.
+
+   Two things fell out of the comparison. The catalog's display order does **not** come
+   from the order of names inside a `SECTIONS` entry, which is what it reads as: the rank
+   is the *section* index, so within a group the order is the order the patches were
+   declared in. Rearranging one of those lists to reorder the window would do nothing, and
+   that is now written down where somebody would go looking. And `value_kind` says "f32"
+   for a cheat that writes no field at all, which describes nothing -- so it is compared
+   only where there is a field, rather than copying a default across as though it were a
+   fact.
+
+   Thirteen mutations checked. Two needed the tests widening: the drop-chance floor can
+   only reach zero for a percentage above 100, which the declared range does not allow but
+   the arithmetic does.
+
+   Still to come: the three stubs built from live state, the managed-call stub, and
+   enable/disable -- everything that actually writes to the game.
 8. **`xnb` and `sprites`.** Decoding the game's containers and building the PNG cache.
    Pillow leaves with them; Go's `image/png` writes the cache. Differential test: decode
    the same `Item_<id>.xnb` in both and compare the PNG bytes, or the pixels.
