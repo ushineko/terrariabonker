@@ -138,10 +138,16 @@ build the differential habit this port depends on.
    by moving the name offset four bytes: eight failures.
 
    **`proc` is done too**, and more of it was testable than expected. A maps listing is
-   messier than anything that would be written by hand -- device mappings, guard pages,
-   and under Proton a mixture of 32-bit and 64-bit addresses in one process -- so the
-   parser is handed a real listing and compared with the Python's reading of the same
-   text. Finding the game is compared against the running one.
+   messier than anything that would be written by hand, so the parser is handed a real
+   one -- the Python interpreter's, a 64-bit process -- and compared with the Python's
+   reading of the same text. Finding the game is compared against the running one.
+
+   Addresses are `uint32` throughout. The game runs as the 32-bit Windows build and every
+   pointer in its structures is four bytes, so the narrow type makes a truncation bug
+   impossible rather than latent. Measured on the running game: 1,473 regions, 1.59 GiB,
+   **none above 4 GB** -- it is a true 32-bit process, not a 64-bit one hosting 32-bit
+   code, so the parser's skip of a wider address never fires on the target and exists for
+   listings that are not the game's.
 
    **Checked against the live game**, which is the only evidence that matters here: both
    implementations scanned the same Terraria process (1,466 regions) and returned the

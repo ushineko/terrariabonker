@@ -21,10 +21,9 @@ import (
 The regions are read from a real listing, not a made-up one.
 
 A /proc maps listing is messier than anything that would be written by hand:
-device mappings, file-backed pages, guard pages, and under Proton a mixture of
-32-bit and 64-bit addresses in one process. So the test hands both
-implementations the same real listing -- this machine's -- and compares what each
-makes of it.
+device mappings, file-backed pages, guard pages, and -- in a 64-bit process --
+addresses past anything a 32-bit game has. So the test hands both
+implementations the same real listing and compares what each makes of it.
 */
 
 const pythonTimeout = 2 * time.Minute
@@ -72,9 +71,10 @@ print(json.dumps({
 `, &got)
 	require.NotEmpty(t, got.Maps)
 
-	// The Python keeps every region; this one keeps the 32-bit ones, because a
-	// 32-bit game has no others and reading a 64-bit address into a uint32 is
-	// how an address becomes a different address.
+	// This listing is the Python interpreter's own: a 64-bit process, which is
+	// why it has regions the game never would. The Python keeps them because
+	// its integers have no width; this keeps the ones that fit a uint32, which
+	// is the width every address in a 32-bit game has.
 	var want [][]int64
 	for _, r := range got.Regions {
 		if r[0] <= 0xFFFFFFFF && r[1] <= 0xFFFFFFFF {
