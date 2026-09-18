@@ -128,7 +128,7 @@ func (u *ui) buildRecipes() fyne.CanvasObject {
 const (
 	modeWidth     float32 = 140
 	recipeDialogW float32 = 620
-	recipeDialogH float32 = 420
+	recipeDialogH float32 = 520
 )
 
 // newRecipeCell is the blank a grid cell is recycled from. GridWrap reuses
@@ -252,21 +252,71 @@ func (u *ui) showRecipe(itemID int) {
 	}
 
 	body := container.NewVBox()
-	for _, r := range list {
-		parts := make([]string, 0, len(r.Ing))
-		for _, ing := range r.Ing {
-			if len(ing) < 2 {
-				continue
-			}
-			parts = append(parts, fmt.Sprintf("%s x%d", u.itemName(ing[0]), ing[1]))
+	for i, r := range list {
+		if i > 0 {
+			body.Add(widget.NewSeparator())
 		}
-		made := fmt.Sprintf("%s x%d", u.itemName(r.Out), r.N)
-		body.Add(widgets.PlainRow(made, strings.Join(parts, ", ")))
-		body.Add(widgets.DimWrapped("at: " + u.rc.book.Station(r)))
+		body.Add(u.recipeCard(r))
 	}
 
 	dialogs.ShowDetail(u.sh.Window, title, container.NewVScroll(body), recipeDialogW, recipeDialogH)
 }
+
+/*
+recipeCard is one recipe: what it makes, what it takes, and where.
+
+A row per ingredient rather than a sentence of them. Zenith takes ten items and
+the sentence ran off the end of the dialog -- "Terra Blade x1, Meowmere x1, Star
+Wrath x1, Influx Waver x..." -- which is the one thing a recipe must not do.
+Each row carries the item's icon, because a list of ten names is read by eye and
+an icon is what the eye actually finds.
+*/
+func (u *ui) recipeCard(r game.Recipe) fyne.CanvasObject {
+	rows := []fyne.CanvasObject{
+		u.itemRow(r.Out, r.N, true),
+		widgets.DimWrapped("at " + u.rc.book.Station(r)),
+	}
+	for _, ing := range r.Ing {
+		if len(ing) < 2 {
+			continue
+		}
+		rows = append(rows, u.itemRow(ing[0], ing[1], false))
+	}
+	return container.NewVBox(rows...)
+}
+
+/*
+itemRow is one item of a recipe: its icon, its name and how many.
+
+The ingredients are indented under what they make, so a card with two recipes in
+it reads as two lists rather than one long one. An item with no icon in the cache
+still gets the space one would take, so the names stay in a column.
+*/
+func (u *ui) itemRow(itemType, count int, made bool) fyne.CanvasObject {
+	icon := canvas.NewImageFromResource(u.sprites.icon(itemType))
+	icon.FillMode = canvas.ImageFillContain
+	icon.ScaleMode = canvas.ImageScalePixels
+	icon.SetMinSize(fyne.NewSize(rowIconSize, rowIconSize))
+
+	text := fmt.Sprintf("%s x%d", u.itemName(itemType), count)
+	label := widget.NewLabel(text)
+	if made {
+		label.TextStyle = fyne.TextStyle{Bold: true}
+	}
+
+	row := container.NewHBox(icon, label)
+	if made {
+		return row
+	}
+	return container.NewHBox(widgets.FixedWidth(container.NewVBox(), rowIndent), row)
+}
+
+// rowIconSize is an icon beside a name: big enough to tell two swords apart,
+// small enough that ten of them are a list rather than a wall.
+const (
+	rowIconSize float32 = 24
+	rowIndent   float32 = 16
+)
 
 // extractRecipes reads the recipe book out of the game, once.
 func (u *ui) extractRecipes() {

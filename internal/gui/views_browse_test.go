@@ -188,3 +188,44 @@ func onePixelPNG(t *testing.T) []byte {
 	require.NoError(t, png.Encode(&buf, img))
 	return buf.Bytes()
 }
+
+/*
+A recipe names every ingredient it takes.
+
+Zenith takes ten swords, and the dialog used to put them in one sentence, which
+ran off its edge: "Terra Blade x1, Meowmere x1, Star Wrath x1, Influx Waver
+x...". A recipe that cannot say what it is made of is the one thing a recipe
+book must not do.
+
+Read from the bundled book rather than a fixture, because the recipe that broke
+it is a real one and a fixture of two ingredients would never have caught it.
+*/
+func TestARecipeNamesEveryIngredient(t *testing.T) {
+	u := testUI(t)
+
+	zenith := 0
+	for id, name := range u.iv.names {
+		if name == "Zenith" {
+			zenith = id
+			break
+		}
+	}
+	require.NotZero(t, zenith, "the bundled names have no Zenith in them")
+
+	made := u.rc.book.Makes(zenith)
+	require.NotEmpty(t, made, "the bundled book has no recipe for Zenith")
+	recipe := made[0]
+	require.Greater(t, len(recipe.Ing), 5, "and it is the many-ingredient one")
+
+	texts := fynetest.Texts(u.recipeCard(recipe))
+	require.Contains(t, texts, "Zenith x1", "what it makes")
+	require.Contains(t, texts, "at "+u.rc.book.Station(recipe), "and where")
+	for _, ing := range recipe.Ing {
+		require.Lenf(t, ing, 2, "an ingredient is an item and a count")
+		want := u.itemName(ing[0]) + " x" + itoa(ing[1])
+		require.Containsf(t, texts, want, "%q is not in the card", want)
+	}
+}
+
+// itoa is a count as it is written in a row.
+func itoa(n int) string { return strconv.Itoa(n) }
