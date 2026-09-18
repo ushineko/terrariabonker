@@ -293,11 +293,7 @@ it reads as two lists rather than one long one. An item with no icon in the cach
 still gets the space one would take, so the names stay in a column.
 */
 func (u *ui) itemRow(itemType, count int, made bool) fyne.CanvasObject {
-	icon := canvas.NewImageFromResource(u.sprites.icon(itemType))
-	icon.FillMode = canvas.ImageFillContain
-	icon.ScaleMode = canvas.ImageScalePixels
-	icon.SetMinSize(fyne.NewSize(rowIconSize, rowIconSize))
-
+	icon := u.itemIcon(itemType, rowIconSize)
 	text := fmt.Sprintf("%s x%d", u.itemName(itemType), count)
 	label := widget.NewLabel(text)
 	if made {
@@ -317,6 +313,20 @@ const (
 	rowIconSize float32 = 24
 	rowIndent   float32 = 16
 )
+
+/*
+itemIcon is an item's icon at a given size, or the space one would take.
+
+The space matters as much as the picture: a list where some items have an icon
+and some do not should still read as one column of names, not two.
+*/
+func (u *ui) itemIcon(itemType int, size float32) *canvas.Image {
+	icon := canvas.NewImageFromResource(u.sprites.icon(itemType))
+	icon.FillMode = canvas.ImageFillContain
+	icon.ScaleMode = canvas.ImageScalePixels
+	icon.SetMinSize(fyne.NewSize(size, size))
+	return icon
+}
 
 // extractRecipes reads the recipe book out of the game, once.
 func (u *ui) extractRecipes() {

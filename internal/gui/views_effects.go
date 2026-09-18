@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 	"github.com/ushineko/fynedesygn/widgets"
@@ -214,13 +215,28 @@ func (u *ui) sellCard() fyne.CanvasObject {
 	on.SetChecked(u.sell.running())
 	on.OnChanged = func(v bool) { u.sell.set(v) }
 
+	// A row is the item's icon and its name, not its number. It said "item type
+	// 3507" because the names came from a subprocess that had not answered when
+	// the section was built; they are read in this process now (spec 051).
 	list := widget.NewList(
 		func() int { return len(u.fx.whitelist) },
-		func() fyne.CanvasObject { return widget.NewLabel("") },
+		func() fyne.CanvasObject {
+			return container.NewHBox(u.itemIcon(0, rowIconSize), widget.NewLabel(""))
+		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
-			if i < len(u.fx.whitelist) {
-				o.(*widget.Label).SetText(fmt.Sprintf("item type %d", u.fx.whitelist[i]))
+			row, ok := o.(*fyne.Container)
+			if !ok || len(row.Objects) != 2 || i < 0 || i >= len(u.fx.whitelist) {
+				return
 			}
+			icon, _ := row.Objects[0].(*canvas.Image)
+			label, _ := row.Objects[1].(*widget.Label)
+			if icon == nil || label == nil {
+				return
+			}
+			itemType := u.fx.whitelist[i]
+			icon.Resource = u.sprites.icon(itemType)
+			icon.Refresh()
+			label.SetText(fmt.Sprintf("%s (#%d)", u.itemName(itemType), itemType))
 		},
 	)
 	u.fx.sellList = list

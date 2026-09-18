@@ -229,3 +229,30 @@ func TestARecipeNamesEveryIngredient(t *testing.T) {
 
 // itoa is a count as it is written in a row.
 func itoa(n int) string { return strconv.Itoa(n) }
+
+/*
+The sell list names its items.
+
+It said "item type 3507", which is the number the game uses and not a thing
+anybody recognises. It said that because the names came from a subprocess that
+had not answered when the section was built; they are read in this process now,
+so a row can say what it is.
+*/
+func TestTheSellListNamesItsItems(t *testing.T) {
+	u := testUI(t)
+	u.startWatches()
+	t.Cleanup(u.shutdown)
+	u.iv.names = map[int]string{757: "Terra Blade", 9: "Wood"}
+	u.fx.whitelist = []int{757, 9}
+
+	win := test.NewWindow(u.sellCard())
+	t.Cleanup(win.Close)
+	win.Resize(fyne.NewSize(500, 400))
+
+	texts := fynetest.Texts(win.Canvas().Content())
+	require.Contains(t, texts, "Terra Blade (#757)")
+	require.Contains(t, texts, "Wood (#9)")
+	for _, text := range texts {
+		require.NotContainsf(t, text, "item type", "%q is a number where a name should be", text)
+	}
+}
