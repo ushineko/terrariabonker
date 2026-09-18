@@ -14,7 +14,12 @@ from __future__ import annotations
 import json
 import os
 
-_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "items.json")
+# The bundled game data moved out of this package when the Go port began: it is
+# read by both implementations now, so it belongs to the repository rather than
+# to the Python package, and Go can only embed what is under its own directory.
+_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+_PATH = os.path.join(_DATA_DIR, "items.json")
 
 try:
     with open(_PATH) as _f:
@@ -22,7 +27,7 @@ try:
 except (OSError, ValueError):
     _NAMES = {}
 
-_TIP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "tooltips.json")
+_TIP_PATH = os.path.join(_DATA_DIR, "tooltips.json")
 
 try:
     with open(_TIP_PATH) as _f:

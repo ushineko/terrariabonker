@@ -15,6 +15,7 @@ import (
 	fd "github.com/ushineko/fynedesygn"
 	"github.com/ushineko/fynedesygn/widgets"
 
+	"github.com/ushineko/terrariabonker/internal/game"
 	"github.com/ushineko/terrariabonker/internal/gui/client"
 )
 
@@ -260,30 +261,23 @@ func (u *ui) loadNames() {
 }
 
 /*
-loadItemNames reads the bundled name table.
+loadItemNames reads the bundled name table, in this process.
 
-Unprivileged and static, so it works with the game closed -- which is why it
-exists. Names used to arrive only with the compendium, and the compendium needs
-a running game, so every recipe, every grid cell and every picker listed numbers
-until one had been read. A recipe book that works offline should say "Terra
-Blade".
+It used to be a subprocess: the table lived in the Python package and a front end
+in another language could not reach it, so the window asked the CLI for a copy at
+every start-up. The table is JSON extracted from the game's own files, embedded
+in this binary now (spec 051, step 1), so there is nothing to ask anyone for.
+
+Names arrive before the window is drawn rather than a subprocess later, and they
+arrive with no game running, which is what a recipe book that works offline needs.
 */
 func (u *ui) loadItemNames() {
-	u.sh.Load("Reading the item names...", func(ctx context.Context) error {
-		out, err := u.runUser(ctx, client.NamesArgv())
-		names, ok := client.ParseNames(out)
-		if !ok {
-			if err != nil {
-				fyne.Do(func() { u.note("item names: " + firstLine(detail(out, err))) })
-			}
-			return nil
-		}
-		fyne.Do(func() {
-			u.mergeNames(names)
-			u.sh.Refresh()
-		})
-		return nil
-	})
+	names, err := game.ItemNames()
+	if err != nil {
+		u.note("item names: " + err.Error())
+		return
+	}
+	u.mergeNames(names.All())
 }
 
 // mergeNames adds names without dropping any already known. The compendium's

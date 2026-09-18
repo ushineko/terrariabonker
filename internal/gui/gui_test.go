@@ -226,9 +226,6 @@ var sentDirectly = map[string]string{
 	"ExtractSpritesArgv/force": "as above",
 	"ExtractRecipesArgv":       "reads the game's files to disk, unprivileged, as above",
 	"RecipesArgv":              "static data, read from the cache that extract-recipes wrote",
-	"NamesArgv": "bundled data, and the reason it is bundled: through the worker it " +
-		"would need a running game, and a recipe book that works offline has to be " +
-		"able to say \"Terra Blade\" rather than 757",
 }
 
 // Each exception must name a builder that exists, or the list is stale and

@@ -66,7 +66,12 @@ MAX_NPCS = 200
 MAIN_NPC_FRAME_COUNT_OFF = layout.MAIN_NPC_FRAME_COUNT_OFF
 MAX_NPC_FRAMES = 64          # sanity bound; the largest vanilla count is well under this
 
-_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "npcs.json")
+# The bundled game data moved out of this package when the Go port began: it is
+# read by both implementations now, so it belongs to the repository rather than
+# to the Python package, and Go can only embed what is under its own directory.
+_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+_PATH = os.path.join(_DATA_DIR, "npcs.json")
 
 try:
     with open(_PATH) as _f:

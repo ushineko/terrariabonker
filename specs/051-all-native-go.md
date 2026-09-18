@@ -30,7 +30,7 @@ objective is a tool with no Python in it — one static CLI, one GUI, no interpr
 | `recipes.py`, `projectiles.py` | 206 each | recipe and projectile tables |
 | `npcs.py`, `profile.py`, `selling.py`, `proc.py`, `projectile_edit.py` | 137–199 | the rest |
 
-**The 572 KB of JSON in `terrariabonker/data/` does not move.** `items.json`,
+**The 572 KB of JSON does not become code.** `items.json`,
 `npcs.json`, `recipes.json`, `prefixes.json`, `prefix_stats.json`, `tiles.json` and
 `tooltips.json` are data, not code. Go reads them as they are, and a diff of what each
 language loads from them is the cheapest correctness check available.
@@ -86,8 +86,14 @@ build the differential habit this port depends on.
    leaves `requirements.txt` in the same commit.
 
 1. **The data tables.** `names`, `prefixes`, `recipes`, `npcs`, `tiles`, `content`,
-   `projectiles` — loaders over the unchanged JSON in `terrariabonker/data/`. No memory,
-   no privilege, no fixture needed, and a differential test per table per row.
+   `projectiles` — loaders over the unchanged JSON in `data/`. No memory, no privilege,
+   no fixture needed, and a differential test per table per row.
+
+   **`names` is done.** `internal/game` reads the embedded `items.json` and
+   `tooltips.json`; every one of the 6,195 names and tooltips, every label and every
+   search result is checked against what the Python makes of the same bytes. The window
+   no longer shells out for them, so item names arrive before the first section is drawn
+   and with no game running.
 
    This is also the step that pays immediately: the Go window shells out to the CLI four
    times at start-up for names, prefixes, recipes and the patch catalog, and those four

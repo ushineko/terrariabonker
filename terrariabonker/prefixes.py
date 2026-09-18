@@ -18,8 +18,13 @@ from __future__ import annotations
 import json
 import os
 
-_DATA = os.path.join(os.path.dirname(__file__), "data", "prefixes.json")
-_STATS = os.path.join(os.path.dirname(__file__), "data", "prefix_stats.json")
+# The bundled game data moved out of this package when the Go port began: it is
+# read by both implementations now, so it belongs to the repository rather than
+# to the Python package, and Go can only embed what is under its own directory.
+_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+_DATA = os.path.join(_DATA_DIR, "prefixes.json")
+_STATS = os.path.join(_DATA_DIR, "prefix_stats.json")
 
 _NAMES: dict[int, str] = {}
 try:

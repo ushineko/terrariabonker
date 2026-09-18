@@ -21,7 +21,12 @@ from terrariabonker import inventory, layout, names
 from terrariabonker.locate import _exec_regions, main_static_base, read_mono_string
 from terrariabonker.patcher import _pat
 
-_DATA = os.path.join(os.path.dirname(__file__), "data", "recipes.json")
+# The bundled game data moved out of this package when the Go port began: it is
+# read by both implementations now, so it belongs to the repository rather than
+# to the Python package, and Go can only embed what is under its own directory.
+_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+_DATA = os.path.join(_DATA_DIR, "recipes.json")
 
 MAIN_RECIPE_OFF = layout.MAIN_RECIPE_OFF
 RECIPE_CREATE_ITEM = 0x8

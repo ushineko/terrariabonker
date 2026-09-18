@@ -134,8 +134,10 @@ def _tile_names():
     import json
     import os
     from terrariabonker import tiles
-    path = os.path.join(os.path.dirname(os.path.abspath(tiles.__file__)),
-                        "data", "tiles.json")
+    # The bundled data lives beside the package, not inside it: both
+    # implementations read it now (spec 051).
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(tiles.__file__)))
+    path = os.path.join(repo, "data", "tiles.json")
     with open(path) as f:
         return {int(k): v for k, v in json.load(f).items()}
 
