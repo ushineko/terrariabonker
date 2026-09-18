@@ -3,7 +3,7 @@ Type=Application
 Name=terrariabonker
 GenericName=Terraria trainer
 Comment=Live-memory trainer and item editor for Terraria (Proton)
-Exec=__EXEC__
+Exec=terrariabonker-gui
 Icon=terrariabonker
 Terminal=false
 # One main category: desktop-file-validate warns that two of them can put the
@@ -20,4 +20,9 @@ StartupNotify=true
 # StartupWMClass covers the X11 and XWayland case, where the match is on
 # WM_CLASS instead. Without it the titlebar finds the icon and the task manager
 # does not, which is how this was noticed.
+#
+# If the task manager still shows no icon after installing this, plasmashell has
+# cached "no icon" for the app_id from a run that predates the entry. It clears
+# on `systemctl --user restart plasma-plasmashell`, or at the next login.
+# kbuildsycoca6 alone does not clear it.
 StartupWMClass=io.ushineko.terrariabonker

@@ -80,8 +80,11 @@ if [ -x "$APP_DIR/$GO_GUI" ] || command -v go >/dev/null; then
 
         if [ -f "$APP_DIR/$GO_DESKTOP_FILE" ]; then
             mkdir -p "$INSTALL_DIR"
-            sed -e "s|__EXEC__|$BIN_DIR/$GO_GUI|g" \
-                "$APP_DIR/$GO_DESKTOP_FILE" > "$INSTALL_DIR/$GO_DESKTOP_FILE"
+            # Copied as-is: Exec is the bare command name, found on PATH via the
+            # symlink above, as the sibling programs' entries do. An absolute
+            # path here would bake this checkout's location into an installed
+            # file.
+            cp -f "$APP_DIR/$GO_DESKTOP_FILE" "$INSTALL_DIR/$GO_DESKTOP_FILE"
             chmod +x "$INSTALL_DIR/$GO_DESKTOP_FILE"
             echo "Installed desktop file: $INSTALL_DIR/$GO_DESKTOP_FILE"
         fi
