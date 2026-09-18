@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -318,4 +319,118 @@ func TestTheStatusBarGetsAVerdictAndTheLogGetsTheAdvice(t *testing.T) {
 	require.Equal(t, "sudo refused", shortReason("sudo: a password is required", nil))
 	require.Equal(t, "unreadable", shortReason("", nil))
 	require.Equal(t, "boom", detail("", errors.New("boom")))
+}
+
+/*
+Every field of a status reply must decode into the struct that reads it.
+
+The argv direction has been checked since the port began: every command the
+window can send is parsed by the real CLI. The reply direction never was, and it
+broke in the way that costs most -- compat_level is a word ("exact", "hotfix")
+and was declared an int, so encoding/json rejected the whole document. With no
+game the CLI errors and the bar shows the error, so it looked fine; with a game
+the status arrived, failed to decode, and the window reported the build as
+unreadable, ran no build gate and never auto-restored.
+
+So this asks the Python for the types its own snapshot carries, the way the argv
+test asks it to parse an argv, rather than trusting what is written here.
+*/
+func TestEveryStatusFieldDecodesIntoTheStructThatReadsIt(t *testing.T) {
+	want := pythonSnapshotTypes(t)
+
+	got := reflect.TypeOf(client.Status{})
+	checked := 0
+	for i := range got.NumField() {
+		f := got.Field(i)
+		tag := strings.Split(f.Tag.Get("json"), ",")[0]
+		pyType, known := want[tag]
+		if !known {
+			continue // built in cmd_status rather than carried by the snapshot
+		}
+		checked++
+		require.Truef(t, fits(pyType, f.Type), "%s is %s in Python and %s here",
+			tag, pyType, f.Type)
+	}
+	require.GreaterOrEqual(t, checked, 8, "the reply's fields are not being checked at all")
+}
+
+// fits reports whether a Go type can hold what the Python annotation describes.
+// An optional Python field may be a pointer here -- "absent" and "zero" are
+// different facts for HP -- or a plain value when zero is answer enough.
+func fits(pyType string, goType reflect.Type) bool {
+	if goType.Kind() == reflect.Pointer {
+		goType = goType.Elem()
+	}
+	switch strings.TrimSuffix(strings.ReplaceAll(pyType, " ", ""), "|None") {
+	case "str":
+		return goType.Kind() == reflect.String
+	case "int":
+		return goType.Kind() == reflect.Int
+	case "float":
+		return goType.Kind() == reflect.Float64
+	case "bool":
+		return goType.Kind() == reflect.Bool
+	}
+	return true // a shape this test does not model; the decode test below covers it
+}
+
+// pythonSnapshotTypes is what the CLI's own status snapshot carries, by field.
+func pythonSnapshotTypes(t *testing.T) map[string]string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), parseTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "python3", "-c", snapshotTypes) //nolint:gosec // a fixed script
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
+		t.Skip("the Python package is not importable here")
+	}
+	require.NoErrorf(t, err, "asking the Python: %s", out)
+
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(out, &got))
+	require.NotEmpty(t, got)
+	return got
+}
+
+// snapshotTypes dumps the annotations of the two records cmd_status reads.
+const snapshotTypes = `
+import json
+from terrariabonker.service import PlayerState, Snapshot
+out = {}
+for cls in (Snapshot, PlayerState):
+    out.update({k: str(v) for k, v in cls.__annotations__.items()})
+print(json.dumps(out))
+`
+
+/*
+A status reply of the shape the CLI emits decodes whole.
+
+The type check above is the contract; this is the document, so a field renamed
+on either side shows up as well as one retyped.
+*/
+func TestAStatusReplyDecodesWhole(t *testing.T) {
+	const reply = `{"pid": 4242, "version": "1.4.5.8", "compat_level": "exact", ` +
+		`"buildid": "24893155", "build": "1.4.5.8+24893155", "copies": 2, ` +
+		`"name": "Nakama", "hp": 380, "max_hp": 400, "mana": 200, "max_mana": 200, ` +
+		`"world": ["Terraria", 12345]}`
+
+	st, ok := client.ParseStatus(reply)
+	require.True(t, ok, "the shape the CLI emits must decode")
+	require.Equal(t, 4242, st.PID)
+	require.Equal(t, "exact", st.CompatLevel)
+	require.Equal(t, "1.4.5.8+24893155", st.BuildKey())
+	require.NotNil(t, st.HP)
+	require.Equal(t, 380, *st.HP)
+	require.Equal(t, "Nakama", *st.Name)
+
+	// And the same reply with no player in it, which is the ordinary state
+	// before a world is loaded.
+	empty, ok := client.ParseStatus(`{"pid": 4242, "version": "1.4.5.8", ` +
+		`"compat_level": "exact", "buildid": "", "build": "1.4.5.8", "copies": 1, ` +
+		`"name": null, "hp": null, "max_hp": null, "mana": null, "max_mana": null, ` +
+		`"world": null}`)
+	require.True(t, ok)
+	require.Nil(t, empty.Name)
+	require.Nil(t, empty.HP)
 }

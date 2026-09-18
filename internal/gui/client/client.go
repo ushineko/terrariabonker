@@ -27,9 +27,13 @@ import (
 // the game may be running with no player loaded — so the pointers distinguish
 // "absent" from "zero", which matters for HP.
 type Status struct {
-	PID         int     `json:"pid"`
-	Version     string  `json:"version"`
-	CompatLevel int     `json:"compat_level"`
+	PID     int    `json:"pid"`
+	Version string `json:"version"`
+	// CompatLevel is a word -- "exact", "hotfix", "incompatible", "unknown" --
+	// not a number. It was an int here, which made encoding/json reject the
+	// whole reply: no HP in the status bar, no build gate and no auto-restore,
+	// because both of those only run on a status that parsed.
+	CompatLevel string  `json:"compat_level"`
 	BuildID     string  `json:"buildid"`
 	Build       string  `json:"build"`
 	Copies      int     `json:"copies"`
