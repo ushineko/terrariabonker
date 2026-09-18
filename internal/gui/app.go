@@ -31,6 +31,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 	fd "github.com/ushineko/fynedesygn"
 	"github.com/ushineko/fynedesygn/logpane"
 	"github.com/ushineko/fynedesygn/shell"
@@ -68,10 +69,38 @@ type ui struct {
 	// log is the window's output, the counterpart of the Qt panel's log box.
 	log *logpane.Pane
 
+	// The Effects loops. Built once with the window, not with the section, so
+	// a cheat survives navigating away from the controls that started it.
+	freeze  *freezer
+	potions *watch
+	fishing *watch
+	buffs   *watch
+	catch   *watch
+	sell    *watch
+	// fx is what those loops read and what their controls write. Held on the
+	// window for the same reason: a section rebuild must not reset a running
+	// cheat's settings.
+	fx effectState
+
 	mu        sync.Mutex
 	status    *client.Status
 	statusOK  bool
 	statusMsg string
+}
+
+// effectState is the Effects section's settings, and the little each loop
+// remembers between rounds.
+type effectState struct {
+	god, mana                       bool
+	buffPower, buffSonar, buffCrate bool
+	recast                          bool
+	bait, power, stack              int
+	// kitDone is set once the kit round has run. After that the service would
+	// find gear and do nothing, so the round trip is not worth making again.
+	kitDone   bool
+	whitelist []int
+	sellPick  int
+	sellList  *widget.List
 }
 
 // sectionTitles is the navigation in order, which is the order the Qt window's
@@ -94,10 +123,10 @@ type sectionEntry struct {
 // rather than a silently different list.
 func sectionBuilders() map[string]sectionEntry {
 	return map[string]sectionEntry{
-		"Player": {theme.AccountIcon, (*ui).buildPlayer},
+		"Player":  {theme.AccountIcon, (*ui).buildPlayer},
+		"Effects": {theme.MediaPlayIcon, (*ui).buildEffects},
 		// Phases 2-5 of spec 050 fill these in. Until then each says what it is
 		// for, rather than being absent from a navigation the flag help lists.
-		"Effects":     {theme.MediaPlayIcon, placeholder("Effects", "Cheats that run while the trainer is open.")},
 		"Projectiles": {theme.MailSendIcon, placeholder("Projectiles", "Edit how projectiles behave.")},
 		"Patches":     {theme.SettingsIcon, placeholder("Patches", "Code written into the running game.")},
 		"Inventory":   {theme.StorageIcon, placeholder("Inventory", "Edit carried items.")},
@@ -164,11 +193,27 @@ func (u *ui) shellOptions(o Options) shell.Options {
 		Section:      o.Section,
 		Scheme:       o.Scheme,
 		StatusBar:    func(*shell.Shell) []fyne.CanvasObject { return u.statusSegments() },
-		OnCreate:     func(s *shell.Shell) { u.sh = s; u.resolve(o) },
+		OnCreate:     func(s *shell.Shell) { u.onCreate(s, o) },
 		OnStart:      func(*shell.Shell) { u.start() },
-		OnStop:       func(*shell.Shell) { u.work.Close() },
+		OnStop:       func(*shell.Shell) { u.shutdown() },
 		OnInvalidate: func(*shell.Shell) { u.statusOK = false },
 	}
+}
+
+/*
+onCreate is everything a section may rely on, before the first one is built.
+
+The shell builds a section during construction, so anything a builder touches
+has to exist by now. The Effects controls read the loops to decide whether their
+switches are on, and building them in OnStart instead meant a window opened with
+--section Effects dereferenced a nil watch and died -- caught by the test that
+renders every section headlessly, which is the cheapest place to find it.
+*/
+func (u *ui) onCreate(s *shell.Shell, o Options) {
+	u.sh = s
+	u.resolve(o)
+	u.fx.bait, u.fx.power, u.fx.stack = defaultBait, defaultPower, defaultStack
+	u.startWatches()
 }
 
 // resolve finds the CLI and works out whether sudo will run without a prompt.
@@ -198,6 +243,7 @@ func (u *ui) start() {
 	}
 	u.startWorker()
 	u.loadStatus()
+	u.loadSellList()
 }
 
 // startWorker brings up one `serve` process. Failing is not fatal: every
@@ -290,6 +336,51 @@ func declined(err error) bool {
 		strings.Contains(msg, "worker is not running") ||
 		strings.Contains(msg, "worker exited")
 }
+
+/*
+shutdown stops everything the window is holding up.
+
+The cheats on the Effects section are held by this process, so they have to be
+let go deliberately: the freeze loop is its own process and the watches each have
+a watcher in the worker to drop. The worker goes last, because stopping a watch
+sends it one more command.
+*/
+func (u *ui) shutdown() {
+	u.freeze.halt()
+	for _, w := range []*watch{u.potions, u.fishing, u.buffs, u.catch, u.sell} {
+		if w != nil {
+			w.halt()
+		}
+	}
+	u.work.Close()
+}
+
+/*
+once runs a single operation in the background and logs what it said.
+
+For the one-off commands beside a watch -- raising rod power as fishing starts,
+restoring it as it stops, editing the sell list. Not through Perform: those run
+while a watch is already going, and Perform refuses a second operation.
+*/
+func (u *ui) once(what string, argv []string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), onceTimeout)
+		defer cancel()
+		out, err := u.run(ctx, argv)
+		fyne.Do(func() {
+			if err != nil {
+				u.note(what + " failed: " + firstLine(detail(out, err)))
+				return
+			}
+			for _, line := range splitLines(out) {
+				u.note(line)
+			}
+		})
+	}()
+}
+
+// onceTimeout bounds a background one-off.
+const onceTimeout = 60 * time.Second
 
 // note writes one line to the window's log. Safe from any goroutine.
 func (u *ui) note(msg string) {

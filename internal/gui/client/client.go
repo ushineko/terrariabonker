@@ -110,6 +110,141 @@ func LongReachArgv(tiles int) []string {
 	return []string{"long-reach", "--tiles", strconv.Itoa(tiles)}
 }
 
+// --- the trainer-held watches ------------------------------------------------
+//
+// None of these is the CLI's own --watch form. The worker must not block, so
+// the window owns the cadence and sends one round per tick.
+
+// PotionsArgv is one renewal round for favorited potions.
+func PotionsArgv(minStack int) []string {
+	return []string{"potions", "--json", "--min-stack", strconv.Itoa(minStack)}
+}
+
+// FishingArgv is one bait round: hand out the kit if asked, then top bait up.
+func FishingArgv(keep int, kit bool) []string {
+	argv := []string{"fishing", "--json", "--keep", strconv.Itoa(keep)}
+	if !kit {
+		argv = append(argv, "--no-kit")
+	}
+	return argv
+}
+
+// FishingPowerArgv raises every rod the player carries to power.
+func FishingPowerArgv(power int) []string {
+	return []string{"fishing", "--json", "--no-kit", "--power", strconv.Itoa(power)}
+}
+
+// FishingRestoreArgv puts the rods back to the power they had. Rod power is the
+// one thing on the Effects section written into the save, so switching the watch
+// off restores it instead of leaving a permanent change behind.
+func FishingRestoreArgv() []string {
+	return []string{"fishing", "--json", "--no-kit", "--restore"}
+}
+
+// FishingBuffsArgv is one round of holding the fishing potion effects up.
+func FishingBuffsArgv(power, sonar, crate bool) []string {
+	argv := []string{"fishing-buffs", "--json"}
+	for _, f := range []struct {
+		on   bool
+		flag string
+	}{{power, "--power"}, {sonar, "--sonar"}, {crate, "--crate"}} {
+		if f.on {
+			argv = append(argv, f.flag)
+		}
+	}
+	return argv
+}
+
+// CatchArgv is one slice of auto-catch.
+func CatchArgv(recast bool) []string {
+	argv := []string{"catch-tick", "--json"}
+	if recast {
+		argv = append(argv, "--recast")
+	}
+	return argv
+}
+
+// CatchStopArgv drops the watcher when auto-catch is switched off.
+func CatchStopArgv() []string { return []string{"catch-stop", "--json"} }
+
+// SellTickArgv is one auto-sell round.
+func SellTickArgv() []string { return []string{"sell-tick", "--json"} }
+
+// SellListArgv reads the whitelist, optionally toggling one item type on the
+// way. A nil add or remove leaves the list alone.
+func SellListArgv(add, remove *int) []string {
+	argv := []string{"sell-list", "--json"}
+	if add != nil {
+		argv = append(argv, "--add", strconv.Itoa(*add))
+	}
+	if remove != nil {
+		argv = append(argv, "--remove", strconv.Itoa(*remove))
+	}
+	return argv
+}
+
+// FreezeArgv holds values against the game. Unlike the rounds above this is a
+// blocking loop, so the window runs it as its own process rather than ticking
+// it, and stops it by killing that process.
+func FreezeArgv(godmode, mana bool) []string {
+	argv := []string{"freeze"}
+	if godmode {
+		argv = append(argv, "--godmode")
+	}
+	if mana {
+		argv = append(argv, "--mana")
+	}
+	return argv
+}
+
+/*
+Replies is every JSON object in a reply, in order.
+
+The worker answers with a line of JSON, sometimes preceded by human-readable
+output, so a reply is read by walking the lines and keeping the ones that decode.
+Only lines starting with "{" are considered, so anything that decodes is an
+object: an array or a bare string on its own line is skipped before parsing
+rather than filtered after.
+*/
+func Replies(raw string) []map[string]any {
+	var out []map[string]any
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			continue
+		}
+		out = append(out, got)
+	}
+	return out
+}
+
+// ParseSellList is the whitelist as item types, and whether the reply carried
+// one at all.
+func ParseSellList(raw string) ([]int, bool) {
+	for _, got := range Replies(raw) {
+		raw, ok := got["whitelist"]
+		if !ok {
+			continue
+		}
+		list, ok := raw.([]any)
+		if !ok {
+			continue
+		}
+		out := make([]int, 0, len(list))
+		for _, v := range list {
+			if n, ok := v.(float64); ok {
+				out = append(out, int(n))
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
 /*
 Sample is one operation this package can emit, with the subcommand it is
 declared to reach.
@@ -141,8 +276,28 @@ func Samples() []Sample {
 		{"SetMaxManaArgv", "set-max-mana", SetMaxManaArgv(200)},
 		{"FastMiningArgv", "fast-mining", FastMiningArgv()},
 		{"LongReachArgv", "long-reach", LongReachArgv(20)},
+		{"PotionsArgv", "potions", PotionsArgv(1)},
+		{"FishingArgv", "fishing", FishingArgv(30, true)},
+		{"FishingArgv/no-kit", "fishing", FishingArgv(30, false)},
+		{"FishingPowerArgv", "fishing", FishingPowerArgv(255)},
+		{"FishingRestoreArgv", "fishing", FishingRestoreArgv()},
+		{"FishingBuffsArgv", "fishing-buffs", FishingBuffsArgv(true, true, true)},
+		{"FishingBuffsArgv/none", "fishing-buffs", FishingBuffsArgv(false, false, false)},
+		{"CatchArgv", "catch-tick", CatchArgv(false)},
+		{"CatchArgv/recast", "catch-tick", CatchArgv(true)},
+		{"CatchStopArgv", "catch-stop", CatchStopArgv()},
+		{"SellTickArgv", "sell-tick", SellTickArgv()},
+		{"SellListArgv", "sell-list", SellListArgv(nil, nil)},
+		{"SellListArgv/add", "sell-list", SellListArgv(ptr(29), nil)},
+		{"SellListArgv/remove", "sell-list", SellListArgv(nil, ptr(29))},
+		{"FreezeArgv", "freeze", FreezeArgv(true, true)},
+		{"FreezeArgv/none", "freeze", FreezeArgv(false, false)},
 	}
 }
+
+// ptr is a sample helper: the optional arguments above are pointers so that
+// "not given" is distinct from zero.
+func ptr(n int) *int { return &n }
 
 // lastLine returns the final non-empty line of a reply.
 func lastLine(raw string) (string, bool) {

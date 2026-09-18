@@ -113,6 +113,13 @@ func (u *ui) logWidget() fyne.CanvasObject {
 // QSpinBox. Fyne has no spin box, and a slider is wrong for a number someone
 // wants to type exactly.
 func (u *ui) spin(def, lo, hi int) *widget.Entry {
+	return u.spinTo(def, lo, hi, nil)
+}
+
+// spinTo is spin that reports every valid value it is given. A loop reading the
+// number needs it somewhere it can be read off the UI thread, so the setter puts
+// it there as it is typed.
+func (u *ui) spinTo(def, lo, hi int, set func(int)) *widget.Entry {
 	e := widget.NewEntry()
 	e.SetText(strconv.Itoa(def))
 	e.Validator = func(s string) error {
@@ -124,6 +131,13 @@ func (u *ui) spin(def, lo, hi int) *widget.Entry {
 			return errOutOfRange(lo, hi)
 		}
 		return nil
+	}
+	if set != nil {
+		e.OnChanged = func(s string) {
+			if n, err := strconv.Atoi(s); err == nil && n >= lo && n <= hi {
+				set(n)
+			}
+		}
 	}
 	return e
 }

@@ -30,9 +30,15 @@ testUI is a window with no window: the panel's state over a headless shell, with
 HOME and the XDG directories pointed at throwaway paths so a test cannot reach
 the developer's configuration.
 
-cli is left empty, so nothing a test does can spawn sudo or touch a game. That is
-deliberate and load-bearing: this is a trainer, and a test suite that could write
-to a running process is a test suite that will, eventually, on someone's machine.
+The CLI is cleared after construction, so nothing a test does can spawn sudo or
+touch a game. That is deliberate and load-bearing: this is a trainer, and a test
+suite that could write to a running process is a test suite that will, eventually,
+on someone's machine.
+
+Clearing it afterwards rather than trusting an empty Options is the point. resolve
+looks the CLI up on PATH, and on a developer's machine it is installed there -- so
+the first version of this helper left every test one call away from running the
+real trainer under sudo.
 */
 func testUI(t *testing.T) *ui {
 	t.Helper()
@@ -42,6 +48,7 @@ func testUI(t *testing.T) *ui {
 
 	u := &ui{version: "test"}
 	u.sh = shell.Headless(app, u.shellOptions(Options{}))
+	u.cli, u.sudoOK = "", false
 	win := test.NewWindow(widget.NewLabel(""))
 	u.sh.Window = win
 	t.Cleanup(win.Close)
@@ -188,8 +195,31 @@ func TestEveryOperationWeSendIsOneTheWorkerWillServe(t *testing.T) {
 	require.NotEmpty(t, ops, "could not read SERVE_OPS from the CLI")
 
 	for _, s := range client.Samples() {
+		if notServed[s.Argv[0]] {
+			continue
+		}
 		require.Containsf(t, ops, s.Argv[0],
 			"%q is not in SERVE_OPS, so the warm worker would refuse it", s.Argv[0])
+	}
+}
+
+/*
+notServed is the operations that must not go through the worker.
+
+freeze is a blocking loop. Sending it to the worker would stop the worker
+answering anything else for as long as the cheat is on, which is why the window
+runs it as a process of its own. Listed rather than inferred, so that adding an
+operation the worker cannot take is a decision someone wrote down.
+*/
+var notServed = map[string]bool{"freeze": true}
+
+// The one exception has to be real: if freeze ever becomes servable, this list
+// is stale and the reason above no longer holds.
+func TestTheOnlyUnservedOperationIsTheBlockingOne(t *testing.T) {
+	ops := serveOps(t)
+	for op := range notServed {
+		require.NotContainsf(t, ops, op,
+			"%q is servable now, so it should not be run as its own process", op)
 	}
 }
 
