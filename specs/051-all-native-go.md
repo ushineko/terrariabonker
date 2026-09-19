@@ -1,9 +1,10 @@
 # Spec 051: The rest of it in Go
 
-**Status**: IN PROGRESS. The window from spec 050 has been run against the live game and
-what it found is fixed, so this starts. Spec 050's phase 6 — retiring the Qt window —
-moves here as step 0, because the Python it would have to keep working is the Python this
-spec deletes.
+**Status**: COMPLETE. Every step landed; there is no Python left in the repository. The
+window from spec 050 had been run against the live game and what it found was fixed,
+which is what let this start. Spec 050's phase 6 — retiring the Qt window — moved here as
+step 0, because the Python it would have had to keep working is the Python this spec
+deletes.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -430,10 +431,27 @@ build the differential habit this port depends on.
    `pylons` is the one patch not applied: it needs a pylon already placed so the game
    compiles the method it patches.
 8. **`xnb` and `sprites`.** Decoding the game's containers and building the PNG cache.
-   Pillow leaves with them; Go's `image/png` writes the cache. Differential test: decode
-   the same `Item_<id>.xnb` in both and compare the PNG bytes, or the pixels.
+   Pillow leaves with them; Go's `image/png` writes the cache.
+
+   **Done.** LZX and the XNB container are a port of libmspack by way of MonoGame; the
+   differential run decoded the game's own assets in both implementations and compared
+   the result: **14,015 sprites byte-identical** and **6,901 icons pixel-identical**. Not
+   file bytes for the icons -- two PNG encoders disagree about filters and chunk order
+   while agreeing about every pixel, so the comparison decodes and compares the image.
+
 9. **Retire Python.** Delete the package and `requirements.txt`, rework `install.sh`,
    and move whatever remains of the 48 test files that is still meaningful.
+
+   **Done.** The package, `requirements.txt`, `terrariabonker.py`, `tools/monofields.py`,
+   `tools/projectile_probe.py` and `tools/extract_prefix_stats.py` are gone;
+   `cmd/monofields` and `cmd/prefixstats` replace the two tools that were still used.
+   `install.sh` builds and installs two Go binaries, `tools/kwin_rule.sh` replaces its
+   Python counterpart, and `.github/workflows/build.yml` builds and releases on a tag.
+
+   The tests did not come over one for one. Translating the last of them was costing more
+   than it was worth -- much of what was left pinned Python's own shape rather than this
+   tool's behaviour -- so the maintainer called it: wipe the remainder and write a
+   smaller, focused Go suite against the Go code. That is what AC4 below records.
 
 ### What this port will not make faster
 
@@ -464,18 +482,26 @@ Python on the shared fixture has not passed.
 _Not yet written in detail: this spec is a plan, and its criteria belong to the phases
 that implement it. The shape they take:_
 
-- [ ] AC1 No Python in the repository; no `requirements.txt`; `install.sh` installs two
+- [x] AC1 No Python in the repository; no `requirements.txt`; `install.sh` installs two
   Go binaries.
-- [ ] AC2 Every CLI subcommand's `--json` output is byte-identical to the Python CLI's
+- [x] AC2 Every CLI subcommand's `--json` output is byte-identical to the Python CLI's
   for the whole differential corpus, checked while both existed.
-- [ ] AC3 Every offset is declared once, in one Go package, and was diffed against the
-  Python value before the Python was deleted.
-- [ ] AC4 The synthetic memory image and the behaviour the Python tests pinned are both
-  carried over; test count does not fall silently.
-- [ ] AC5 `serve` speaks the same JSON-line protocol, and the spec 050 window works
+- [x] AC3 Every offset is declared once, in one Go package (`internal/layout`), and was
+  diffed against the Python value before the Python was deleted. The 17 anchors resolved
+  to the same live addresses in both.
+- [x] AC4 The synthetic memory image is carried over (`internal/memtest` and each
+  package's planted process). **The second half of this criterion was deliberately
+  dropped**: the count did fall, from 461 tests with ~150 of them coupled to Python to
+  653 Go tests with none. It did not fall *silently* -- the maintainer decided it, for
+  the reason recorded under step 9. What the remaining Python tests pinned about Python
+  is gone on purpose; what they pinned about this tool's behaviour is in the Go suite,
+  and the values that would otherwise have been transcribed are frozen as digests.
+- [x] AC5 `serve` speaks the same JSON-line protocol, and the spec 050 window works
   against the Go implementation with no change to its client.
-- [ ] AC6 The maintainer has used it on a live game, including a patch and a restore,
-  before the Python is deleted.
+- [x] AC6 The maintainer has used it on a live game, including a patch and a restore,
+  before the Python is deleted. Fourteen of the fifteen patches were applied to a running
+  game and watched; `pylons` needs a pylon placed for the game to compile the method it
+  patches.
 
 ## Risks & Assumptions
 
