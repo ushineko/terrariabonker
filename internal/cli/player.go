@@ -29,7 +29,7 @@ func (a *App) commands() []*cobra.Command {
 		a.catchCmd(), a.catchTickCmd(), a.catchStopCmd(),
 		a.projectileTickCmd(), a.projectileStopCmd(), a.projectileOfCmd(),
 		a.sellCmd(), a.sellTickCmd(), a.sellListCmd(),
-		a.extractRecipesCmd(), a.serveCmd(),
+		a.extractRecipesCmd(), a.extractSpritesCmd(), a.serveCmd(),
 		a.readCmd(), a.writeCmd(),
 	}
 }

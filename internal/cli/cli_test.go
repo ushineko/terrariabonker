@@ -39,9 +39,6 @@ switched to a different valid command would otherwise pass.
 func TestEveryArgvTheWindowEmitsIsAccepted(t *testing.T) {
 	for _, sample := range client.Samples() {
 		t.Run(sample.Name, func(t *testing.T) {
-			if notYetPorted[sample.Cmd] {
-				t.Skipf("%s arrives with the sprite extractor (spec 051, step 8)", sample.Cmd)
-			}
 			root := cli.Root()
 			cmd, rest, err := root.Find(sample.Argv)
 			require.NoErrorf(t, err, "%v reaches no command", sample.Argv)
@@ -54,16 +51,6 @@ func TestEveryArgvTheWindowEmitsIsAccepted(t *testing.T) {
 		})
 	}
 }
-
-/*
-notYetPorted is the one command the window can ask for that this does not have
-yet.
-
-Icon extraction is unprivileged disk work and comes with the sprite reader. The
-entry is here rather than in a comment so it disappears the moment the command
-exists.
-*/
-var notYetPorted = map[string]bool{"extract-sprites": true}
 
 /*
 The two front ends accept and refuse the same argv.
@@ -113,6 +100,7 @@ func TestTheArgvSurfaceMatchesThePython(t *testing.T) {
 		{"patch", "disable", "mining"}, {"patch", "off", "mining"},
 		{"freeze", "--godmode", "--mana"}, {"godmode", "--seconds", "5"},
 		{"restore", "--json"}, {"extract-recipes"}, {"serve"},
+		{"extract-sprites"}, {"extract-sprites", "--force"},
 		{"read", "0x10000000"}, {"write", "0x10000000", "5"},
 
 		// And the ones both must refuse.

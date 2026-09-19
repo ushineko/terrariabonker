@@ -6,7 +6,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ushineko/terrariabonker/internal/game"
+	"github.com/ushineko/terrariabonker/internal/proc"
 	"github.com/ushineko/terrariabonker/internal/recipes"
+	"github.com/ushineko/terrariabonker/internal/sprites"
 )
 
 /*
@@ -110,6 +112,46 @@ func (a *App) prefixesCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable catalog")
+	return cmd
+}
+
+/*
+extractSpritesCmd builds the icon cache from the game's own files.
+
+Unprivileged on purpose, and the only command here that is: it reads
+Content/Images from disk and writes under ~/.cache, so the icons land owned by
+the user rather than by root. It never attaches to the game for memory -- only
+to learn where the game was installed, which nothing else knows.
+*/
+func (a *App) extractSpritesCmd() *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "extract-sprites",
+		Short: "decode item icons from the game into a local cache",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			/*
+				The game's path, if it happens to be running. Extraction works
+				without it once the path has been learned, which is the usual
+				case -- so a game that is closed is not a failure here.
+			*/
+			exe := ""
+			if pid, err := proc.FindPID(); err == nil {
+				exe = proc.New(pid).ExePath()
+			}
+			got, err := sprites.Extract(sprites.Options{
+				ExePath: exe, Force: force,
+				Progress: func(done, total int) { printf(cmd, "%d/%d", done, total) },
+			})
+			if err != nil {
+				return err
+			}
+			printf(cmd, "[OK] icons: %d of %d (%d skipped/failed) -> %s",
+				got.OK, got.Total, got.Failed, sprites.CacheDir(""))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "re-decode even if cached")
 	return cmd
 }
 

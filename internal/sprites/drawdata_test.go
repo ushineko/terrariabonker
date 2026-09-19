@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,15 +24,6 @@ nothing but the file connects them -- which makes the JSON the interface, and a
 key spelled differently on either side a silent loss of every tinted icon. Both
 implementations are asked to write it and then to read the other's.
 */
-
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
-
-// realHome is the home directory before the test moved it, so the Python child
-// can still find its own packages.
-var realHome = os.Getenv("HOME")
 
 /*
 pyDrawData runs a script against a chosen file, without moving HOME.
