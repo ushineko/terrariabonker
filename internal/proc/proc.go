@@ -321,3 +321,35 @@ func mapsTheGame(path string) bool {
 	}
 	return false
 }
+
+/*
+MappedInode is the inode a path is mapped from, and whether it is mapped
+executable at all.
+
+The mapping carries the inode it was made from, so comparing it with the file on
+disk says whether the process is running the code that path now describes.
+Replacing a file leaves the old mapping in place, and reading the new file would
+then report a build that is not running.
+*/
+func MappedInode(pid int, path string) (uint64, bool) {
+	f, err := os.Open(filepath.Join("/proc", strconv.Itoa(pid), "maps"))
+	if err != nil {
+		return 0, false
+	}
+	defer func() { _ = f.Close() }()
+
+	scan := bufio.NewScanner(f)
+	scan.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scan.Scan() {
+		parts := strings.Fields(scan.Text())
+		if len(parts) < 6 || parts[5] != path || !strings.Contains(parts[1], "x") {
+			continue
+		}
+		inode, err := strconv.ParseUint(parts[4], 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return inode, true
+	}
+	return 0, false
+}
