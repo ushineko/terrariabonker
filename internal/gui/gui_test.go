@@ -1,16 +1,12 @@
 package gui
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -23,7 +19,10 @@ import (
 	"github.com/ushineko/fynedesygn/shell"
 	fdtheme "github.com/ushineko/fynedesygn/theme"
 
+	"github.com/ushineko/terrariabonker/internal/cli"
 	"github.com/ushineko/terrariabonker/internal/gui/client"
+	"github.com/ushineko/terrariabonker/internal/memtest"
+	"github.com/ushineko/terrariabonker/internal/service"
 )
 
 /*
@@ -138,69 +137,40 @@ func TestEveryArgvWeBuildParsesAgainstTheRealCLI(t *testing.T) {
 	samples := client.Samples()
 	require.NotEmpty(t, samples)
 
+	root := cli.Root()
 	for _, s := range samples {
 		t.Run(s.Name, func(t *testing.T) {
-			require.Equalf(t, s.Cmd, s.Argv[0], "%s emits %q, declared as %q", s.Name, s.Argv[0], s.Cmd)
+			require.Equalf(t, s.Cmd, s.Argv[0], "%s emits %q, declared as %q",
+				s.Name, s.Argv[0], s.Cmd)
 
-			argv, err := json.Marshal(s.Argv)
-			require.NoError(t, err)
-			ctx, cancel := context.WithTimeout(t.Context(), parseTimeout)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, "python3", "-c", parseCheck, string(argv)) //nolint:gosec // a fixed script and our own argv
-			// From the repository root, because that is where the package is
-			// importable from. go test runs in the package directory, and
-			// without this every case skipped -- which is how a guardrail
-			// silently stops guarding.
-			cmd.Dir = repoRoot
-			out, err := cmd.CombinedOutput()
-			if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-				t.Skip("the Python CLI is not importable here")
-			}
-			require.NoErrorf(t, err, "%s: %s does not parse: %s", s.Name, s.Argv, out)
-			require.Equalf(t, s.Cmd, strings.TrimSpace(string(out)),
-				"%s reached a different subcommand", s.Name)
+			cmd, rest, err := root.Find(s.Argv)
+			require.NoErrorf(t, err, "%s: %v reaches no command", s.Name, s.Argv)
+			require.Equalf(t, s.Cmd, cmd.Name(), "%s reached a different subcommand", s.Name)
+			require.NoErrorf(t, cmd.ParseFlags(rest),
+				"%s: %v has a flag the CLI does not take", s.Name, s.Argv)
+			require.NoErrorf(t, cmd.ValidateArgs(cmd.Flags().Args()),
+				"%s: %v has arguments the CLI does not take", s.Name, s.Argv)
 		})
 	}
 }
-
-// repoRoot is where the Python package is importable from, relative to this
-// package's directory. parseTimeout bounds one interpreter start-up.
-const (
-	repoRoot     = "../.."
-	parseTimeout = 30 * time.Second
-)
-
-// parseCheck parses an argv with the real CLI parser and prints the subcommand
-// it reached, so the test can assert which handler it found rather than only
-// that it found one.
-const parseCheck = `
-import json, sys
-from terrariabonker.cli import build_parser
-argv = json.loads(sys.argv[1])
-args = build_parser().parse_args(argv)
-if getattr(args, "func", None) is None:
-    sys.exit("no handler")
-print(argv[0])
-`
 
 /*
 Every operation the window sends to the worker must be one the worker will
 serve, or it falls back to a one-shot CLI run costing ~2.7 s instead of ~2.5 ms
 -- the difference between a 1 Hz inventory sync and a window that stutters.
 
-SERVE_OPS is read where it is declared rather than copied, because a copy is a
-second spelling to keep in step.
+The allowlist is read where it is declared rather than copied, because a copy is
+a second spelling to keep in step.
 */
 func TestEveryOperationWeSendToTheWorkerIsOneItWillServe(t *testing.T) {
-	ops := serveOps(t)
-	require.NotEmpty(t, ops, "could not read SERVE_OPS from the CLI")
+	require.NotEmpty(t, cli.ServeOps, "the worker serves nothing")
 
 	for _, s := range client.Samples() {
 		if _, direct := sentDirectly[s.Name]; direct {
 			continue
 		}
-		require.Containsf(t, ops, s.Argv[0],
-			"%q is not in SERVE_OPS, so the warm worker would refuse it", s.Argv[0])
+		require.Truef(t, cli.ServeOps[s.Argv[0]],
+			"%q is not served, so the warm worker would refuse it", s.Argv[0])
 	}
 }
 
@@ -237,26 +207,6 @@ func TestEveryDirectExceptionNamesARealBuilder(t *testing.T) {
 		require.Truef(t, have[name], "%q is not a builder any more", name)
 		require.NotEmptyf(t, why, "%q is excused without a reason", name)
 	}
-}
-
-// serveOps reads the SERVE_OPS frozenset out of the Python CLI, where it is
-// declared. Reading it rather than copying it is the point: a copy is a second
-// spelling to keep in step.
-func serveOps(t *testing.T) []string {
-	t.Helper()
-	src, err := os.ReadFile("../../terrariabonker/cli.py")
-	if err != nil {
-		t.Skipf("the Python CLI is not here to check against: %v", err)
-	}
-	block := regexp.MustCompile(`(?s)SERVE_OPS\s*=\s*frozenset\(\{(.*?)\}\)`).FindSubmatch(src)
-	if block == nil {
-		t.Skip("SERVE_OPS is no longer a frozenset literal; teach this test its new shape")
-	}
-	var ops []string
-	for _, m := range regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(string(block[1]), -1) {
-		ops = append(ops, m[1])
-	}
-	return ops
 }
 
 // The reply parsers take the last line, because the CLI may print a warning
@@ -317,7 +267,7 @@ func TestTheStatusBarGetsAVerdictAndTheLogGetsTheAdvice(t *testing.T) {
 }
 
 /*
-Every field of a status reply must decode into the struct that reads it.
+Every field of a status reply decodes into the struct that reads it.
 
 The argv direction has been checked since the port began: every command the
 window can send is parsed by the real CLI. The reply direction never was, and it
@@ -327,76 +277,65 @@ game the CLI errors and the bar shows the error, so it looked fine; with a game
 the status arrived, failed to decode, and the window reported the build as
 unreadable, ran no build gate and never auto-restored.
 
-So this asks the Python for the types its own snapshot carries, the way the argv
-test asks it to parse an argv, rather than trusting what is written here.
+So the reply is built by the thing that emits it and read by the thing that
+reads it, and the two are different packages that share only this shape.
 */
 func TestEveryStatusFieldDecodesIntoTheStructThatReadsIt(t *testing.T) {
-	want := pythonSnapshotTypes(t)
+	emitted := cliStatusReply(t)
+
+	var loose map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(emitted), &loose))
+	require.NotEmpty(t, loose, "the CLI emitted no fields")
 
 	got := reflect.TypeOf(client.Status{})
 	checked := 0
 	for i := range got.NumField() {
-		f := got.Field(i)
-		tag := strings.Split(f.Tag.Get("json"), ",")[0]
-		pyType, known := want[tag]
-		if !known {
-			continue // built in cmd_status rather than carried by the snapshot
+		tag := strings.Split(got.Field(i).Tag.Get("json"), ",")[0]
+		if tag == "" || tag == "-" {
+			continue
 		}
+		_, carried := loose[tag]
+		require.Truef(t, carried, "the window reads %q and the CLI does not emit it", tag)
 		checked++
-		require.Truef(t, fits(pyType, f.Type), "%s is %s in Python and %s here",
-			tag, pyType, f.Type)
 	}
 	require.GreaterOrEqual(t, checked, 8, "the reply's fields are not being checked at all")
+
+	// And the reply the CLI really emitted decodes, whole, into that struct.
+	st, ok := client.ParseStatus(emitted)
+	require.True(t, ok, "the window could not decode the CLI's own status")
+	require.NotEmpty(t, st.CompatLevel, "the compatibility level is a word, and it is missing")
 }
 
-// fits reports whether a Go type can hold what the Python annotation describes.
-// An optional Python field may be a pointer here -- "absent" and "zero" are
-// different facts for HP -- or a plain value when zero is answer enough.
-func fits(pyType string, goType reflect.Type) bool {
-	if goType.Kind() == reflect.Pointer {
-		goType = goType.Elem()
-	}
-	switch strings.TrimSuffix(strings.ReplaceAll(pyType, " ", ""), "|None") {
-	case "str":
-		return goType.Kind() == reflect.String
-	case "int":
-		return goType.Kind() == reflect.Int
-	case "float":
-		return goType.Kind() == reflect.Float64
-	case "bool":
-		return goType.Kind() == reflect.Bool
-	}
-	return true // a shape this test does not model; the decode test below covers it
-}
+/*
+cliStatusReply is one `status --json` reply, from the command tree itself.
 
-// pythonSnapshotTypes is what the CLI's own status snapshot carries, by field.
-func pythonSnapshotTypes(t *testing.T) map[string]string {
+Run against no game at all: the fields are all there whether or not a player is
+loaded, which is the state the window spends most of its time in.
+*/
+func cliStatusReply(t *testing.T) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), parseTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", snapshotTypes) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
+	t.Setenv("HOME", t.TempDir())
 
-	var got map[string]string
-	require.NoError(t, json.Unmarshal(out, &got))
-	require.NotEmpty(t, got)
-	return got
+	var stdout, stderr strings.Builder
+	app := cli.NewApp(cli.Options{
+		Elevate: func() error { return nil },
+		Attach: func() (*cli.Game, error) {
+			return &cli.Game{Svc: service.New(newEmptyMem(), -1), PID: os.Getpid()}, nil
+		},
+	})
+	require.Equalf(t, cli.ExitOK,
+		app.Execute(t.Context(), []string{"status", "--json"}, &stdout, &stderr),
+		"the CLI could not report a status: %s", stderr.String())
+	return stdout.String()
 }
 
-// snapshotTypes dumps the annotations of the two records cmd_status reads.
-const snapshotTypes = `
-import json
-from terrariabonker.service import PlayerState, Snapshot
-out = {}
-for cls in (Snapshot, PlayerState):
-    out.update({k: str(v) for k, v in cls.__annotations__.items()})
-print(json.dumps(out))
-`
+// emptyMem is a game with nothing in it, which is what the window sees before a
+// world is loaded.
+type emptyMem struct{ *memtest.FakeMem }
+
+func (emptyMem) ExePath() string { return "" }
+
+func newEmptyMem() emptyMem { return emptyMem{memtest.New(0x10000000, 0x1000)} }
 
 /*
 A status reply of the shape the CLI emits decodes whole.

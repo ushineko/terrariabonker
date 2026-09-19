@@ -1,15 +1,9 @@
 package memtest_test
 
 import (
-	"context"
+	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -28,44 +22,12 @@ same plants are made on both sides and the buffers compared byte for byte.
 What is really being pinned is not the fake -- it is the layout. Where a mono
 string keeps its length, that the length counts characters rather than bytes,
 how far below a player's life its name pointer sits. Those are facts about the
-game, and they are about to exist in two languages.
+game, and a fixture that plants them wrongly agrees with a reader that reads
+them wrongly.
+
+So the bytes are frozen. They are what the implementation this was ported from
+planted, while both existed.
 */
-
-const pythonTimeout = 2 * time.Minute
-
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
-
-// pythonBuf builds the same fake in Python and returns its buffer.
-func pythonBuf(t *testing.T, script string) []byte {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-
-	var encoded string
-	require.NoError(t, json.Unmarshal(out, &encoded))
-	raw, err := hex.DecodeString(encoded)
-	require.NoError(t, err)
-	return raw
-}
-
-// preamble builds the Python fake the suite's conftest defines.
-const preamble = `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-mem = FakeMem(0x10000000, 0x400)
-`
 
 /*
 A planted player is the same bytes on both sides.
@@ -83,14 +45,8 @@ func TestAPlantedPlayerIsTheSameBytes(t *testing.T) {
 	got.PlantPlayer(life, []int32{7, 11, 400, 400, 200, 200}, namePtr)
 	got.PlantMonoString(namePtr, "Nakama")
 
-	want := pythonBuf(t, preamble+`
-mem.plant_player(0x10000200, [7, 11, 400, 400, 200, 200], 0x10000040)
-mem.plant_mono_string(0x10000040, "Nakama")
-print(json.dumps(mem.buf.hex()))
-`)
-
-	require.Equal(t, hex.EncodeToString(want), hex.EncodeToString(got.Buf),
-		"the two fakes are not the same memory")
+	require.Equal(t, "6ad85295755614d3", digest(got.Buf),
+		"a player is planted differently; if that was deliberate, update the digest")
 }
 
 /*
@@ -103,16 +59,16 @@ rather than a bug.
 func TestAMonoStringCountsCharacters(t *testing.T) {
 	const base, size = 0x10000000, 0x400
 
-	for _, name := range []string{"Nakama", "", "a", "Zoë", "player one"} {
+	for name, want := range map[string]string{
+		"Nakama":     "6dd849ae532e67e8",
+		"":           "b00f58e4c719ed9e",
+		"a":          "54fac0a341391977",
+		"Zoë":        "cbd054202ef84679",
+		"player one": "bc3fa7833beabfcc",
+	} {
 		got := memtest.New(base, size)
 		got.PlantMonoString(base+0x40, name)
-
-		want := pythonBuf(t, preamble+`
-mem.plant_mono_string(0x10000040, `+quote(name)+`)
-print(json.dumps(mem.buf.hex()))
-`)
-		require.Equalf(t, hex.EncodeToString(want), hex.EncodeToString(got.Buf),
-			"%q is planted differently", name)
+		require.Equalf(t, want, digest(got.Buf), "%q is planted differently", name)
 	}
 }
 
@@ -142,9 +98,9 @@ func TestReadingOutsideTheMappingFails(t *testing.T) {
 	require.Equal(t, []proc.Region{{Start: base, End: base + size}}, mem.Regions())
 }
 
-// quote is a Python string literal, so a name with anything awkward in it
-// survives the trip.
-func quote(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
+// digest is a buffer as one short string, for freezing one without writing a
+// kilobyte of hex into this file.
+func digest(buf []byte) string {
+	sum := sha256.Sum256(buf)
+	return hex.EncodeToString(sum[:8])
 }

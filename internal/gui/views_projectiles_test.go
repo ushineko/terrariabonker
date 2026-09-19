@@ -1,10 +1,6 @@
 package gui
 
 import (
-	"context"
-	"encoding/json"
-	"os/exec"
-	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -14,6 +10,7 @@ import (
 	"github.com/ushineko/fynedesygn/fynetest"
 
 	"github.com/ushineko/terrariabonker/internal/gui/client"
+	"github.com/ushineko/terrariabonker/internal/projectile"
 )
 
 /*
@@ -21,46 +18,20 @@ The editable fields must be the CLI's own.
 
 The window spells them out because it has to draw a control per field, and a
 field the CLI does not know is rejected at the far end with a message nobody
-sees. So this asks the Python for the list rather than trusting the one written
-here -- the same technique as the abbreviation test, and for the same reason.
+sees. So the list is checked against the editor's own table rather than against
+the copy written here.
 */
 func TestTheProjectileFieldsAreTheOnesTheCLIKnows(t *testing.T) {
-	want := pythonProjectileFields(t)
-	require.Len(t, client.ProjectileFields, len(want), "a field was added or dropped")
+	require.Len(t, client.ProjectileFields, len(projectile.Fields),
+		"a field was added or dropped")
 	for _, f := range client.ProjectileFields {
-		got, known := want[f.Name]
-		require.Truef(t, known, "%q is not a field the CLI knows", f.Name)
-		require.Equalf(t, got.Kind, f.Kind, "%s is written at a different width", f.Name)
+		got, known := projectile.Fields[f.Name]
+		require.Truef(t, known, "%q is not a field the editor knows", f.Name)
+		require.Equalf(t, string(got.Kind), f.Kind, "%s is written at a different width", f.Name)
 		require.Equalf(t, got.Lo, f.Lo, "%s has a different lower limit", f.Name)
 		require.Equalf(t, got.Hi, f.Hi, "%s has a different upper limit", f.Name)
 	}
 }
-
-// pythonProjectileFields asks projectile_edit.FIELDS what it holds.
-func pythonProjectileFields(t *testing.T) map[string]client.ProjectileField {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), parseTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", projectileFieldCheck) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-
-	var got map[string]client.ProjectileField
-	require.NoError(t, json.Unmarshal(out, &got))
-	require.NotEmpty(t, got)
-	return got
-}
-
-const projectileFieldCheck = `
-import json
-from terrariabonker.projectile_edit import FIELDS
-print(json.dumps({n: {"Name": n, "Kind": f.kind, "Lo": f.lo, "Hi": f.hi}
-                  for n, f in FIELDS.items()}))
-`
 
 /*
 One slice's argv is the same argv every time.
