@@ -18,10 +18,13 @@ import (
 /*
 Every offset is the Python's offset, and there are no others on either side.
 
-The Python spreads them over three modules and re-exports some of them; this
-declares each one once, so the comparison is against the union of the three and
-a name is allowed to appear in more than one of them only if it agrees with
-itself.
+The Python spreads them over five modules and spells several of them twice under
+different names; this declares each one once. So the comparison is against the
+union of the five, a name appearing in more than one module must agree with
+itself, and a second Python name for a number Go already has is listed as an
+alias and checked for agreeing in value rather than being declared again. Adding
+a second Go spelling to satisfy the test would be the exact duplication this
+package exists to end.
 
 These numbers are build-specific and hand-derived, and they now exist in two
 languages -- which is the exact failure the Python module was created to end,
@@ -38,9 +41,9 @@ func TestEveryOffsetMatchesThePython(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", "-c", `
 import json
-from terrariabonker import inventory, layout, player
+from terrariabonker import inventory, layout, npcs, player, recipes
 out = {}
-for mod in (layout, player, inventory):
+for mod in (layout, player, inventory, npcs, recipes):
     for k, v in vars(mod).items():
         if not k.isupper() or not isinstance(v, int) or isinstance(v, bool):
             continue
@@ -60,6 +63,13 @@ print(json.dumps(out))
 	require.NotEmpty(t, want)
 
 	for name, value := range want {
+		if target, isAlias := aliases[name]; isAlias {
+			got, known := layout.Offsets[target]
+			require.Truef(t, known, "%s is aliased to %s, which does not exist", name, target)
+			require.Equalf(t, value, got,
+				"%s and %s are the same number in the Python and differ here", name, target)
+			continue
+		}
 		got, known := layout.Offsets[name]
 		require.Truef(t, known, "%s is an offset the Python has and this does not", name)
 		require.Equalf(t, value, got, "%s is a different number here", name)
@@ -68,4 +78,21 @@ print(json.dumps(out))
 		_, known := want[name]
 		require.Truef(t, known, "%s is an offset this has and the Python does not", name)
 	}
+}
+
+/*
+aliases are the numbers the Python spells twice, and the one Go name for each.
+
+Every one of these is a module importing a constant from another and re-exporting
+it under a shorter name, so the two spellings cannot disagree there. They could
+disagree here, which is what the test above checks: the alias is followed to the
+single Go declaration and the value compared.
+
+A new entry belongs here only when the Python really does have two names for one
+number. A Go constant added to satisfy one would be the duplication this package
+was created to end.
+*/
+var aliases = map[string]string{
+	"ARR_LEN":  "ARR_LEN_OFF",
+	"ARR_DATA": "ARR_DATA_OFF",
 }
