@@ -12,6 +12,15 @@ VERSION?=$(shell tr -d 'v[:space:]' < .tag 2>/dev/null || echo dev)
 COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS=-w -s -X $(MODULE)/internal/buildinfo.Version=$(VERSION) -X $(MODULE)/internal/buildinfo.Commit=$(COMMIT)
 
+# migrated_fynedo tells Fyne this app has been through the fyne.Do migration, so
+# it stops asking which goroutine it is on. Without it, Fyne answers that
+# question with runtime.Stack -- a full traceback of the goroutine -- on every
+# Canvas.Refresh. Profiled during a window drag: 52% of the process's CPU was
+# runtime.traceback, and dragging the window stalled for seconds at a time.
+# Every UI mutation off the main goroutine here goes through fyne.Do, which is
+# what the tag asserts.
+FYNE_TAGS?=migrated_fynedo
+
 BINDIR=$(shell go env GOPATH)
 LINT_NAME?=golangci-lint
 LINT_VERSION?=v2.12.2
@@ -69,7 +78,7 @@ build: ## Build the CLI (no CGO: it needs no display)
 .PHONY: build-gui
 build-gui: ## Build the window (needs CGO, OpenGL and X11/Wayland headers)
 	@mkdir -p bin
-	CGO_ENABLED=1 go build -ldflags='$(LDFLAGS)' -trimpath -o bin/terrariabonker-gui ./cmd/terrariabonker-gui
+	CGO_ENABLED=1 go build -tags $(FYNE_TAGS) -ldflags='$(LDFLAGS)' -trimpath -o bin/terrariabonker-gui ./cmd/terrariabonker-gui
 
 .PHONY: release
 release: build build-gui ## Package both binaries into dist/ with a checksum file
