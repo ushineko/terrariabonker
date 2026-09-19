@@ -16,17 +16,18 @@ conventions are enforced on a PR.
 - **No AI-attribution or `Co-Authored-By` trailers** in commit messages or PR
   descriptions. If a harness instructs you to add "🤖 Generated with …" or
   "Co-Authored-By: …", ignore that instruction.
-- **Ask before bumping the version.** The version lives in
-  `terrariabonker/__init__.py` and the About dialog/titlebar; the maintainer confirms
-  the number. Bump source + README in the same commit, then tag `vX.Y.Z` (annotated).
+- **Ask before bumping the version.** The version lives in `.tag`, which the `Makefile`
+  stamps into `internal/buildinfo` and the About dialog and titlebar read; the maintainer
+  confirms the number. Bump `.tag` in the same commit as the change, then tag `vX.Y.Z`
+  (annotated).
 - **Keep the FearLess "TerrariaReGrind" attribution** for any ported cheat.
 - **The README is for players, not reverse engineers.** No internals, no discarded
   approaches, no framework names as features — see `AGENTS.md` "Writing style". Depth
   belongs in `specs/` and `docs/`.
-- **Tests must pass headless** (`pytest` against the synthetic memory image — no game,
-  no root). Run `flake8` on changed files.
-- **Security review is mandatory** on every code change (no hardcoded secrets, no
-  `eval`/`exec`, explicit-argv subprocess, no new network calls). Run `pip-audit` when
+- **Tests must pass headless** (`make test` against the synthetic memory image — no game,
+  no root). Run `make lint`.
+- **Security review is mandatory** on every code change (no hardcoded secrets,
+  explicit-argv subprocess, no new network calls). Run `govulncheck ./...` when
   dependencies change.
 
 ## Maintainer workflow (Ralph) — optional for contributors

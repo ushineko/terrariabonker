@@ -13,11 +13,12 @@ external contributors — see `CONTRIBUTING.md`.
 
 ## What this project is
 
-A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.7** (the Windows
+A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8** (the Windows
 build under Proton/wine-mono). It locates the player in `/proc/<pid>/mem` with no hardcoded
-addresses, then reads and edits player state, inventory, and applies code-patch cheats. A
-Go control panel and a Python CLI share one common layer. Cheat sites are derived with Cheat
-Engine's mono dissector (see `ce/README.md`); nothing needs CE at runtime.
+addresses, then reads and edits player state, inventory, and applies code-patch cheats.
+Everything is Go: a CLI that runs as root and a control panel that does not, over one
+common layer (spec 051). Cheat sites are derived with Cheat Engine's mono dissector (see
+`ce/README.md`); nothing needs CE at runtime.
 
 Some code-patch cheats are ported from the FearLess Forums "TerrariaReGrind" Cheat Engine
 table. **Keep that attribution** in the README and About dialog for any ported cheat —
@@ -27,28 +28,28 @@ reverse-engineering credit for those hooks belongs to the ReGrind authors.
 
 ## Architecture (respect these boundaries)
 
-- **Common layer** — `terrariabonker/service.py` (`Service`) and the modules it uses
-  (`locate`, `player`, `inventory`, `patcher`, `recipes`, `sprites`, `profile`, `version`).
-  All game logic lives here so the CLI and GUI cannot drift.
-- **CLI** — `terrariabonker/cli.py`: a thin argparse front end; `--json` is the contract the
-  GUI consumes. Memory operations self-elevate via `sudo` (`proc.elevate`).
-- **GUI** — `internal/gui/`, in Go on fynedesygn (spec 050): runs **unprivileged** (a window
-  must not run as root) and reaches the common layer by shelling each action to the CLI under
-  sudo, either through a long-lived `serve` worker or a one-shot run.
-  `internal/gui/client` builds the argv and parses the JSON; `terrariabonker/argv.py` is the
-  same contract on the Python side, which the suite uses to drive the common layer. Do not
-  add in-process root memory access to the GUI.
+- **Common layer** — `internal/service` (`Service`) and the packages it uses (`locate`,
+  `player`, `inventory`, `patch`, `projectile`, `recipes`, `sprites`, `profile`,
+  `version`). All game logic lives here so the CLI and GUI cannot drift.
+- **CLI** — `internal/cli`, behind `cmd/terrariabonker`: a thin cobra front end; `--json` is
+  the contract the GUI consumes. Memory operations self-elevate via `sudo`
+  (`proc.Elevate`).
+- **GUI** — `internal/gui`, behind `cmd/terrariabonker-gui`, on fynedesygn (spec 050): runs
+  **unprivileged** (a window must not run as root) and reaches the common layer by shelling
+  each action to the CLI under sudo, either through a long-lived `serve` worker or a
+  one-shot run. `internal/gui/client` builds the argv and parses the JSON. Do not add
+  in-process root memory access to the GUI.
 - **State** — per-pid live patch state (`~/.config/terrariabonker/patches.json`) is
   concurrency-safe (flock + atomic write). The pid-independent desired-config profile
   (`~/.config/terrariabonker/profile.json`) drives auto-restore. Sprite icons cache under
   `~/.cache/terrariabonker/`.
-- **Offsets are build-specific (1.4.5.7).** Locate by AOB/signature; never hardcode a JIT
+- **Offsets are build-specific (1.4.5.8).** Locate by AOB/signature; never hardcode a JIT
   address. Re-derive with the `ce/poc_*.lua` recon scripts after a game update. A moved
   layout must fail safe ("anchor not found"/no match), never mis-write.
-- **An offset is declared once and imported.** `terrariabonker/layout.py` owns the mono
-  szarray shape and `Main`'s static offsets; item field offsets live in `inventory.py`. A
-  module that needs another's offset imports it. Never re-spell a constant in a second
-  module — a game update is the routine event here, and re-deriving one number should be one
+- **An offset is declared once and imported.** `internal/layout` owns them all: the mono
+  szarray shape, `Main`'s statics, and the item, player, NPC and projectile fields. A
+  package that needs an offset imports it from there. Never re-spell a constant in a second
+  package — a game update is the routine event here, and re-deriving one number should be one
   edit, not a hunt for every spelling of it. (It was five spellings under four names once.)
 
 ---
@@ -58,10 +59,10 @@ reverse-engineering credit for those hooks belongs to the ReGrind authors.
 These are rules the project learned by breaking something. Each one has a scar.
 
 - **The arena is shared memory: read it before you write it.** Stub slots are assigned by
-  position in an append-only registry (`_SLOT_ORDER`), never by sorted name — appending must
+  position in an append-only registry (`slotOrder`), never by sorted name — appending must
   not move an existing slot. Never write a stub into a slot without establishing what is
-  already there (`_check_slot`), and never write a jump over bytes that are not what will be
-  restored (`_check_site`). Data offsets must be checked against the extents of every other
+  already there (`checkSlot`), and never write a jump over bytes that are not what will be
+  restored (`checkSite`). Data offsets must be checked against the extents of every other
   allocation, with a test that computes them rather than trusting a comment.
   *Two collisions came from skipping this: a stub written over a live one crashed the game,
   and an overlapping arm word made mining press the player's use button.*
@@ -88,9 +89,9 @@ held confidently, and turned out to be wrong. Reasoning is for deciding what to 
 for explaining a measurement — not for standing in place of one.
 
 - **Ask the game before inferring.** The runtime knows its own field offsets
-  (`tools/monofields.py`), and the assembly knows its own behaviour (`tools/ilrecon`).
+  (`cmd/monofields`), and the assembly knows its own behaviour (`tools/ilrecon`).
   Prefer either over declaration order, template diffs, value-signature matching, or
-  watching a number change. Run `sudo python3 tools/monofields.py --verify` when touching
+  watching a number change. Run `sudo go run ./cmd/monofields --verify` when touching
   offsets; it exits non-zero on disagreement.
   *`Projectile.active` was inferred from the shared `Entity` layout and read `Entity.wet`
   for eight releases.*
@@ -124,19 +125,20 @@ for explaining a measurement — not for standing in place of one.
 
 ## Coding standards
 
-**Python**
-- Target the system interpreter (`/usr/bin/python3`), not conda/miniforge. Python 3.10+.
-- Runtime deps: `numpy`, `Pillow` (see `requirements.txt`). Ask before adding a new
-  runtime dependency; prefer the standard library.
-- Style: PEP 8, 4-space indent, ~100-col soft limit, double-quoted strings to match the
-  codebase. Keep changes surgical — edit only what the task needs; do not reformat unrelated
-  code or remove pre-existing (unrelated) dead code.
-- Lint with `flake8` before committing changed files.
-- **Imports go at the top of the module.** Defer one into a function only to break an import
-  cycle or to keep an optional/expensive dependency out of a fast path — and say which in a
-  comment. Without a stated rule they accumulate: `service.py` currently has 10 top-level
-  imports and **59** deferred ones, some duplicating a top-level import of the same module.
-  New code follows the rule; the existing 59 are not a licence to add the 60th.
+**Go**
+- `go.mod` pins the minimum toolchain and carries no `toolchain` line; the linter pin lives
+  in the `Makefile`. Ask before adding a dependency — the CLI's only one is cobra, and the
+  panel's is fynedesygn. Prefer the standard library.
+- `make lint` (the pinned golangci-lint, `config/.golangci-v2.12.2.yml`) and `make test`
+  before committing. A `//nolint` carries a reason, and the reason is why the rule does not
+  apply here, not that it was in the way.
+- Errors crossing a package boundary are wrapped with `%w` and a sentence saying what was
+  being attempted. Errors within this module already carry their context.
+- Keep changes surgical — edit only what the task needs; do not reformat unrelated code or
+  remove pre-existing (unrelated) dead code. The two automated dead-code sweeps that were
+  tried both deleted working code, once silently: a fixture's `Read` and `Write` are reached
+  through an interface, so the linter calls them dead, and removing one leaves a planted
+  game that mines nothing and a test that still passes.
 
 **Bash / shell**
 - `set -euo pipefail` in scripts; quote expansions; prefer explicit argv over shell strings.
@@ -156,8 +158,9 @@ CLIs (`pactl --format=json`) next; human-readable CLI output only as a documente
 
 ## Testing
 
-- `pytest`, kept in `tests/`. Tests run headless with no game and no root against a synthetic
-  memory image (`tests/conftest.py` `FakeMem`) — keep it that way so CI/others can run them.
+- `go test`, in `_test.go` files beside the code they cover. Tests run headless with no game
+  and no root against a synthetic memory image (`internal/memtest` `FakeMem`, and each
+  package's own planted process) — keep it that way so CI and others can run them.
 - Tests encode **behavioral contracts**, not implementation details. A test that breaks on a
   pure refactor (no behavior change) is testing the wrong thing.
 - Avoid over-mocking. When a change touches a real boundary (a `/proc` read/write path, the
@@ -165,34 +168,38 @@ CLIs (`pactl --format=json`) next; human-readable CLI output only as a documente
   than asserting on mocks.
 - Live verification against a running game is fine for the maintainer, but every change must
   also be covered by a headless test.
-- **Never assert on source text.** No `inspect.getsource` and no substring checks against a
-  module's own code: they pass when the line sits in a branch that never runs, and fail on a
-  rename that changes nothing. Test behaviour. Where an *architectural* rule genuinely needs
-  enforcing (no threads in the GUI transport, no JSON parsing outside `client.py`), read it
-  from the AST — `test_view_parity.py` and `test_gui_helper.py` show the technique.
+- **Never assert on source text.** No substring checks against a package's own source: they
+  pass when the line sits in a branch that never runs, and fail on a rename that changes
+  nothing. Test behaviour. Where an *architectural* rule genuinely needs enforcing (no JSON
+  parsing outside `internal/gui/client`), read it from the AST with `go/parser`.
 - **Mutation-check a new test: break the thing it guards and watch it fail.** A test written
   after the fix routinely passes against the bug it was meant to catch. When a mutation
   survives, say whether the test was weak or the mutant was *equivalent* — an equivalent
   mutant is a finding about the code (something is redundant or unreachable), not a pass.
   Both outcomes are worth recording in the validation report.
-- **Shared scaffolding lives in `tests/conftest.py`.** `qt_app` and `gui_window` are there;
-  so is `FakeMem`. A fixture copied into a third file belonged in conftest two files ago —
-  and the copies drift: seven `QApplication` fixtures under two names is how three GUI test
-  modules ended up passing only because another module's import ran first.
+- **Shared scaffolding lives in one place per package** — a `fixture_test.go`, or
+  `internal/memtest` where more than one package needs it. A helper copied into a third file
+  belonged in the fixture two files ago, and the copies drift.
 - **Refactors are pinned before they start.** Before restructuring a path that writes to the
   game, add characterization tests for whatever is only covered incidentally, then re-run
   them as mutations *after* the split. A green suite following a "behaviour-preserving"
-  change is a question, not an answer: a `catch_tick` split once moved a `break` out of a
+  change is a question, not an answer: a `CatchTick` split once moved a `break` out of a
   guard, changing when the loop gave up, and all 579 tests still passed.
+
+- **Freeze what would otherwise be a second copy.** Where a test's expected value is the
+  whole planted buffer or a whole table (patch bytes, the anchor table, the catalog), pin a
+  `sha256` of it rather than transcribing it: a transcribed copy is edited to match when it
+  disagrees, and a digest is not.
 
 ## Security (non-negotiable minimums)
 
 - No hardcoded secrets/credentials; none in logs or error messages.
-- No `eval`/`exec` of dynamic input, no shell-string injection (spawn with explicit argv
-  lists), no network calls added without discussion.
+- No shell-string injection (spawn with explicit argv lists), no network calls added
+  without discussion.
 - The tool writes to your **own** single-player game's memory over a sudo `/proc` path; it
   ships no game assets (sprites are decoded from the user's own install into a local cache).
-- Run a dependency scan (`pip-audit`) when changing dependencies; record the tool + version.
+- Run `govulncheck ./...` when changing dependencies and before a tagged release; record the
+  tool + version.
 
 ## Writing style (READMEs, specs, dialogs, PR text)
 
@@ -242,27 +249,26 @@ deliberately: it is two group boxes of buttons and shows nothing a reader needs.
 - **Commit messages must NOT contain AI-attribution or `Co-Authored-By` trailers** (no
   "Generated with …", no "Co-Authored-By: …"). This applies to PR/MR descriptions too.
 - Conventional-style subjects: `feat(...)`, `fix(...)`, `refactor(...)`, `docs(...)`.
-- The version lives in `terrariabonker/__init__.py` and the About dialog/titlebar. Bump it in
-  the same commit as the change (maintainer confirms the number). Semver-ish: features → minor,
-  fixes → patch.
+- The version lives in `.tag`, which the `Makefile` stamps into `internal/buildinfo` and
+  which the About dialog and titlebar read. Bump it in the same commit as the change
+  (maintainer confirms the number). Semver-ish: features → minor, fixes → patch.
 - Release tags are annotated, unscoped `vX.Y.Z`, pushed after the version-bump commit lands on
-  `main` (`git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`).
+  `main` (`git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`). The build workflow refuses a
+  tag that does not match `.tag`, then publishes the `make release` tarball.
 
 ## Running
 
-- CLI: `python3 terrariabonker.py <command>` (memory commands self-elevate via sudo). The GUI
-  needs **passwordless sudo** for its memory actions (it can't answer a prompt in a
-  subprocess); without it the GUI degrades with a warning and the recipe browser/icons still
-  work. See the README "Requirements".
+- CLI: `terrariabonker <command>`, or `go run ./cmd/terrariabonker <command>` (memory
+  commands self-elevate via sudo). The GUI needs **passwordless sudo** for its memory actions
+  (it can't answer a prompt in a subprocess); without it the GUI degrades with a warning and
+  the recipe browser/icons still work. See the README "Requirements".
 - Before running a background/GUI instance for debugging, kill stale ones so logs are
   clean — but **not** with `pkill -f terrariabonker`: `-f` matches the whole command line,
   including the shell that is running the pkill, so it kills the session issuing it. Match
   the exact argv instead:
 
   ```bash
-  for p in $(pgrep -x python3); do
-      tr '\0' ' ' < /proc/$p/cmdline | grep -q 'terrariabonker.py gui' && kill "$p"
-  done
+  pkill -x terrariabonker-gui
   ```
 
   The same trap applies to `pgrep -f` when hunting for the game or a worker.

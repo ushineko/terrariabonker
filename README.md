@@ -6,7 +6,7 @@ It finds the player in memory with no hardcoded address, then reads, edits and
 freezes player state and inventory items by reading and writing
 `/proc/<pid>/mem`. A GUI control panel drives the same operations as the CLI.
 
-Discovery, value edits, and the *code patches* all run from Python over `/proc`. 
+Discovery, value edits and the *code patches* are all Go, over `/proc`.
 External debuggers and disassemblers such as Cheat Engine are used off to the
 side in order to re-derive patch offsets after a game update. See
 [Two kinds of cheat](#two-kinds-of-cheat-value-edits-and-code-patches).
@@ -261,17 +261,16 @@ hooks belongs to the ReGrind authors.
 
 - Terraria running under **Proton**. Force it in Steam under Properties → Compatibility.
   The cheats are derived against Proton's **wine-mono** runtime and require it.
-- Python 3.10+ (the system one, `/usr/bin/python3`, not conda).
-- `numpy`, `Pillow` — on Arch/CachyOS `python-numpy python-pillow`, otherwise
-  `pip install -r requirements.txt`.
-- A Go toolchain, to build the control panel. The CLI works without one.
+- A Go toolchain (1.26 or newer) to build. The CLI needs nothing else; the
+  control panel also needs CGO, OpenGL and X11/Wayland headers — on Arch/CachyOS
+  `sudo pacman -S go base-devel mesa libx11 libxcursor libxrandr libxinerama libxi libxkbcommon wayland`.
 - **Passwordless sudo.** Reading another process's memory needs root. The GUI itself stays
   unprivileged and shells each action out, so it cannot answer a password prompt — without
   a NOPASSWD rule the trainer and inventory do nothing (the panel says so, and the browser
   tabs still work). Grant it with `sudo visudo`:
 
   ```
-  youruser ALL=(root) NOPASSWD: /usr/bin/python3 /path/to/terrariabonker/terrariabonker.py *
+  youruser ALL=(root) NOPASSWD: /home/youruser/.local/bin/terrariabonker *
   ```
 
   That grants only this program. The CLI works without it, prompting for a password.
@@ -279,12 +278,17 @@ hooks belongs to the ReGrind authors.
 ## Installation
 
 ```bash
-cd ~/git/ag-scripts/terrariabonker
+git clone https://github.com/ushineko/terrariabonker
+cd terrariabonker
 ./install.sh
 ```
 
-Installs a `terrariabonker` command and a desktop entry. Nothing is copied — it points at
-this checkout, so `git pull` updates it. Remove with `./uninstall.sh`.
+Builds both binaries and installs `terrariabonker`, `terrariabonker-gui`, an icon and a
+desktop entry into `~/.local`. A machine without the GUI's headers still gets a working
+CLI. Re-run `./install.sh` after a `git pull`; remove with `./uninstall.sh`.
+
+A tagged release also carries a prebuilt `linux-amd64` tarball with both binaries and the
+same installer.
 
 ## Usage (CLI)
 
@@ -335,7 +339,8 @@ loose on a world you care about.
 
 ## Usage (GUI)
 
-Launch from the application menu, or `terrariabonker gui`.
+Launch from the application menu, or run `terrariabonker-gui`. It is a separate binary
+and stays unprivileged: it reaches game memory only by running the CLI under sudo.
 
 - **Auto-restore** — the panel remembers the cheats you want and your item edits, and
   re-applies them whenever a fresh game appears. This is what makes item stat edits survive
@@ -399,44 +404,49 @@ update, see [docs/discovery.md](docs/discovery.md).
 
 ```
 terrariabonker/
-├── terrariabonker.py           entry point
-├── terrariabonker/
-│   ├── proc.py                 process memory access and privilege elevation
-│   ├── locate.py               finds the player in memory
-│   ├── player.py               player stats
-│   ├── inventory.py            inventory and item fields
-│   ├── trainer.py              godmode and infinite mana
-│   ├── patcher.py              the cheats that change game behaviour
-│   ├── tiles.py                world tiles and vein finding
-│   ├── service.py              shared core behind the CLI and GUI
-│   ├── version.py              version detection and the compatibility gate
-│   ├── profile.py              your saved cheats and item edits
-│   ├── recipes.py              recipe database
-│   ├── content.py              item and NPC catalog
-│   ├── npcs.py                 NPC data
-│   ├── sprites.py              item and NPC icons
-│   ├── xnb.py                  reads the game's own sprite files
-│   ├── names.py                item names
-│   ├── prefixes.py             modifier names
-│   ├── data/                   name and tooltip tables, extracted from the game
-│   ├── cli.py                  the command line
-│   └── argv.py                 the CLI's argument contract, shared with the panel
-├── cmd/terrariabonker-gui/     the control panel (Go)
-├── internal/gui/               its sections, and the client that drives the CLI
-├── tools/                      helpers: sprite extraction, screenshots
+├── cmd/terrariabonker/         the command line (runs as root)
+├── cmd/terrariabonker-gui/     the control panel (unprivileged; shells out)
+├── cmd/monofields/             dumps a mono class's field offsets
+├── internal/
+│   ├── proc/                   process memory access and privilege elevation
+│   ├── locate/                 finds the player in memory
+│   ├── player/                 player stats
+│   ├── inventory/              inventory and item fields
+│   ├── trainer/                godmode and infinite mana
+│   ├── patch/                  the cheats that change game behaviour
+│   ├── projectile/             projectile edits, and the fishing bobber
+│   ├── tiles/                  world tiles and vein finding
+│   ├── selling/                coins, and what auto-sell will take
+│   ├── service/                shared core behind the CLI and GUI
+│   ├── version/                version detection and the compatibility gate
+│   ├── profile/                your saved cheats and item edits
+│   ├── builds/                 this machine's decisions about game builds
+│   ├── recipes/                recipe database
+│   ├── content/                item and NPC catalog
+│   ├── game/                   names, modifiers and the data tables
+│   ├── sprites/                item and NPC icons
+│   ├── xnb/                    reads the game's own sprite files (LZX + XNB)
+│   ├── layout/                 the field offsets every package reads through
+│   ├── cli/                    the CLI's commands, and the JSON worker
+│   └── gui/                    the panel's tabs, and the client that drives the CLI
+├── data/                       name and tooltip tables, extracted from the game
+├── tools/                      helpers: screenshots, the KDE window rule
 ├── docs/discovery.md           how the offsets were found, and how to rebuild them
 ├── ce/                         notes from the reverse-engineering work
-├── specs/                      feature specs
-└── tests/                      test suite (no game, no root)
+└── specs/                      feature specs
 ```
+
+Tests live beside the code they cover, as `_test.go` files.
 
 ## Testing
 
 ```bash
-QT_QPA_PLATFORM=offscreen /usr/bin/python3 -m pytest tests/ -q
+make test     # go test -race ./...
+make lint     # the pinned golangci-lint
 ```
 
-Tests run against a fake in-memory process, so they need neither the game nor root.
+Tests run against a fake in-memory process, so they need neither the game nor root, and
+the GUI's tests run headless through the Fyne test driver.
 
 ## Safety
 
