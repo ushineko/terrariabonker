@@ -27,6 +27,7 @@ import (
 	"github.com/ushineko/terrariabonker/internal/locate"
 	"github.com/ushineko/terrariabonker/internal/player"
 	"github.com/ushineko/terrariabonker/internal/proc"
+	"github.com/ushineko/terrariabonker/internal/projectile"
 )
 
 // Mem is everything the service reads and writes through. It is proc.Mem in
@@ -86,6 +87,13 @@ type Service struct {
 	// Where each item type's pristine template is, found once: the search is a
 	// full region scan and it is the same answer all session.
 	templateAddrs map[int32]uint32
+
+	// The projectile array, located once; the editor that holds overrides on
+	// what is in flight; and auto-catch's two pieces of state.
+	projArr    uint32
+	projEditor *projectile.Editor
+	lastReel   time.Time
+	seenCast   bool
 }
 
 // New is a service over memory that is already open.
@@ -106,6 +114,7 @@ func (s *Service) Invalidate() {
 	s.blocks, s.anchor, s.found, s.build = nil, 0, false, nil
 	s.mainBase, s.haveBase = 0, false
 	s.templateAddrs = nil
+	s.projArr, s.projEditor = 0, nil
 }
 
 /*

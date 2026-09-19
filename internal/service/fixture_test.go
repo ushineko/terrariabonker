@@ -884,3 +884,134 @@ func secondRodPower(mem *execMem) byte {
 	}
 	return raw[0]
 }
+
+// Where the projectile array and its objects go.
+const (
+	projArrAt     = base + 0x38000
+	projObjectsAt = base + 0x3A000
+	projArrayLen  = 1001
+)
+
+// bobber is one projectile planted in the array.
+type bobber struct {
+	slot    int
+	ptype   int32
+	ai      [3]float32
+	localAI [3]float32
+}
+
+/*
+plantProjectilesInto fills the array and puts the named projectiles in it.
+
+Every slot is allocated behind one vtable, as the game allocates them: that
+agreement is what tells the array from anything else of the same length.
+*/
+func plantProjectilesInto(mem *execMem, live []bobber) {
+	mem.PokeBytes(staticAt+layout.MainProjectileOff, u32(projArrAt))
+	mem.PokeI32(projArrAt+layout.ArrLenOff, projArrayLen)
+	for i := range projArrayLen {
+		obj := uint32(projObjectsAt + i*0x30) //nolint:gosec // a planted address
+		mem.PokeBytes(projArrAt+layout.ArrDataOff+uint32(i)*4, u32(obj))
+		mem.PokeBytes(obj, u32(itemVTable))
+		// Cleared, so a slot left over from an earlier planting is not still a
+		// live bobber.
+		mem.PokeBytes(obj+uint32(layout.ProjectileActive), []byte{0})
+		mem.PokeBytes(obj+uint32(layout.ProjectileBobber), []byte{0})
+	}
+	for i, b := range live {
+		obj := uint32(projObjectsAt + b.slot*0x30) //nolint:gosec // a planted address
+		mem.PokeBytes(obj+uint32(layout.ProjectileActive), []byte{1})
+		mem.PokeI32(obj+uint32(layout.ProjectileType), b.ptype)
+		if b.ptype == 0 {
+			mem.PokeBytes(obj+uint32(layout.ProjectileBobber), []byte{1})
+		}
+		ai := uint32(projFloatsAt + i*0x40)           //nolint:gosec // a planted address
+		localAI := uint32(projFloatsAt + i*0x40 + 32) //nolint:gosec // a planted address
+		mem.PokeBytes(obj+uint32(layout.ProjectileAI), u32(ai))
+		mem.PokeBytes(obj+uint32(layout.ProjectileLocalAI), u32(localAI))
+		for j := range 3 {
+			mem.WriteF32(ai+layout.ArrDataOff+uint32(j)*4, b.ai[j])
+			mem.WriteF32(localAI+layout.ArrDataOff+uint32(j)*4, b.localAI[j])
+		}
+	}
+}
+
+// projFloatsAt is where the projectiles' float arrays go.
+const projFloatsAt = base + 0x3F000
+
+/*
+autoUsePatcher is a patcher over a game auto-use is really applied to, with an
+arena so its words can be armed.
+
+Whether a cheat is on is answered by reading the bytes at its site, so the anchor
+is planted and a jump written over its injection point.
+*/
+func autoUsePatcher(t *testing.T, mem *execMem) *patch.Patcher {
+	t.Helper()
+	inj := patch.Injections["auto_use"]
+	anchor := patch.Anchors[inj.Anchor].Pattern
+	body := make([]byte, anchor.Len())
+	for i := range body {
+		body[i] = 0xCC
+		if anchor.Mask[i] {
+			body[i] = anchor.Raw[i]
+		}
+	}
+	mem.PokeBytes(autoUseAnchorAt, body)
+	mem.PokeBytes(uint32(int64(autoUseAnchorAt)+int64(inj.InjectOff)), []byte{0xE9, 0, 0, 0, 0})
+	mem.PokeBytes(arenaAt+patch.ArenaMagicOff, patch.ArenaMagic)
+
+	atHome(t)
+	return patch.NewPatcher(&arenaMem{execMem: mem}, -1)
+}
+
+// Where auto-use's anchor and this program's arena go in the planted game.
+const (
+	autoUseAnchorAt = base + 0x52000
+	arenaAt         = base + 0x60000
+)
+
+// arenaMem is a planted game with an arena mapping beside its code.
+type arenaMem struct{ *execMem }
+
+func (m *arenaMem) AllRegions() []proc.Region {
+	return append(m.execMem.AllRegions(), proc.Region{
+		Start: arenaAt, End: arenaAt + patch.ArenaSize,
+		Readable: true, Writable: true, Executable: true,
+	})
+}
+
+/*
+plantHoldingRod puts the rod in the player's hand.
+
+Casting checks that, because the use button is not fishing-specific: pressing it
+against a sword swings the sword. The base fixture leaves the held slot at zero,
+which is a pickaxe.
+*/
+func plantHoldingRod(mem *execMem) {
+	const rodSlot = 2                                                    // where the fixture's live player keeps their rod
+	mem.PokeI32(uint32(int64(liveLife)+layout.SelectedItemOff), rodSlot) //nolint:gosec // a delta
+}
+
+// plantHoldingSlot puts a chosen hotbar slot in the player's hand.
+func plantHoldingSlot(mem *execMem, slot int32) {
+	mem.PokeI32(uint32(int64(liveLife)+layout.SelectedItemOff), slot) //nolint:gosec // a delta
+}
+
+/*
+plantFavorite marks one of the live player's slots as favorited, and makes it a
+potion worth carrying.
+
+The favourite is the player's opt-in: without it every potion picked up would
+start doing something.
+*/
+func plantFavorite(mem *execMem, slot int) {
+	at := liveItems + uint32(slot)*itemStride                  //nolint:gosec // a slot index
+	mem.PokeBytes(at+uint32(layout.ItemFavorited), []byte{1})  //nolint:gosec // a field offset
+	mem.PokeBytes(at+uint32(layout.ItemConsumable), []byte{1}) //nolint:gosec // a field offset
+	mem.PokeI32(at+uint32(layout.ItemBuffType), 122)           //nolint:gosec // a field offset
+}
+
+// itoa and sprintf keep the tests readable.
+func itoa(v int) string                 { return fmt.Sprintf("%d", v) }
+func sprintf(f string, a ...any) string { return fmt.Sprintf(f, a...) }
