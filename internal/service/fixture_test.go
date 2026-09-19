@@ -35,7 +35,7 @@ accident.
 
 const (
 	base = 0x10000000
-	size = 0x80000 // wide enough to hold the world, the templates and an arena
+	size = 0x100000 // wide enough to hold the world, the templates, the NPCs and an arena
 
 	// The two inert snapshots, and the live player behind get_LocalPlayer.
 	snapLife  = base + 0x3000
@@ -1116,4 +1116,175 @@ func bankStacks(mem *execMem) []selling.Row {
 		return nil
 	}
 	return bank.Rows()
+}
+
+/*
+The NPC side of the image: Main.npc, its slots, a shelf of templates, and the
+two things that look like templates and are not.
+
+Every slot is a real NPC object allocated behind one vtable, as the game
+allocates them at world load -- that agreement is what tells the array from
+anything else 201 long.
+
+The addresses matter. A template is picked out of the heap by being inactive and
+carrying the right netID, and the *last* match in address order is the one taken,
+so the decoys are placed one either side of the shelf:
+
+  - below it, a Blue Slime object that is inactive and is not a template -- a
+    despawned NPC that left its netID behind, which is a thing the live game was
+    observed doing. Its stats are the scaled ones. Taking the first match instead
+    of the last hands this out.
+  - above it, the live Blue Slime standing in the world, in slot zero, active and
+    scaled. Dropping the inactive test hands *this* out, and it is above the shelf
+    precisely so that dropping the test is not covered for by the ordering.
+
+Both read as a Blue Slime and neither is one, which is the whole difficulty.
+*/
+const (
+	npcVTable     = 0xFEEDFACE
+	npcDecoyAt    = base + 0x7C000
+	npcTemplateAt = base + 0x80000
+	npcArrAt      = base + 0x88000
+	npcObjectsAt  = base + 0x8A000
+	npcStride     = 0x2A0 // NPC_OBJECT_SIZE rounded up, so two objects never touch
+	npcArrayLen   = 201   // MAX_NPCS + 1, which is the length the finder checks
+
+	// What a Blue Slime reads as once an expert world has scaled it, which is
+	// what both decoys carry and no template ever does.
+	npcScaledLife = 60
+)
+
+// npcTemplate is one entry on the template shelf.
+type npcTemplate struct {
+	netID   int32
+	npcType int32
+	life    int32
+	damage  int32
+	defense int32
+	width   int32
+	height  int32
+}
+
+/*
+npcShelf is the templates the fixture offers.
+
+A negative netID is in it because that is the case the whole keying exists for:
+the coloured slimes share a type and differ only by the netID, so a scan keyed on
+type would hand out the wrong one and read as correct.
+*/
+var npcShelf = []npcTemplate{
+	{netID: 1, npcType: 1, life: 25, damage: 7, defense: 2, width: 24, height: 18},
+	{netID: -3, npcType: 1, life: 45, damage: 9, defense: 4, width: 24, height: 18},
+	{netID: 4, npcType: 4, life: 2800, damage: 15, defense: 12, width: 100, height: 110},
+}
+
+// npcTakenSlots are the slots already holding a live NPC, so the first free one
+// is not slot zero -- which a search that never looked would also return.
+var npcTakenSlots = []int{0, 1, 2}
+
+// liveSlimeSlot is the slot holding the Blue Slime that is in the world, rather
+// than the one on the shelf.
+const liveSlimeSlot = 0
+
+// plantNPCsInto writes Main.npc, its slots and the template shelf.
+func plantNPCsInto(mem *execMem) {
+	mem.PokeBytes(staticAt+uint32(layout.MainNPCOff), u32(npcArrAt)) //nolint:gosec // a field offset
+	mem.PokeI32(npcArrAt+layout.ArrLenOff, npcArrayLen)
+	for i := range npcArrayLen {
+		obj := uint32(npcObjectsAt + i*npcStride) //nolint:gosec // a planted address
+		mem.PokeBytes(npcArrAt+layout.ArrDataOff+uint32(i)*4, u32(obj))
+		mem.PokeBytes(obj, u32(npcVTable))
+		mem.PokeBytes(obj+layout.NPCActive, []byte{0})
+		// A slot's netID is nothing the shelf offers, so a slot can never be
+		// mistaken for the template of the NPC being asked for.
+		mem.PokeI32(obj+layout.NPCNetID, 0)
+	}
+	for _, slot := range npcTakenSlots {
+		obj := uint32(npcObjectsAt + slot*npcStride) //nolint:gosec // a planted address
+		mem.PokeBytes(obj+layout.NPCActive, []byte{1})
+	}
+	// The Blue Slime in the world, and the one that used to be.
+	slime := uint32(npcObjectsAt + liveSlimeSlot*npcStride) //nolint:gosec // a planted address
+	mem.PokeI32(slime+layout.NPCNetID, 1)
+	mem.PokeI32(slime+layout.NPCLifeMax, npcScaledLife)
+	mem.PokeBytes(npcDecoyAt, u32(npcVTable))
+	mem.PokeI32(npcDecoyAt+layout.NPCNetID, 1)
+	mem.PokeI32(npcDecoyAt+layout.NPCLifeMax, npcScaledLife)
+	mem.PokeBytes(npcDecoyAt+layout.NPCActive, []byte{0})
+	for i, tpl := range npcShelf {
+		obj := uint32(npcTemplateAt + i*npcStride) //nolint:gosec // a planted address
+		mem.PokeBytes(obj, u32(npcVTable))
+		mem.PokeI32(obj+layout.NPCNetID, tpl.netID)
+		mem.PokeI32(obj+layout.NPCType, tpl.npcType)
+		mem.PokeI32(obj+layout.NPCLifeMax, tpl.life)
+		mem.PokeI32(obj+layout.NPCDamage, tpl.damage)
+		mem.PokeI32(obj+layout.NPCDefense, tpl.defense)
+		mem.PokeI32(obj+layout.NPCWidth, tpl.width)
+		mem.PokeI32(obj+layout.NPCHeight, tpl.height)
+		mem.PokeBytes(obj+layout.NPCActive, []byte{0})
+	}
+}
+
+// pyPlantNPCs is the same shelf and the same slots, as Python source.
+func pyPlantNPCs() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `
+from terrariabonker import npcs as N
+mem.poke_bytes(%d + N.MAIN_NPC_OFF, struct.pack("<I", %d))
+mem.poke_i32(%d + I.ARR_LEN_OFF, %d)
+for _i in range(%d):
+    _obj = %d + _i * %d
+    mem.poke_bytes(%d + I.ARR_DATA_OFF + _i * 4, struct.pack("<I", _obj))
+    mem.poke_bytes(_obj, struct.pack("<I", %d))
+    u8(_obj + N.NPC_ACTIVE, 0)
+    mem.poke_i32(_obj + N.NPC_NET_ID, 0)
+for _slot in %s:
+    u8(%d + _slot * %d + N.NPC_ACTIVE, 1)
+mem.poke_i32(%d + N.NPC_NET_ID, 1)
+mem.poke_i32(%d + N.NPC_LIFE_MAX, %d)
+mem.poke_bytes(%d, struct.pack("<I", %d))
+mem.poke_i32(%d + N.NPC_NET_ID, 1)
+mem.poke_i32(%d + N.NPC_LIFE_MAX, %d)
+u8(%d + N.NPC_ACTIVE, 0)
+`, staticAt, npcArrAt, npcArrAt, npcArrayLen, npcArrayLen, npcObjectsAt, npcStride,
+		npcArrAt, npcVTable, pyInts(npcTakenSlots), npcObjectsAt, npcStride,
+		npcObjectsAt+liveSlimeSlot*npcStride,
+		npcObjectsAt+liveSlimeSlot*npcStride, npcScaledLife,
+		npcDecoyAt, npcVTable, npcDecoyAt, npcDecoyAt, npcScaledLife, npcDecoyAt)
+	for i, tpl := range npcShelf {
+		obj := npcTemplateAt + i*npcStride
+		fmt.Fprintf(&b, `
+mem.poke_bytes(%d, struct.pack("<I", %d))
+mem.poke_i32(%d + N.NPC_NET_ID, %d)
+mem.poke_i32(%d + N.NPC_TYPE, %d)
+mem.poke_i32(%d + N.NPC_LIFE_MAX, %d)
+mem.poke_i32(%d + N.NPC_DAMAGE, %d)
+mem.poke_i32(%d + N.NPC_DEFENSE, %d)
+mem.poke_i32(%d + N.NPC_WIDTH, %d)
+mem.poke_i32(%d + N.NPC_HEIGHT, %d)
+u8(%d + N.NPC_ACTIVE, 0)
+`, obj, npcVTable, obj, tpl.netID, obj, tpl.npcType, obj, tpl.life, obj, tpl.damage,
+			obj, tpl.defense, obj, tpl.width, obj, tpl.height, obj)
+	}
+	return b.String()
+}
+
+// pyInts is a slot list as a Python list.
+func pyInts(v []int) string {
+	parts := make([]string, len(v))
+	for i, n := range v {
+		parts[i] = fmt.Sprint(n)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// plantFacingInto is which way the player is turned, which is the side a spawn
+// lands on.
+func plantFacingInto(mem *execMem, facing int32) {
+	mem.PokeI32(uint32(liveLife)-0x738+0x2C, facing)
+}
+
+// plantFacing is the same, as Python source.
+func plantFacing(facing int32) string {
+	return fmt.Sprintf("mem.poke_i32(%d + 0x2C, %d)\n", liveLife-0x738, facing)
 }

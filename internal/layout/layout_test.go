@@ -145,3 +145,34 @@ var aliases = map[string]string{
 	"ARRAY_LEN_OFF":  "ARR_LEN_OFF",
 	"ARRAY_DATA_OFF": "ARR_DATA_OFF",
 }
+
+/*
+TestCopySpansMatchThePython covers the one piece of layout that is not a number.
+
+The sweep above compares integers, so a pair of spans passes through it
+untouched -- and a span is exactly the kind of thing that would be widened on one
+side only, because widening it looks harmless until a spawned NPC shares an array
+with the template it came from.
+*/
+func TestCopySpansMatchThePython(t *testing.T) {
+	_, file, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(file)))
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "python3", "-c",
+		`import json
+from terrariabonker import npcs
+print(json.dumps([list(s) for s in npcs.NPC_COPY_SPANS]))
+`)
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
+		t.Skip("the Python package is not importable here")
+	}
+	require.NoErrorf(t, err, "asking the Python: %s", out)
+
+	var want [][2]int
+	require.NoError(t, json.Unmarshal(out, &want))
+	require.Equal(t, want, layout.NPCCopySpans)
+}

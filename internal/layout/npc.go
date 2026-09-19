@@ -147,3 +147,18 @@ var projectileOffsets = map[string]int64{
 	"EXTRAUPDATES_OFF": ProjectileExtraUpdates,
 	"ARRAY_LEN":        ProjectileArrayLen,
 }
+
+/*
+NPCCopySpans are the parts of an NPC object a spawn copies out of a template.
+
+A spawn is a field copy: the game keeps a fully-populated template of every NPC
+and every Main.npc slot is a real object allocated at world load, so nothing has
+to be injected or called. What must not be copied is the object header, the
+entity's own position, and every field holding a reference -- 0x044..0x06F --
+because handing a slot the template's arrays would make the two share them.
+What is left is these two pointer-free spans, covering direction and size and
+then the whole stat block.
+
+A pair is [lo, hi): the same half-open bounds the Python's tuple carries.
+*/
+var NPCCopySpans = [][2]int{{0x2C, 0x44}, {0x70, 0x298}}
