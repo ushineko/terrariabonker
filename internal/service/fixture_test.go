@@ -174,6 +174,15 @@ var snapItemsImage = []item{
 // somewhere to look.
 type execMem struct{ *memtest.FakeMem }
 
+/*
+ExePath is nothing: a planted game has no file behind it.
+
+That is the honest answer and it exercises a real state -- the game can be run
+from outside Steam, where there is no manifest to read and the build gate has to
+carry on without one.
+*/
+func (m *execMem) ExePath() string { return "" }
+
 // plant writes the whole image into a Go fake.
 func plant() *execMem {
 	mem := memtest.New(base, size)

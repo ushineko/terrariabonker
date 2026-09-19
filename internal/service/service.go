@@ -35,6 +35,9 @@ type Mem interface {
 	locate.ExecMem
 	inventory.Mem
 	player.Mem
+	// ExePath is where the mapped game came from, which is how the build gate
+	// finds both the version and Steam's manifest.
+	ExePath() string
 }
 
 /*
@@ -73,6 +76,7 @@ type Service struct {
 	blocks []locate.Block // the located player copies, kept and re-validated
 	anchor uint32         // where get_LocalPlayer was found
 	found  bool           // and whether it was
+	build  *Build         // the running build, once it reads as a real one
 }
 
 // New is a service over memory that is already open.
@@ -90,7 +94,7 @@ func Connect() (*Service, error) {
 
 // Invalidate drops what was located, so the next call scans from scratch.
 func (s *Service) Invalidate() {
-	s.blocks, s.anchor, s.found = nil, 0, false
+	s.blocks, s.anchor, s.found, s.build = nil, 0, false, nil
 }
 
 /*
@@ -259,14 +263,10 @@ type ItemSlot struct {
 	Flags     inventory.Flags `json:"flags"`
 }
 
-/*
-Snapshot is one read of everything the window puts on screen.
-
-The build fields the Python's snapshot carries arrive with the patcher, which is
-the module that knows what a build is; until then this is the player half.
-*/
+// Snapshot is one read of everything the window puts on screen.
 type Snapshot struct {
-	PID       int          `json:"pid"`
+	PID       int `json:"pid"`
+	Build     `json:",inline"`
 	Copies    int          `json:"copies"`
 	Player    *PlayerState `json:"player"`
 	Inventory []ItemSlot   `json:"inventory"`
@@ -280,7 +280,7 @@ shows "no player" as an ordinary state, so an empty snapshot comes back rather
 than an error to render.
 */
 func (s *Service) Snapshot(withInventory bool) Snapshot {
-	out := Snapshot{PID: s.PID, Inventory: []ItemSlot{}}
+	out := Snapshot{PID: s.PID, Build: s.BuildInfo(), Inventory: []ItemSlot{}}
 	blocks, err := s.Players()
 	if err != nil {
 		return out
