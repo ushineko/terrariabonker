@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/service"
 )
 
@@ -42,6 +43,30 @@ func plantTemplateInto(mem *execMem) {
 	mem.PokeI32(templateAt+uint32(layoutItemRare), 8)
 	mem.WriteF32(templateAt+uint32(layoutItemKnockback), 6.5)
 	mem.WriteF32(templateAt+uint32(layoutItemScale), 1.0)
+
+	/*
+		And templates for what the fishing kit hands out.
+
+		Without them a given rod or bait is a bare type with none of the fields
+		that make it one -- so the kit would hand out something the gear sweep
+		does not recognise, and hand out another every time it was asked.
+	*/
+	plantKitTemplate(mem, kitRodAt, service.KitRod, "ITEM_FISHING_POLE", 50)
+	plantKitTemplate(mem, kitBaitAt, service.KitBait, "ITEM_BAIT", 35)
+}
+
+// Where the kit's own templates go.
+const (
+	kitRodAt  = base + 0x2A000
+	kitBaitAt = base + 0x2C000
+)
+
+// plantKitTemplate is a template for one of the kit's items, with the byte that
+// makes it what it is.
+func plantKitTemplate(mem *execMem, at uint32, itemType int32, field string, power byte) {
+	mem.PokeBytes(at, u32(itemVTable))
+	mem.PokeI32(at+uint32(layoutItemType), itemType)
+	mem.PokeBytes(at+uint32(layout.Offsets[field]), []byte{power}) //nolint:gosec // an offset
 }
 
 // pyPlantTemplate is the same, as Python source.
@@ -55,8 +80,16 @@ mem.poke_i32(%d + I.ITEM_USE_ANIM, 24)
 mem.poke_i32(%d + I.ITEM_RARE, 8)
 mem.write_f32(%d + I.ITEM_KNOCKBACK, 6.5)
 mem.write_f32(%d + I.ITEM_SCALE, 1.0)
+mem.poke_bytes(%d, struct.pack("<I", %d))
+mem.poke_i32(%d + I.ITEM_TYPE, %d)
+mem.poke_bytes(%d + I.ITEM_FISHING_POLE, bytes([50]))
+mem.poke_bytes(%d, struct.pack("<I", %d))
+mem.poke_i32(%d + I.ITEM_TYPE, %d)
+mem.poke_bytes(%d + I.ITEM_BAIT, bytes([35]))
 `, templateAt, itemVTable, templateAt, templateType, templateAt, templateAt,
-		templateAt, templateAt, templateAt, templateAt)
+		templateAt, templateAt, templateAt, templateAt,
+		kitRodAt, itemVTable, kitRodAt, service.KitRod, kitRodAt,
+		kitBaitAt, itemVTable, kitBaitAt, service.KitBait, kitBaitAt)
 }
 
 /*

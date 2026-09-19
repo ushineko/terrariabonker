@@ -778,3 +778,109 @@ func miningGame(t *testing.T, falls bool) (*miningMem, *patch.Patcher) {
 	atHome(t)
 	return game, patch.NewPatcher(game, -1)
 }
+
+// pyProfileAt points the Python's profile at a scratch file, so a test never
+// touches the maintainer's own.
+func pyProfileAt(home string) string {
+	return fmt.Sprintf(`
+import os
+from terrariabonker import profile
+profile._PATH = os.path.join(%q, ".config", "terrariabonker", "profile.json")
+`, home)
+}
+
+// Where the player's buff arrays go, and what is already running.
+const (
+	buffTypeArr = base + 0x34000
+	buffTimeArr = base + 0x35000
+	buffSlots   = 44
+)
+
+/*
+plantBuffsInto gives the player a bar with one of the fishing effects already
+running for eight minutes, which is what drinking a potion looks like.
+*/
+func plantBuffsInto(mem *execMem) {
+	mem.PokeBytes(uint32(int64(liveLife)+layout.BuffTypePtrOff), u32(buffTypeArr)) //nolint:gosec // a delta
+	mem.PokeBytes(uint32(int64(liveLife)+layout.BuffTimePtrOff), u32(buffTimeArr)) //nolint:gosec // a delta
+	mem.PokeI32(buffTypeArr+layout.ArrLenOff, buffSlots)
+	mem.PokeI32(buffTimeArr+layout.ArrLenOff, buffSlots)
+	mem.PokeI32(buffTypeArr+layout.ArrDataOff, 121)
+	mem.PokeI32(buffTimeArr+layout.ArrDataOff, 28800)
+}
+
+// plantBuffs is the same, as Python source.
+func plantBuffs() string {
+	return fmt.Sprintf(`
+from terrariabonker import buffs as BF, layout as L2
+mem.poke_bytes(%d + BF.BUFF_TYPE_PTR_OFF, struct.pack("<I", %d))
+mem.poke_bytes(%d + BF.BUFF_TIME_PTR_OFF, struct.pack("<I", %d))
+mem.poke_i32(%d + L2.ARR_LEN_OFF, %d)
+mem.poke_i32(%d + L2.ARR_LEN_OFF, %d)
+mem.poke_i32(%d + L2.ARR_DATA_OFF, 121)
+mem.poke_i32(%d + L2.ARR_DATA_OFF, 28800)
+`, liveLife, buffTypeArr, liveLife, buffTimeArr,
+		buffTypeArr, buffSlots, buffTimeArr, buffSlots, buffTypeArr, buffTimeArr)
+}
+
+// writeWatcher counts writes, for the tests about what happens before what.
+type writeWatcher struct {
+	*execMem
+	writes int
+}
+
+func (w *writeWatcher) Write(addr uint32, data []byte) bool {
+	w.writes++
+	return w.execMem.Write(addr, data)
+}
+
+/*
+plantBaitInto gives the player a bait stack below any sensible floor.
+
+The base fixture carries none, which made every question about topping bait up a
+question with no bait in it.
+*/
+func plantBaitInto(mem *execMem) {
+	const slot, at = 7, liveItems + 7*itemStride
+	mem.PokeBytes(liveArr+layout.ArrDataOff+slot*4, u32(at))
+	mem.PokeBytes(at, u32(itemVTable))
+	mem.PokeI32(at+uint32(layout.ItemType), 2675)         //nolint:gosec // a field offset
+	mem.PokeI32(at+uint32(layout.ItemStack), 12)          //nolint:gosec // a field offset
+	mem.PokeBytes(at+uint32(layout.ItemBait), []byte{15}) //nolint:gosec // a field offset
+}
+
+// pyPlantBait is the same, as Python source.
+func pyPlantBait() string {
+	const slot, at = 7, liveItems + 7*itemStride
+	return fmt.Sprintf(`
+mem.poke_bytes(%d + I.ARR_DATA_OFF + %d * 4, struct.pack("<I", %d))
+mem.poke_bytes(%d, struct.pack("<I", %d))
+mem.poke_i32(%d + I.ITEM_TYPE, 2675)
+mem.poke_i32(%d + I.ITEM_STACK, 12)
+mem.poke_bytes(%d + I.ITEM_BAIT, bytes([15]))
+`, liveArr, slot, at, at, itemVTable, at, at, at)
+}
+
+// Where a second rod goes, and what it was carrying.
+const (
+	secondRodSlot = 8
+	secondRodAt   = liveItems + secondRodSlot*itemStride
+)
+
+// plantSecondRod gives the player a rod the cheat has never touched.
+func plantSecondRod(mem *execMem) {
+	mem.PokeBytes(liveArr+layout.ArrDataOff+secondRodSlot*4, u32(secondRodAt))
+	mem.PokeBytes(secondRodAt, u32(itemVTable))
+	mem.PokeI32(secondRodAt+uint32(layout.ItemType), 2289)                //nolint:gosec // a field offset
+	mem.PokeI32(secondRodAt+uint32(layout.ItemStack), 1)                  //nolint:gosec // a field offset
+	mem.PokeBytes(secondRodAt+uint32(layout.ItemFishingPole), []byte{40}) //nolint:gosec // a field offset
+}
+
+// secondRodPower is what that rod's fishing power reads now.
+func secondRodPower(mem *execMem) byte {
+	raw := mem.Read(secondRodAt+uint32(layout.ItemFishingPole), 1) //nolint:gosec // a field offset
+	if len(raw) < 1 {
+		return 0
+	}
+	return raw[0]
+}

@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -33,12 +34,27 @@ var repoRoot = func() string {
 	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
 }()
 
+/*
+realHome is the maintainer's home directory as it was before any test moved it.
+
+Tests that touch the patch record or the profile point HOME at a scratch
+directory. The Python child must not inherit that: its interpreter works out
+where the user's packages are at startup, from HOME, and a moved one makes numpy
+unimportable -- which the helper below reports as "the Python is not importable"
+and skips.
+
+That is worse than a failure, because a skipped comparison looks like a passing
+one. Several of the fishing tests were skipping in silence before this.
+*/
+var realHome = os.Getenv("HOME")
+
 func askPython(t *testing.T, script string, into any) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a generated fixture
 	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "HOME="+realHome)
 	out, err := cmd.CombinedOutput()
 	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
 		t.Skip("the Python package is not importable here")
