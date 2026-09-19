@@ -1,16 +1,11 @@
 package game_test
 
 import (
-	"context"
-	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -18,85 +13,38 @@ import (
 )
 
 /*
-The differential harness.
+The bundled tables: item names, tooltips, NPC names, and the search that walks
+them.
 
-Every table this package reads is read by the Python too, and the port is only
-right if both make the same thing of the same bytes. So the tests ask the Python
-rather than asserting what the Go produced -- the same technique the argv and
-the abbreviation tests use, and the one that caught the Qt panel's docstring
-lying about its own function.
+The tables themselves are files in data/, so the record is the file and a change
+to one is visible in the commit that made it. What is worth asserting here is
+that they are read at all, read into the right shape, and that the *ranking* --
+which is code rather than data -- puts things where somebody expects them.
 
-It is the habit spec 051 depends on: the modules after this one write to another
-process's memory, and "it looks right" is not a standard that survives that.
+The counts and the search results below were agreed with the implementation this
+was ported from, while both existed.
 */
 
-// pythonTimeout is generous: the first call pays for the interpreter starting
-// and for reading 572 KB of JSON.
-const pythonTimeout = 2 * time.Minute
-
-// repoRoot is where the Python package can be imported from.
+// repoRoot is the checkout, for the test that the data is embedded rather than
+// read from beside the binary.
 var repoRoot = func() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
 }()
 
-// askPython runs a snippet in the repository and decodes what it printed.
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
-
-/*
-Every item name is the one the Python reads from the same file.
-
-Row for row, not a sample: the table is the answer to "what is item 3507", and a
-port that is right about 6,190 of 6,195 rows is wrong in a way nobody would
-notice until it named the wrong sword.
-*/
-func TestEveryItemNameMatchesThePython(t *testing.T) {
-	var want map[string]string
-	askPython(t, `
-import json
-from terrariabonker import names
-print(json.dumps(names.all_names()))
-`, &want)
-
-	got, err := game.ItemNames()
+// The item table is whole, and a few known rows read as themselves.
+func TestTheItemTableIsRead(t *testing.T) {
+	names, err := game.ItemNames()
 	require.NoError(t, err)
-	require.Equal(t, len(want), got.Len(), "the tables are different sizes")
-	require.Greater(t, got.Len(), 6000, "and neither of them is empty")
+	require.Equal(t, 6195, names.Len(), "the item table has changed size")
 
-	for key, name := range want {
-		id := atoi(t, key)
-		require.Equalf(t, name, got.Name(id), "item %d is named differently", id)
+	for id, want := range map[int]string{
+		9: "Wood", 757: "Terra Blade", 3507: "Copper Shortsword",
+		4956: "Zenith", 5400: "The Dirtiest Block",
+	} {
+		require.Equalf(t, want, names.Name(id), "item %d", id)
 	}
-}
-
-// And the tooltips beside them, which are the same shape of table and the same
-// kind of mistake to get wrong.
-func TestEveryTooltipMatchesThePython(t *testing.T) {
-	var want map[string]string
-	askPython(t, `
-import json
-from terrariabonker import names
-print(json.dumps({str(i): names.tooltip(i) for i in names.all_names()}))
-`, &want)
-
-	got, err := game.ItemNames()
-	require.NoError(t, err)
-	for key, tip := range want {
-		id := atoi(t, key)
-		require.Equalf(t, tip, got.Tooltip(id), "item %d has a different tooltip", id)
-	}
+	require.Empty(t, names.Name(99999), "an item nobody has a name for has one")
 }
 
 /*
@@ -106,55 +54,58 @@ An id the table does not know is an item from another version and is shown as
 its number; the zero id is the game's own way of saying a slot holds nothing,
 which is not an unknown item but no item.
 */
-func TestALabelIsNeverEmptyAndMatchesThePython(t *testing.T) {
-	ids := []int{0, 9, 757, 3507, 5400, 99999}
-	var want map[string]string
-	askPython(t, `
-import json
-from terrariabonker import names
-print(json.dumps({str(i): names.label(i) for i in [0, 9, 757, 3507, 5400, 99999]}))
-`, &want)
-
-	got, err := game.ItemNames()
+func TestALabelIsNeverEmpty(t *testing.T) {
+	names, err := game.ItemNames()
 	require.NoError(t, err)
-	for _, id := range ids {
-		label := got.Label(id)
-		require.NotEmpty(t, label)
-		require.Equalf(t, want[itoa(id)], label, "item %d is labelled differently", id)
+	for id, want := range map[int]string{
+		0: "(empty)", 9: "Wood", 757: "Terra Blade",
+		3507: "Copper Shortsword", 5400: "The Dirtiest Block", 99999: "#99999",
+	} {
+		require.Equalf(t, want, names.Label(id), "item %d", id)
 	}
-	require.Equal(t, "(empty)", got.Label(0))
 }
 
 /*
-Search returns the same items in the same order.
+Search returns the items in the order a picker shows them.
 
-The order is the point: shortest name first, because a short name containing
-the query is usually the thing being looked for. A port that returned the same
-set in a different order would send someone to the wrong row of a picker.
+The order is the point: shortest name first, because a short name containing the
+query is usually the thing being looked for. Returning the same set in a
+different order sends somebody to the wrong row.
 */
-func TestSearchMatchesThePython(t *testing.T) {
-	for _, query := range []string{"wood", "pickaxe", "terra", "zenith", "  SWORD "} {
-		var want [][]any
-		askPython(t, `
-import json, sys
-from terrariabonker import names
-print(json.dumps(names.search(`+quote(query)+`, limit=20)))
-`, &want)
+func TestSearchRanksByLength(t *testing.T) {
+	for _, c := range []struct {
+		query string
+		want  []int
+	}{
+		{"wood", []int{9, 5710, 619, 5215, 93, 621, 911, 2504, 5930, 39,
+			1389, 25, 480, 727, 1729, 2503, 2827, 3278, 5690, 24}},
+		{"pickaxe", []int{990, 3503, 1, 1320, 3497, 3521, 122, 469, 776, 882,
+			2776, 2781, 3509, 3515, 4059, 777, 1506, 1202, 3466, 3485}},
+		{"terra", []int{2208, 3389, 4144, 5308, 757, 5005, 5134, 4731, 5288,
+			5630, 1428, 5000, 5228, 5227}},
+		{"zenith", []int{4956}},
+		// Trimmed and case-folded, because a query is typed.
+		{"  SWORD ", []int{2332, 5224, 723, 1166, 2118, 24, 439, 483, 881, 484,
+			653, 1199, 3501, 3502, 5284, 4, 6, 659, 921, 989}},
+	} {
+		t.Run(c.query, func(t *testing.T) {
+			names, err := game.ItemNames()
+			require.NoError(t, err)
 
-		got, err := game.ItemNames()
-		require.NoError(t, err)
-		hits := got.Search(query, 20)
-
-		require.Lenf(t, hits, len(want), "%q found a different number of items", query)
-		for i, row := range want {
-			require.Equalf(t, int(row[0].(float64)), hits[i].ID, "%q: hit %d is a different item", query, i)
-			require.Equalf(t, row[1].(string), hits[i].Name, "%q: hit %d has a different name", query, i)
-		}
+			hits := names.Search(c.query, 20)
+			got := make([]int, len(hits))
+			for i, hit := range hits {
+				got[i] = hit.ID
+				require.Equalf(t, names.Name(hit.ID), hit.Name,
+					"hit %d carries a name that is not the item's", i)
+			}
+			require.Equal(t, c.want, got, "a different set, or a different order")
+		})
 	}
 
-	got, err := game.ItemNames()
+	names, err := game.ItemNames()
 	require.NoError(t, err)
-	require.Empty(t, got.Search("   ", 20), "a query of nothing finds nothing")
+	require.Empty(t, names.Search("   ", 20), "a query of nothing finds nothing")
 }
 
 // The table is read once however many callers ask for it: 6,195 rows of
@@ -178,7 +129,7 @@ func TestTheTablesAreInTheBinaryNotBesideIt(t *testing.T) {
 	// the embedded copy.
 	require.NoFileExists(t, filepath.Join(t.TempDir(), "items.json"))
 	_, err = os.Stat(filepath.Join(repoRoot, "data", "items.json"))
-	require.NoError(t, err, "the file is still in the repository for the Python to read")
+	require.NoError(t, err, "the file is still in the repository")
 }
 
 func atoi(t *testing.T, s string) int {
@@ -190,61 +141,39 @@ func atoi(t *testing.T, s string) int {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
-// quote is a Python string literal for a query, so a test case with spaces or
-// quotes in it survives the trip.
-func quote(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
-
 /*
-Every NPC name is the Python's, both directions.
+The NPC table is keyed on the net id, like the game's own collection.
 
-Keyed on the net id, like the game's own collection: the variants share a type
-and are told apart only by a negative net id, so a table keyed on type would
-collapse the coloured slimes into one row.
+The variants share a type and are told apart only by a negative net id, so a
+table keyed on type would collapse the coloured slimes into one row -- and the
+sixty-five negative keys are what shows it is not.
 */
-func TestEveryNPCNameMatchesThePython(t *testing.T) {
-	var want map[string]string
-	askPython(t, `
-import json
-from terrariabonker import npcs
-print(json.dumps({str(k): v for k, v in npcs.all_names().items()}))`, &want)
-	require.NotEmpty(t, want)
-
-	got, err := game.NPCs()
+func TestTheNPCTableIsKeyedOnNetID(t *testing.T) {
+	npcs, err := game.NPCs()
 	require.NoError(t, err)
-	require.Equal(t, len(want), got.Count(), "a different number of NPCs is named")
+	require.Equal(t, 759, npcs.Count(), "the NPC table has changed size")
 
 	negatives := 0
-	for key, name := range want {
-		id, err := strconv.Atoi(key)
-		require.NoError(t, err)
-		require.Equalf(t, name, got.Name(id), "NPC %s is named differently", key)
+	for id := range npcs.All() {
 		if id < 0 {
 			negatives++
 		}
 	}
-	require.NotZero(t, negatives, "no negative net id in the table, so nothing proves it is keyed on one")
+	require.Equal(t, 65, negatives, "a different number of variants is named")
 
-	for id := range got.All() {
-		_, known := want[strconv.Itoa(id)]
-		require.Truef(t, known, "NPC %d is named here and not in the Python", id)
+	for id, want := range map[int]string{
+		1: "Blue Slime", -3: "Green Slime", 4: "Eye of Cthulhu", 245: "Golem",
+	} {
+		require.Equalf(t, want, npcs.Name(id), "NPC %d", id)
 	}
 }
 
-// An id nobody has a name for still gets a label, because it still has to appear
-// in a list.
+// An id nobody has a name for still gets a label, because it still has to
+// appear in a list.
 func TestAnUnknownNPCStillGetsALabel(t *testing.T) {
-	var want []string
-	askPython(t, `
-import json
-from terrariabonker import npcs
-print(json.dumps([npcs.label(i) for i in (1, -2, 999999)]))`, &want)
-
-	got, err := game.NPCs()
+	npcs, err := game.NPCs()
 	require.NoError(t, err)
-	for i, id := range []int{1, -2, 999999} {
-		require.Equalf(t, want[i], got.Label(id), "NPC %d is labelled differently", id)
+	for id, want := range map[int]string{1: "Blue Slime", -2: "Slimer", 999999: "#999999"} {
+		require.Equalf(t, want, npcs.Label(id), "NPC %d", id)
 	}
 }

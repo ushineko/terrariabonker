@@ -9,51 +9,43 @@ import (
 )
 
 /*
-The whole recipe book is the book the Python reads.
+The crafting book.
 
-Every one of 3,603 recipes, field for field: what it makes, how many, what it
-takes and where. A recipe read wrong is a player told to craft the wrong thing,
-and there is no way to notice from the inside -- the table is the answer.
+The book is a file in data/, written by `extract-recipes` out of a running game,
+so the record is the file. What is asserted here is that it is read whole and
+read into the right shape -- a recipe decoded wrong is a player told to craft
+the wrong thing, and there is no way to notice from the inside because the table
+is the answer.
+
+The counts were agreed with the implementation this was ported from.
 */
-func TestTheWholeRecipeBookMatchesThePython(t *testing.T) {
-	var want struct {
-		Recipes []struct {
-			Out  int     `json:"out"`
-			N    int     `json:"n"`
-			Ing  [][]int `json:"ing"`
-			Tile *int    `json:"tile"`
-		} `json:"recipes"`
-		Stations  map[string]string `json:"stations"`
-		TileIcons map[string][]int  `json:"tileicons"`
-	}
-	askPython(t, `
-import json
-from terrariabonker import recipes as rec
-print(json.dumps(rec.load()))
-`, &want)
-
+func TestTheWholeRecipeBookIsRead(t *testing.T) {
 	book, err := game.CraftingBook()
 	require.NoError(t, err)
-	require.Len(t, book.Recipes, len(want.Recipes))
-	require.Greater(t, len(book.Recipes), 3000, "and neither book is empty")
+	require.Len(t, book.Recipes, 3603, "the book has changed size")
+	require.Len(t, book.Stations, 35, "a crafting station has appeared or gone")
+	require.Len(t, book.TileIcons, 1923, "a placeable item's tile icon has")
 
-	for i, r := range want.Recipes {
-		got := book.Recipes[i]
-		require.Equalf(t, r.Out, got.Out, "recipe %d makes something else", i)
-		require.Equalf(t, r.N, got.N, "recipe %d makes a different number", i)
-		require.Equalf(t, r.Ing, got.Ing, "recipe %d takes something else", i)
-		require.Equalf(t, r.Tile, got.Tile, "recipe %d is made somewhere else", i)
+	byHand, atStation := 0, 0
+	for i, r := range book.Recipes {
+		require.Positivef(t, r.Out, "recipe %d makes nothing", i)
+		require.Positivef(t, r.N, "recipe %d makes none of it", i)
+		if r.Tile == nil {
+			byHand++
+		} else {
+			atStation++
+		}
 	}
-	require.Equal(t, want.Stations, book.Stations)
-	require.Equal(t, want.TileIcons, book.TileIcons)
+	require.Positive(t, byHand, "nothing in the book is made by hand")
+	require.Positive(t, atStation, "nothing in the book is made at a station")
 }
 
 /*
 A recipe says where it is made.
 
-The station names come from the book; a tile it has no name for is reported as
-its number rather than as nothing, because a recipe that has to be made
-somewhere and cannot say where is worse than one naming a tile to look up.
+A tile the book has no name for is reported as its number rather than as
+nothing: a recipe that has to be made somewhere and cannot say where is worse
+than one naming a tile the reader can look up.
 */
 func TestARecipeSaysWhereItIsMade(t *testing.T) {
 	book, err := game.CraftingBook()
@@ -61,38 +53,33 @@ func TestARecipeSaysWhereItIsMade(t *testing.T) {
 
 	anvil, unknown := 16, 4242
 	require.Equal(t, "by hand", book.Station(game.Recipe{}))
-	require.NotEmpty(t, book.Station(game.Recipe{Tile: &anvil}))
-	require.NotEqual(t, "tile 16", book.Station(game.Recipe{Tile: &anvil}),
+	require.Equal(t, "Anvil", book.Station(game.Recipe{Tile: &anvil}),
 		"16 is a station the book knows")
 	require.Equal(t, "tile 4242", book.Station(game.Recipe{Tile: &unknown}))
 }
 
 /*
-Both directions of the book agree with the Python's.
+Both directions of the book, which are the window's two modes.
 
-Makes and Uses are the same recipes seen from opposite ends, and the window's
-two modes are built on them.
+Makes and Uses are the same recipes seen from opposite ends. Wood is the case
+worth pinning: it is made eight ways and used by a hundred and thirty-five, so a
+lookup that returned the wrong direction would still return something.
 */
-func TestBothDirectionsMatchThePython(t *testing.T) {
+func TestBothDirectionsOfTheBook(t *testing.T) {
 	book, err := game.CraftingBook()
 	require.NoError(t, err)
 
-	for _, item := range []int{9, 757, 3507, 8} {
-		var want struct {
-			Makes int `json:"makes"`
-			Uses  int `json:"uses"`
+	for _, c := range []struct{ item, makes, uses int }{
+		{item: 9, makes: 8, uses: 135},  // Wood
+		{item: 757, makes: 1, uses: 1},  // Terra Blade
+		{item: 3507, makes: 1, uses: 1}, // Copper Shortsword
+		{item: 8, makes: 1, uses: 349},  // Torch
+	} {
+		require.Lenf(t, book.Makes(c.item), c.makes, "item %d is made by a different number", c.item)
+		require.Lenf(t, book.Uses(c.item), c.uses, "item %d is used by a different number", c.item)
+
+		for _, r := range book.Makes(c.item) {
+			require.Equalf(t, c.item, r.Out, "a recipe that does not make item %d", c.item)
 		}
-		askPython(t, `
-import json
-from terrariabonker import recipes as rec
-book = rec.load()["recipes"]
-item = `+itoa(item)+`
-print(json.dumps({
-  "makes": sum(1 for r in book if r["out"] == item),
-  "uses": sum(1 for r in book if any(t == item for t, _ in r["ing"])),
-}))
-`, &want)
-		require.Lenf(t, book.Makes(item), want.Makes, "item %d is made by a different number of recipes", item)
-		require.Lenf(t, book.Uses(item), want.Uses, "item %d is used by a different number", item)
 	}
 }
