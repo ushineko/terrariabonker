@@ -1,15 +1,9 @@
 package buffs_test
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -37,27 +31,6 @@ const (
 	slots   = 44 // this build's count, not the 22 of older versions
 )
 
-const pythonTimeout = time.Minute
-
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
-
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
-
 // running is what the planted player already has on.
 var running = []struct{ slot, buff, ticks int32 }{
 	{slot: 0, buff: 11, ticks: 28800}, // a potion, eight minutes of it
@@ -79,89 +52,86 @@ func plant(length int32) *memtest.FakeMem {
 	return mem
 }
 
-// pyPlant is the same, as Python source.
-func pyPlant(length int32) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `
-import json, os, struct, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import buffs as B
-mem = FakeMem(%d, %d)
-mem.poke_bytes(%d + B.BUFF_TYPE_PTR_OFF, struct.pack("<I", %d))
-mem.poke_bytes(%d + B.BUFF_TIME_PTR_OFF, struct.pack("<I", %d))
-mem.poke_i32(%d + 0x0C, %d)
-mem.poke_i32(%d + 0x0C, %d)
-`, base, size, life, typeArr, life, timeArr, typeArr, length, timeArr, length)
-	for _, r := range running {
-		fmt.Fprintf(&b, "mem.poke_i32(%d + 0x10 + %d * 4, %d)\n", typeArr, r.slot, r.buff)
-		fmt.Fprintf(&b, "mem.poke_i32(%d + 0x10 + %d * 4, %d)\n", timeArr, r.slot, r.ticks)
-	}
-	fmt.Fprintf(&b, "bar = B.Buffs(mem, %d)\n", life)
-	return b.String()
-}
-
-// What is running reads the same, and the empty slots are left out.
-func TestActiveMatchesThePython(t *testing.T) {
-	var want map[string][]int32
-	askPython(t, pyPlant(slots)+`
-print(json.dumps({str(k): list(v) for k, v in bar.active().items()}))`, &want)
-
+// What is running reads back as what was planted, and the empty slots are left
+// out.
+func TestActiveIsWhatWasPlanted(t *testing.T) {
 	got, err := buffs.New(plant(slots), life).Active()
 	require.NoError(t, err)
-	require.Len(t, got, len(want), "a different number of buffs is running")
-	for _, a := range got {
-		w, known := want[fmt.Sprintf("%d", a.Slot)]
-		require.Truef(t, known, "slot %d is running there and not here", a.Slot)
-		require.Equalf(t, w[0], a.Type, "slot %d holds a different buff", a.Slot)
-		require.Equalf(t, w[1], a.Ticks, "slot %d has a different time", a.Slot)
+	require.Len(t, got, len(running), "a different number of buffs is running")
+
+	for i, want := range running {
+		require.EqualValuesf(t, want.slot, got[i].Slot, "buff %d is in a different slot", i)
+		require.Equalf(t, want.buff, got[i].Type, "slot %d holds a different buff", want.slot)
+		require.Equalf(t, want.ticks, got[i].Ticks, "slot %d has a different time", want.slot)
 	}
 }
 
-// How long a buff has left is the same, including for one that is not running.
-func TestTimeOfMatchesThePython(t *testing.T) {
-	asked := []int32{11, 121, 122, 999}
-	var want []int32
-	askPython(t, pyPlant(slots)+fmt.Sprintf(
-		"print(json.dumps([bar.time_of(b) for b in [%d, %d, %d, %d]]))",
-		asked[0], asked[1], asked[2], asked[3]), &want)
+/*
+How long a buff has left, including for one that is not running.
 
+Zero for a buff that is not on is what the renewal reads to decide between
+leaving a potion alone and topping its own effect up.
+*/
+func TestTimeOf(t *testing.T) {
 	bar := buffs.New(plant(slots), life)
-	for i, b := range asked {
-		require.Equalf(t, want[i], bar.TimeOf(b), "buff %d has a different time left", b)
+	for _, c := range []struct {
+		buff, ticks int32
+	}{{11, 28800}, {121, 60}, {122, 120}, {999, 0}} {
+		require.Equalf(t, c.ticks, bar.TimeOf(c.buff), "buff %d", c.buff)
 	}
 }
 
-// Every renewal does the same thing and leaves the same bytes.
-func TestRenewMatchesThePython(t *testing.T) {
+/*
+Every renewal does one of four things, and leaves a known set of bytes.
+
+The digest is over the whole buffer, so a renewal that wrote the right number
+into the wrong slot fails here -- and a renewal writes into the player's own
+buff bar, which is the one thing in this package that is not undoable.
+*/
+func TestRenew(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		buff  int32
-		ticks int32
+		name   string
+		buff   int32
+		ticks  int32
+		what   string
+		digest string
 	}{
-		{"one running far longer, which is a potion", 11, 120},
-		{"one running shorter", 121, 120},
-		{"one running exactly as long", 122, 120},
-		{"one not running at all", 123, 120},
-		{"and a longer renewal of the potion", 11, 99999},
+		{
+			name: "one running far longer, which is a potion", buff: 11, ticks: 120,
+			what: buffs.Kept, digest: "7afb13e22ded2e9b",
+		},
+		{
+			name: "one running shorter", buff: 121, ticks: 120,
+			what: buffs.Renewed, digest: "6afb9e01efb09ada",
+		},
+		{
+			name: "one running exactly as long", buff: 122, ticks: 120,
+			what: buffs.Kept, digest: "7afb13e22ded2e9b",
+		},
+		{
+			name: "one not running at all", buff: 123, ticks: 120,
+			what: buffs.Added, digest: "f407428204993260",
+		},
+		{
+			name: "and a longer renewal of the potion", buff: 11, ticks: 99999,
+			what: buffs.Renewed, digest: "578938b797fcc0c7",
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			var want struct {
-				What string `json:"what"`
-				Buf  string `json:"buf"`
-			}
-			askPython(t, pyPlant(slots)+fmt.Sprintf(`
-what = bar.renew(%d, %d)
-print(json.dumps({"what": what, "buf": mem.buf.hex()}))`, c.buff, c.ticks), &want)
-
 			mem := plant(slots)
 			got, err := buffs.New(mem, life).Renew(c.buff, c.ticks)
 			require.NoError(t, err)
-			require.Equal(t, want.What, got, "the renewal did something else")
-			require.Equal(t, want.Buf, mem.Hex(), "the two left different memory behind")
+			require.Equal(t, c.what, got, "the renewal did something else")
+			require.Equal(t, c.digest, image(mem),
+				"different bytes; if that was deliberate, update the digest")
 		})
 	}
+}
+
+// image is the whole planted buffer, as one short string.
+func image(mem *memtest.FakeMem) string {
+	sum := sha256.Sum256([]byte(mem.Hex()))
+	return hex.EncodeToString(sum[:8])
 }
 
 /*
@@ -211,26 +181,18 @@ func TestABuffIsAddedTimeFirst(t *testing.T) {
 }
 
 // A full bar is said to be full rather than overwriting something.
-func TestAFullBarMatchesThePython(t *testing.T) {
-	var want string
-	askPython(t, pyPlant(slots)+`
-for i in range(bar.slots()):
-    mem.poke_i32(`+fmt.Sprintf("%d", typeArr)+` + 0x10 + i * 4, 500 + i)
-    mem.poke_i32(`+fmt.Sprintf("%d", timeArr)+` + 0x10 + i * 4, 60)
-print(json.dumps(bar.renew(123, 120)))`, &want)
-	require.Equal(t, buffs.Full, want, "the Python found room in a full bar")
-
+func TestAFullBar(t *testing.T) {
 	mem := plant(slots)
 	for i := range int32(slots) {
 		mem.PokeI32(typeArr+0x10+uint32(i)*4, 500+i) //nolint:gosec // a slot index
 		mem.PokeI32(timeArr+0x10+uint32(i)*4, 60)    //nolint:gosec // a slot index
 	}
-	before := mem.Hex()
+	before := image(mem)
 
 	got, err := buffs.New(mem, life).Renew(123, 120)
 	require.NoError(t, err)
-	require.Equal(t, buffs.Full, got)
-	require.Equal(t, before, mem.Hex(), "something was written to a full bar")
+	require.Equal(t, buffs.Full, got, "room was found in a full bar")
+	require.Equal(t, before, image(mem), "something was written to a full bar")
 }
 
 /*
@@ -266,12 +228,8 @@ func TestNonsenseIsRefused(t *testing.T) {
 }
 
 // The slot count is this build's, not an older one's.
-func TestTheSlotCountMatchesThePython(t *testing.T) {
-	var want int
-	askPython(t, pyPlant(slots)+"print(json.dumps(bar.slots()))", &want)
-
+func TestTheSlotCount(t *testing.T) {
 	got, err := buffs.New(plant(slots), life).Slots()
 	require.NoError(t, err)
-	require.Equal(t, want, got)
-	require.Equal(t, slots, got, "and not the count the fixture plants")
+	require.Equal(t, slots, got, "a different number of slots was read")
 }
