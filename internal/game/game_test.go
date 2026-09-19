@@ -196,3 +196,55 @@ func quote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+/*
+Every NPC name is the Python's, both directions.
+
+Keyed on the net id, like the game's own collection: the variants share a type
+and are told apart only by a negative net id, so a table keyed on type would
+collapse the coloured slimes into one row.
+*/
+func TestEveryNPCNameMatchesThePython(t *testing.T) {
+	var want map[string]string
+	askPython(t, `
+import json
+from terrariabonker import npcs
+print(json.dumps({str(k): v for k, v in npcs.all_names().items()}))`, &want)
+	require.NotEmpty(t, want)
+
+	got, err := game.NPCs()
+	require.NoError(t, err)
+	require.Equal(t, len(want), got.Count(), "a different number of NPCs is named")
+
+	negatives := 0
+	for key, name := range want {
+		id, err := strconv.Atoi(key)
+		require.NoError(t, err)
+		require.Equalf(t, name, got.Name(id), "NPC %s is named differently", key)
+		if id < 0 {
+			negatives++
+		}
+	}
+	require.NotZero(t, negatives, "no negative net id in the table, so nothing proves it is keyed on one")
+
+	for id := range got.All() {
+		_, known := want[strconv.Itoa(id)]
+		require.Truef(t, known, "NPC %d is named here and not in the Python", id)
+	}
+}
+
+// An id nobody has a name for still gets a label, because it still has to appear
+// in a list.
+func TestAnUnknownNPCStillGetsALabel(t *testing.T) {
+	var want []string
+	askPython(t, `
+import json
+from terrariabonker import npcs
+print(json.dumps([npcs.label(i) for i in (1, -2, 999999)]))`, &want)
+
+	got, err := game.NPCs()
+	require.NoError(t, err)
+	for i, id := range []int{1, -2, 999999} {
+		require.Equalf(t, want[i], got.Label(id), "NPC %d is labelled differently", id)
+	}
+}
