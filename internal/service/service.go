@@ -95,6 +95,10 @@ type Service struct {
 	lastReel   time.Time
 	seenCast   bool
 
+	// The vein watcher, kept between ticks: its detection state is what stops
+	// the extractor missing the first tile.
+	watch *VeinWatch
+
 	// Whether a piggy bank is placed in the loaded world, kept per world: the
 	// search is a whole-world one and the selling round asks on a timer.
 	bankPlaced *bool

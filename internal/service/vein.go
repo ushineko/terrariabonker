@@ -249,6 +249,14 @@ type Extracted struct {
 	Waits      []float64 `json:"waits"`
 	MedianWait *float64  `json:"median_wait"`
 	Reason     string    `json:"reason"`
+	/*
+		TriggeredBy is the tile whose breaking set this off, when a watcher did.
+
+		Absent for an extraction somebody asked for by coordinate, which is why
+		it is a pointer: the two are the same report and the difference between
+		them is worth keeping visible.
+	*/
+	TriggeredBy *[2]int32 `json:"triggered_by,omitempty"`
 }
 
 /*
