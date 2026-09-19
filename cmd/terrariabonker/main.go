@@ -16,10 +16,12 @@ import (
 	"context"
 	"os"
 
+	"github.com/ushineko/terrariabonker/internal/buildinfo"
 	"github.com/ushineko/terrariabonker/internal/cli"
 )
 
 func main() {
 	app := cli.NewApp(cli.Options{})
+	app.Root.Version = buildinfo.Version + " (" + buildinfo.Commit + ")"
 	os.Exit(app.Execute(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
 }

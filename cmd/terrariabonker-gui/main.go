@@ -20,14 +20,13 @@ import (
 
 	"github.com/ushineko/fynedesygn/theme"
 
+	"github.com/ushineko/terrariabonker/internal/buildinfo"
 	"github.com/ushineko/terrariabonker/internal/gui"
 )
 
-// version is the panel's version, set at build time from the Python package's
-// __version__ so the two front ends cannot drift apart silently.
-//
-//	-ldflags "-X main.version=$(cat VERSION)"
-var version = "dev"
+// version is the panel's version. It defaults to buildinfo's, which the
+// Makefile stamps from .tag, so the two front ends carry the same number.
+var version = buildinfo.Version
 
 func main() {
 	var (

@@ -1,11 +1,6 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-.ruff_cache/
-
-# dotnet build output (tools/)
+# dotnet build output (tools/extract_item_names)
 bin/
 obj/
 
 # go build output
-/terrariabonker-gui
+dist/
