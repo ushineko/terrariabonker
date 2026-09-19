@@ -18,7 +18,7 @@ import (
 /*
 Every offset is the Python's offset, and there are no others on either side.
 
-The Python spreads them over five modules and spells several of them twice under
+The Python spreads them over seven modules and spells several of them twice under
 different names; this declares each one once. So the comparison is against the
 union of the five, a name appearing in more than one module must agree with
 itself, and a second Python name for a number Go already has is listed as an
@@ -39,14 +39,21 @@ func TestEveryOffsetMatchesThePython(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", `
+	cmd := exec.CommandContext(ctx, "python3", "-c", mixedNames+`
 import json
-from terrariabonker import inventory, layout, npcs, player, recipes
+from terrariabonker import inventory, layout, npcs, player, recipes, selling, service
 out = {}
+# Modules that are nothing but layout: everything in them is compared.
 for mod in (layout, player, inventory, npcs, recipes):
     for k, v in vars(mod).items():
         if not k.isupper() or not isinstance(v, int) or isinstance(v, bool):
             continue
+        assert out.get(k, v) == v, f"{k} disagrees with itself across modules"
+        out[k] = v
+# And the ones that hold game rules as well, from which only the layout is taken.
+for mod, names in ((selling, MIXED_SELLING), (service, MIXED_SERVICE)):
+    for k in names:
+        v = getattr(mod, k)
         assert out.get(k, v) == v, f"{k} disagrees with itself across modules"
         out[k] = v
 print(json.dumps(out))
@@ -81,6 +88,22 @@ print(json.dumps(out))
 }
 
 /*
+mixedNames says which constants to take from the two modules that are not purely
+layout.
+
+selling and service hold the game's own rules -- which item is a Piggy Bank, what
+a coin is worth, how many copper make a sale -- beside the handful of offsets
+they reach memory with. Only the offsets are this package's business, and listing
+them is how that line is drawn: a number added to one of those modules is
+compared here when somebody says it is layout, and not before.
+*/
+const mixedNames = `
+MIXED_SELLING = ("ITEM_VALUE", "BANK_PTR_OFF", "SAFE_PTR_OFF", "CHEST_ITEM_OFF",
+                 "COPY_LO", "BANK_SLOTS", "SELL_SLOTS", "COIN_SLOTS")
+MIXED_SERVICE = ("ITEM_COPY_LO", "ITEM_COPY_HI")
+`
+
+/*
 aliases are the numbers the Python spells twice, and the one Go name for each.
 
 Every one of these is a module importing a constant from another and re-exporting
@@ -93,6 +116,8 @@ number. A Go constant added to satisfy one would be the duplication this package
 was created to end.
 */
 var aliases = map[string]string{
-	"ARR_LEN":  "ARR_LEN_OFF",
-	"ARR_DATA": "ARR_DATA_OFF",
+	"ARR_LEN":          "ARR_LEN_OFF",
+	"ARR_DATA":         "ARR_DATA_OFF",
+	"ITEM_COPY_LO":     "COPY_LO",
+	"INVENTORY_SLOTS_": "INVENTORY_SLOTS",
 }
