@@ -1,16 +1,9 @@
 package tiles_test
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"sort"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -19,13 +12,16 @@ import (
 )
 
 /*
-A planted world, read by both implementations.
+A planted world, and what is read out of it.
 
 The tile reader is where a silent failure lives: the active bit's offset is
 measured rather than derived, and a wrong one lands on padding that reads as a
-constant zero, so every tile looks mined. Nothing about a self-consistent fixture
-catches that -- which is why the real check runs against a live world and why what
-is compared here is the reading, tile for tile.
+constant zero, so every tile looks mined. A self-consistent fixture cannot catch
+that -- which is why the real check runs against a live world, and why what is
+checked here is the reading, tile for tile, against the plan that was planted.
+
+The flood orders and the whitelists below were agreed with the implementation
+this was ported from, while both existed.
 */
 
 const (
@@ -53,27 +49,6 @@ const (
 	// the fast path in the search depends on.
 	record = 24
 )
-
-const pythonTimeout = time.Minute
-
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
-
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
 
 /*
 world is what is planted at each coordinate: the tile id, whether a tile is
@@ -170,152 +145,155 @@ func plant() *memtest.FakeMem {
 	return mem
 }
 
-// pyPlant is the same world as Python source, written with the Python's own
-// offsets.
-func pyPlant() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `
-import json, os, struct, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import layout, tiles
-mem = FakeMem(%d, %d)
-mem.poke_bytes(%d + layout.MAIN_TILE_OFF, struct.pack("<I", %d))
-mem.poke_i32(%d + layout.MAIN_MAX_TILES_OFF, %d)
-mem.poke_i32(%d + layout.MAIN_MAX_TILES_OFF + 4, %d)
-mem.poke_bytes(%d + 0x08, struct.pack("<I", %d))
-mem.poke_i32(%d + 0x04, 0)
-mem.poke_i32(%d + 0x08, %d)
-mem.poke_i32(%d + 0x0C, 0)
-`, base, size, staticBase, tileBuf, staticBase, worldW, staticBase, worldH,
-		tileBuf, tileBounds, tileBounds, tileBounds, worldH, tileBounds)
+/*
+Every coordinate reads back as what was planted there, including the ones the
+type alone cannot separate.
 
-	for _, key := range sortedKeys(plan) {
-		x, y := key[0], key[1]
-		c := plan[key]
-		if c.noObject {
-			continue
+A dirt block and open air are both id 0 and differ only in the active bit; a
+mined ore reads back as id 0 because clearing zeroes both; and a coordinate with
+no object at all is different again from one with an inactive object.
+*/
+func TestReadingTilesIsWhatWasPlanted(t *testing.T) {
+	read := tm(t)
+
+	for x := int32(-1); x <= worldW; x++ {
+		for y := int32(-1); y <= worldH; y++ {
+			at := [2]int32{x, y}
+			want, inside := plan[at]
+
+			id, haveID := read.TypeAt(x, y)
+			active, haveActive := read.ActiveAt(x, y)
+			solid, haveSolid := read.SolidTypeAt(x, y)
+
+			if !inside || want.noObject {
+				require.Falsef(t, haveID, "an id was read at %v", at)
+				require.Falsef(t, haveActive, "an active bit was read at %v", at)
+				require.Falsef(t, haveSolid, "a solid id was read at %v", at)
+				continue
+			}
+			require.Truef(t, haveID, "no id at %v", at)
+			require.Equalf(t, want.id, id, "a different id at %v", at)
+			require.Truef(t, haveActive, "no active bit at %v", at)
+			require.Equalf(t, want.active, active, "a different active bit at %v", at)
+
+			require.Equalf(t, want.active, haveSolid,
+				"%v is solid on one reading and not the other", at)
+			if want.active {
+				require.Equalf(t, want.id, solid, "a different solid id at %v", at)
+			}
 		}
-		idx := worldH*x + y
-		at := objects + idx*record
-		header := 0
-		if c.active {
-			header = 0x20
-		}
-		fmt.Fprintf(&b, "mem.poke_bytes(%d + 4 * %d, struct.pack(\"<I\", %d))\n",
-			entries, idx, at)
-		fmt.Fprintf(&b, "mem.poke_bytes(%d + 0x08, struct.pack(\"<H\", %d))\n", at, c.id)
-		fmt.Fprintf(&b, "mem.poke_bytes(%d + 0x0E, struct.pack(\"<H\", %d))\n", at, header)
-	}
-	fmt.Fprintf(&b, "tm = tiles.TileMap(mem, %d)\n", staticBase)
-	return b.String()
-}
-
-// Every coordinate reads the same, including the ones the type alone cannot
-// separate.
-func TestReadingTilesMatchesThePython(t *testing.T) {
-	var want map[string][]any
-	askPython(t, pyPlant()+fmt.Sprintf(`
-out = {}
-for x in range(-1, %d + 1):
-    for y in range(-1, %d + 1):
-        out["%%d,%%d" %% (x, y)] = [tm.type_at(x, y), tm.active_at(x, y),
-                                    tm.solid_type_at(x, y)]
-print(json.dumps(out))`, worldW, worldH), &want)
-
-	tm, err := tiles.New(plant(), staticBase)
-	require.NoError(t, err)
-
-	for key, w := range want {
-		var x, y int32
-		_, err := fmt.Sscanf(key, "%d,%d", &x, &y)
-		require.NoError(t, err)
-
-		typ, haveType := tm.TypeAt(x, y)
-		require.Equalf(t, w[0], nilOr(typ, haveType), "the id at %s differs", key)
-
-		active, haveActive := tm.ActiveAt(x, y)
-		require.Equalf(t, w[1], nilOrBool(active, haveActive), "active at %s differs", key)
-
-		solid, haveSolid := tm.SolidTypeAt(x, y)
-		require.Equalf(t, w[2], nilOr(solid, haveSolid), "the solid id at %s differs", key)
 	}
 }
 
-// A column comes back the same, including where it runs past the world.
-func TestColumnMatchesThePython(t *testing.T) {
-	for _, c := range [][3]int32{{2, 0, worldH}, {2, 5, 9}, {6, 8, 12}, {0, -5, 3}, {99, 0, 3}, {2, 5, 5}} {
-		t.Run(fmt.Sprintf("%d_%d_%d", c[0], c[1], c[2]), func(t *testing.T) {
-			var want []any
-			askPython(t, pyPlant()+fmt.Sprintf("print(json.dumps(tm.column(%d, %d, %d)))",
-				c[0], c[1], c[2]), &want)
+/*
+A column comes back as the tiles in it, including where it runs past the world.
 
-			got := tm(t).Column(c[0], c[1], c[2])
-			require.Len(t, got, len(want), "a different number of tiles came back")
-			for i, w := range want {
-				require.Equalf(t, w, nilOr(got[i].Type, got[i].Present),
-					"tile %d of the column differs", i)
+A nil in the list is a coordinate with no object, which is not the same as a
+tile whose id is zero -- and the column is what the falling-ore search walks.
+*/
+func TestColumn(t *testing.T) {
+	for _, c := range []struct {
+		x, y0, y1 int32
+		want      []int // -1 for a coordinate with no object
+	}{
+		{2, 0, worldH, []int{0, 0, 0, 0, 0, 0, 1, 7, 7, 7, 1, 1}},
+		{2, 5, 9, []int{0, 1, 7, 7}},
+		{6, 8, 12, []int{1, 1, -1, 1}},
+		{0, -5, 3, []int{0, 0, 0}},
+		{99, 0, 3, nil},
+		{2, 5, 5, nil},
+	} {
+		t.Run(fmt.Sprintf("%d_%d_%d", c.x, c.y0, c.y1), func(t *testing.T) {
+			got := tm(t).Column(c.x, c.y0, c.y1)
+			require.Len(t, got, len(c.want), "a different number of tiles came back")
+			for i, want := range c.want {
+				if want < 0 {
+					require.Falsef(t, got[i].Present, "tile %d has an object", i)
+					continue
+				}
+				require.Truef(t, got[i].Present, "tile %d has no object", i)
+				require.EqualValuesf(t, want, got[i].Type, "tile %d is a different id", i)
 			}
 		})
 	}
 }
 
-// A whole-world search finds the same coordinates, in the same order.
-func TestFindTypeMatchesThePython(t *testing.T) {
+// A whole-world search finds the coordinates in order, column by column.
+func TestFindType(t *testing.T) {
 	for _, c := range []struct {
 		want  uint16
 		limit int
-	}{{7, 0}, {6, 0}, {1, 0}, {0, 0}, {7, 2}, {999, 0}} {
+		found [][2]int32
+	}{
+		{want: 7, found: [][2]int32{{1, 6}, {2, 7}, {2, 8}, {2, 9}, {3, 7}, {3, 8},
+			{3, 9}, {4, 6}, {5, 9}}},
+		{want: 6, found: [][2]int32{{4, 7}, {4, 8}}},
+		// Stopped early, which is what the caller's budget does.
+		{want: 7, limit: 2, found: [][2]int32{{1, 6}, {2, 7}}},
+		{want: 999, found: nil},
+	} {
 		t.Run(fmt.Sprintf("id%d_limit%d", c.want, c.limit), func(t *testing.T) {
-			var found [][]int32
-			askPython(t, pyPlant()+fmt.Sprintf("print(json.dumps(tm.find_type(%d, %d)))",
-				c.want, c.limit), &found)
-
 			got := tm(t).FindType(c.want, c.limit)
-			require.Len(t, got, len(found), "a different number of tiles was found")
-			for i, w := range found {
-				require.Equalf(t, w[0], got[i].X, "hit %d is at a different x", i)
-				require.Equalf(t, w[1], got[i].Y, "hit %d is at a different y", i)
+			require.Len(t, got, len(c.found), "a different number of tiles was found")
+			for i, want := range c.found {
+				require.Equalf(t, want[0], got[i].X, "hit %d is at a different x", i)
+				require.Equalf(t, want[1], got[i].Y, "hit %d is at a different y", i)
 			}
 		})
 	}
 }
 
 /*
-A flood takes one vein, in the same order.
+A flood takes one vein, in a fixed order.
 
 The order matters and is not incidental: the caller queues these for the game to
-mine, a batch at a time, so two implementations that agreed on the set and
-disagreed on the order would mine different tiles in the first batch.
+mine, a batch at a time, so a change that kept the set and reordered it would
+mine different tiles in the first batch.
 */
-func TestFloodMatchesThePython(t *testing.T) {
+func TestFlood(t *testing.T) {
 	for _, c := range []struct {
+		name     string
 		x, y     int32
-		gems     bool
 		limit    int
 		diagonal bool
+		want     [][2]int32
 	}{
-		{2, 7, false, tiles.DefaultLimit, true},  // into the copper
-		{4, 7, false, tiles.DefaultLimit, true},  // into the iron beside it
-		{2, 7, false, 2, true},                   // and stopped early
-		{2, 7, false, 3, true},                   // stopped mid-spread
-		{2, 7, false, tiles.DefaultLimit, false}, // without the diagonals
-		{0, 0, false, tiles.DefaultLimit, true},  // empty sky
-		{0, 6, false, tiles.DefaultLimit, true},  // stone, which is not on the list
-		{5, 9, false, tiles.DefaultLimit, true},  // an ore's id where no tile is
+		{
+			name: "into the copper", x: 2, y: 7, limit: tiles.DefaultLimit, diagonal: true,
+			want: [][2]int32{{2, 7}, {3, 7}, {2, 8}, {3, 8}, {1, 6}, {3, 9}, {4, 6}},
+		},
+		{
+			name: "into the iron beside it", x: 4, y: 7, limit: tiles.DefaultLimit,
+			diagonal: true, want: [][2]int32{{4, 7}, {4, 8}},
+		},
+		{
+			name: "stopped early", x: 2, y: 7, limit: 2, diagonal: true,
+			want: [][2]int32{{2, 7}, {3, 7}},
+		},
+		{
+			name: "stopped mid-spread", x: 2, y: 7, limit: 3, diagonal: true,
+			want: [][2]int32{{2, 7}, {3, 7}, {2, 8}},
+		},
+		{
+			name: "without the diagonals", x: 2, y: 7, limit: tiles.DefaultLimit,
+			want: [][2]int32{{2, 7}, {3, 7}, {2, 8}, {3, 8}, {3, 9}},
+		},
+		{name: "empty sky", x: 0, y: 0, limit: tiles.DefaultLimit, diagonal: true},
+		{
+			name: "stone, which is not on the list", x: 0, y: 6,
+			limit: tiles.DefaultLimit, diagonal: true,
+		},
+		{
+			name: "an ore's id where no tile is", x: 5, y: 9,
+			limit: tiles.DefaultLimit, diagonal: true,
+		},
 	} {
-		t.Run(fmt.Sprintf("%d_%d_limit%d_diag%v", c.x, c.y, c.limit, c.diagonal), func(t *testing.T) {
-			var want [][]int32
-			askPython(t, pyPlant()+fmt.Sprintf(`
-print(json.dumps(tiles.flood(tm, %d, %d, tiles.whitelist(%s), limit=%d, diagonal=%s)))`,
-				c.x, c.y, pyBool(c.gems), c.limit, pyBool(c.diagonal)), &want)
-
-			got := tiles.Flood(tm(t), c.x, c.y, tiles.Whitelist(c.gems), c.limit, c.diagonal)
-			require.Len(t, got, len(want), "a different number of tiles was taken")
-			for i, w := range want {
-				require.Equalf(t, w[0], got[i].X, "tile %d is at a different x", i)
-				require.Equalf(t, w[1], got[i].Y, "tile %d is at a different y", i)
+		t.Run(c.name, func(t *testing.T) {
+			got := tiles.Flood(tm(t), c.x, c.y, tiles.Whitelist(false), c.limit, c.diagonal)
+			require.Len(t, got, len(c.want), "a different number of tiles was taken")
+			for i, want := range c.want {
+				require.Equalf(t, want[0], got[i].X, "tile %d is at a different x", i)
+				require.Equalf(t, want[1], got[i].Y, "tile %d is at a different y", i)
 			}
 		})
 	}
@@ -361,23 +339,30 @@ func TestAFloodWillNotStartOnEmptySpace(t *testing.T) {
 	}
 }
 
-// The whitelist is the same set, and gems are opt-in.
-func TestWhitelistMatchesThePython(t *testing.T) {
-	for _, gems := range []bool{false, true} {
-		var want []int
-		askPython(t, `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import tiles
-print(json.dumps(sorted(tiles.whitelist(`+pyBool(gems)+`))))`, &want)
+/*
+The whitelist is the ores, and gems are opt-in.
 
-		got := tiles.Whitelist(gems)
+Frozen because it is a hand-written list of tile ids: a number added to it is a
+tile the extractor will mine, and one removed is ore somebody expected to go and
+did not.
+*/
+func TestWhitelist(t *testing.T) {
+	ores := []int{6, 7, 8, 9, 22, 37, 56, 58, 107, 108, 111, 123, 166, 167, 168,
+		169, 204, 211, 221, 222, 223, 224, 404, 407, 408}
+	withGems := []int{6, 7, 8, 9, 22, 37, 56, 58, 63, 64, 65, 66, 67, 68, 107, 108,
+		111, 123, 166, 167, 168, 169, 204, 211, 221, 222, 223, 224, 404, 407, 408}
+
+	for _, c := range []struct {
+		gems bool
+		want []int
+	}{{gems: false, want: ores}, {gems: true, want: withGems}} {
+		got := tiles.Whitelist(c.gems)
 		ids := make([]int, 0, len(got))
 		for id := range got {
 			ids = append(ids, id)
 		}
 		sort.Ints(ids)
-		require.Equalf(t, want, ids, "the whitelist differs with gems=%v", gems)
+		require.Equalf(t, c.want, ids, "the whitelist differs with gems=%v", c.gems)
 	}
 }
 
