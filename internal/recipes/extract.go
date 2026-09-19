@@ -303,3 +303,12 @@ func readU32Or(mem Mem, addr uint32) (uint32, bool) {
 	v, ok := mem.ReadU32(addr)
 	return v, ok && v != 0
 }
+
+/*
+DataPath is where the bundled book lives in the working tree.
+
+Relative to the current directory on purpose: this is a maintenance command run
+from a checkout, and writing into an installed copy's embedded data would put
+the file somewhere the build does not read.
+*/
+func DataPath() string { return filepath.Join("data", "recipes.json") }
