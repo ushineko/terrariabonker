@@ -18,7 +18,7 @@ import (
 /*
 Every offset is the Python's offset, and there are no others on either side.
 
-The Python spreads them over seven modules and spells several of them twice under
+The Python spreads them over eight modules and spells several of them twice under
 different names; this declares each one once. So the comparison is against the
 union of the five, a name appearing in more than one module must agree with
 itself, and a second Python name for a number Go already has is listed as an
@@ -41,7 +41,7 @@ func TestEveryOffsetMatchesThePython(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", "-c", mixedNames+`
 import json
-from terrariabonker import inventory, layout, npcs, player, recipes, selling, service
+from terrariabonker import inventory, layout, npcs, player, projectiles, recipes, selling, service
 out = {}
 # Modules that are nothing but layout: everything in them is compared.
 for mod in (layout, player, inventory, npcs, recipes):
@@ -51,7 +51,8 @@ for mod in (layout, player, inventory, npcs, recipes):
         assert out.get(k, v) == v, f"{k} disagrees with itself across modules"
         out[k] = v
 # And the ones that hold game rules as well, from which only the layout is taken.
-for mod, names in ((selling, MIXED_SELLING), (service, MIXED_SERVICE)):
+for mod, names in ((selling, MIXED_SELLING), (service, MIXED_SERVICE),
+                   (projectiles, MIXED_PROJECTILES)):
     for k in names:
         v = getattr(mod, k)
         assert out.get(k, v) == v, f"{k} disagrees with itself across modules"
@@ -85,15 +86,29 @@ print(json.dumps(out))
 		_, known := want[name]
 		require.Truef(t, known, "%s is an offset this has and the Python does not", name)
 	}
+	/*
+		And every alias names something that is really there.
+
+		Without this the list is a place to hide: an entry for a name the Python
+		does not have excuses nothing and goes unnoticed, and one whose target
+		does not exist turns a missing offset into a passing test. There was a
+		dead entry here within an hour of the list existing.
+	*/
+	for name, target := range aliases {
+		_, aliased := want[name]
+		require.Truef(t, aliased, "%s is aliased but the Python does not have it", name)
+		_, exists := layout.Offsets[target]
+		require.Truef(t, exists, "%s is aliased to %s, which this does not declare", name, target)
+	}
 }
 
 /*
 mixedNames says which constants to take from the two modules that are not purely
 layout.
 
-selling and service hold the game's own rules -- which item is a Piggy Bank, what
-a coin is worth, how many copper make a sale -- beside the handful of offsets
-they reach memory with. Only the offsets are this package's business, and listing
+selling, service and projectiles hold the game's own rules -- which item is a
+Piggy Bank, what a coin is worth, how far a catch counter climbs -- beside the
+offsets they reach memory with. Only the offsets are this package's business, and listing
 them is how that line is drawn: a number added to one of those modules is
 compared here when somebody says it is layout, and not before.
 */
@@ -101,6 +116,10 @@ const mixedNames = `
 MIXED_SELLING = ("ITEM_VALUE", "BANK_PTR_OFF", "SAFE_PTR_OFF", "CHEST_ITEM_OFF",
                  "COPY_LO", "BANK_SLOTS", "SELL_SLOTS", "COIN_SLOTS")
 MIXED_SERVICE = ("ITEM_COPY_LO", "ITEM_COPY_HI")
+MIXED_PROJECTILES = ("WET_OFF", "AI_OFF", "LOCALAI_OFF", "ACTIVE_OFF", "SCALE_OFF",
+                     "BOBBER_OFF", "TYPE_OFF", "TIMELEFT_OFF", "PENETRATE_OFF",
+                     "MAXPENETRATE_OFF", "TILECOLLIDE_OFF", "EXTRAUPDATES_OFF",
+                     "ARRAY_LEN", "ARRAY_LEN_OFF", "ARRAY_DATA_OFF")
 `
 
 /*
@@ -116,8 +135,12 @@ number. A Go constant added to satisfy one would be the duplication this package
 was created to end.
 */
 var aliases = map[string]string{
-	"ARR_LEN":          "ARR_LEN_OFF",
-	"ARR_DATA":         "ARR_DATA_OFF",
-	"ITEM_COPY_LO":     "COPY_LO",
-	"INVENTORY_SLOTS_": "INVENTORY_SLOTS",
+	"ARR_LEN":  "ARR_LEN_OFF",
+	"ARR_DATA": "ARR_DATA_OFF",
+	// service and selling each name the low end of the template block.
+	"ITEM_COPY_LO": "COPY_LO",
+	// projectiles names the array header the way the rest of the project does,
+	// one module along.
+	"ARRAY_LEN_OFF":  "ARR_LEN_OFF",
+	"ARRAY_DATA_OFF": "ARR_DATA_OFF",
 }

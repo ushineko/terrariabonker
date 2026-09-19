@@ -94,3 +94,56 @@ var recipeOffsets = map[string]int64{
 	"ITEM_PLACE_STYLE":     ItemPlaceStyle,
 	"LOCALIZEDTEXT_VALUE":  LocalizedTextValue,
 }
+
+/*
+A projectile's fields.
+
+All verified against the mono runtime's own field metadata, widths included --
+which matter here: the flags are one byte each and packed against their
+neighbours.
+*/
+const (
+	ProjectileWet          = 0x03C // Entity.wet
+	ProjectileAI           = 0x044 // -> float[3]
+	ProjectileLocalAI      = 0x048 // -> float[3]
+	ProjectileActive       = 0x078
+	ProjectileScale        = 0x08C
+	ProjectileBobber       = 0x088
+	ProjectileType         = 0x094
+	ProjectileTimeLeft     = 0x0B4
+	ProjectilePenetrate    = 0x0D4 // -1 means it never runs out
+	ProjectileMaxPenetrate = 0x0DC
+	ProjectileTileCollide  = 0x100 // one byte
+	ProjectileExtraUpdates = 0x104
+)
+
+/*
+ProjectileWet is named rather than dropped because it is where `active` was
+wrongly read for several releases.
+
+The two are indistinguishable while fishing: a bobber floats in water and is
+therefore always wet, so every test and every hour of play agreed with the wrong
+offset. Projectiles in *flight* are dry, which is why no probe ever saw one.
+Confirmed against the runtime's field metadata and live -- twelve active
+projectiles in the array, every one of them dry.
+
+Keeping the name is what stops the offset being reused for something else.
+*/
+const ProjectileArrayLen = 1001
+
+// projectileOffsets is those under the Python's names for them.
+var projectileOffsets = map[string]int64{
+	"WET_OFF":          ProjectileWet,
+	"AI_OFF":           ProjectileAI,
+	"LOCALAI_OFF":      ProjectileLocalAI,
+	"ACTIVE_OFF":       ProjectileActive,
+	"SCALE_OFF":        ProjectileScale,
+	"BOBBER_OFF":       ProjectileBobber,
+	"TYPE_OFF":         ProjectileType,
+	"TIMELEFT_OFF":     ProjectileTimeLeft,
+	"PENETRATE_OFF":    ProjectilePenetrate,
+	"MAXPENETRATE_OFF": ProjectileMaxPenetrate,
+	"TILECOLLIDE_OFF":  ProjectileTileCollide,
+	"EXTRAUPDATES_OFF": ProjectileExtraUpdates,
+	"ARRAY_LEN":        ProjectileArrayLen,
+}
