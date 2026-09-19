@@ -1,14 +1,9 @@
 package player_test
 
 import (
-	"context"
-	"encoding/json"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -27,27 +22,6 @@ which catches a field written in the wrong place as surely as a field written
 with the wrong value.
 */
 
-const pythonTimeout = time.Minute
-
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
-
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
-
 const (
 	base = 0x10000000
 	size = 0x1000
@@ -56,17 +30,6 @@ const (
 
 // preamble plants the same player in the Python's fake as the Go tests plant in
 // theirs, and leaves a handle on it.
-const preamble = `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker.player import Player
-mem = FakeMem(0x10000000, 0x1000)
-mem.plant_player(0x10000800, [380, 400, 137, 201, 220, 180], 0)
-p = Player(mem, 0x10000800)
-`
-
 /*
 plant is a Go fake holding the same player.
 
@@ -81,64 +44,71 @@ func plant(t *testing.T) (*memtest.FakeMem, *player.Player) {
 	return mem, player.New(mem, life)
 }
 
-// Every field is read from the same place.
-func TestReadingAPlayerMatchesThePython(t *testing.T) {
-	var want map[string]int32
-	askPython(t, preamble+`print(json.dumps({
-    "life": p.stat_life, "life_max": p.stat_life_max, "life_max2": p.stat_life_max2,
-    "mana": p.stat_mana, "mana_max": p.stat_mana_max, "mana_max2": p.stat_mana_max2,
-}))`, &want)
+/*
+Every field is read from the place it was planted.
 
+The block is six adjacent integers and the fields either side of the anchor are
+read by subtracting from it, so a sign error reads the cap as the current value
+-- which is a plausible number and looks like the player being at full health.
+*/
+func TestReadingAPlayer(t *testing.T) {
 	_, p := plant(t)
-	for name, read := range map[string]func() (int32, bool){
-		"life":      p.StatLife,
-		"life_max":  p.StatLifeMax,
-		"life_max2": p.StatLifeMax2,
-		"mana":      p.StatMana,
-		"mana_max":  p.StatManaMax,
-		"mana_max2": p.StatManaMax2,
+	for name, c := range map[string]struct {
+		read func() (int32, bool)
+		want int32
+	}{
+		"life":      {p.StatLife, 137},
+		"life_max":  {p.StatLifeMax, 400},
+		"life_max2": {p.StatLifeMax2, 380},
+		"mana":      {p.StatMana, 201},
+		"mana_max":  {p.StatManaMax, 220},
+		"mana_max2": {p.StatManaMax2, 180},
 	} {
-		got, ok := read()
+		got, ok := c.read()
 		require.Truef(t, ok, "%s could not be read", name)
-		require.Equalf(t, want[name], got, "%s is read from somewhere else", name)
+		require.Equalf(t, c.want, got, "%s is read from somewhere else", name)
 	}
 }
 
-// Every write leaves the buffer in the same state, byte for byte.
-func TestWritingAPlayerMatchesThePython(t *testing.T) {
-	cases := []struct {
+/*
+Every write leaves the buffer in a known state, byte for byte.
+
+The digest is over the whole buffer, because the fields are adjacent: a write
+that put the right number one field along would otherwise pass, and the field
+one along is the cap.
+*/
+func TestWritingAPlayer(t *testing.T) {
+	for _, c := range []struct {
 		name   string
-		python string
+		digest string
 		run    func(p *player.Player) bool
 	}{
-		{"set_life", "p.set_life(1)", func(p *player.Player) bool { return p.SetLife(1) }},
-		{"set_mana", "p.set_mana(7)", func(p *player.Player) bool { return p.SetMana(7) }},
-		{"set_max_life", "p.set_max_life(500)", func(p *player.Player) bool { return p.SetMaxLife(500) }},
-		{"set_max_mana", "p.set_max_mana(400)", func(p *player.Player) bool { return p.SetMaxMana(400) }},
-		{"heal_full", "p.heal_full()", func(p *player.Player) bool { return p.HealFull() }},
-		{"mana_full", "p.mana_full()", func(p *player.Player) bool { return p.ManaFull() }},
+		{"set_life", "da9d9c4c8c0ac138", func(p *player.Player) bool { return p.SetLife(1) }},
+		{"set_mana", "27fd8c7af9ed2685", func(p *player.Player) bool { return p.SetMana(7) }},
+		{"set_max_life", "1abc2dee5858dfdd", func(p *player.Player) bool { return p.SetMaxLife(500) }},
+		{"set_max_mana", "b5ce83101d4a1d35", func(p *player.Player) bool { return p.SetMaxMana(400) }},
+		{"heal_full", "09272104de09215d", func(p *player.Player) bool { return p.HealFull() }},
+		{"mana_full", "911f2e6da92d4863", func(p *player.Player) bool { return p.ManaFull() }},
 		// Raising the cap and then filling to it is the sequence the trainer
 		// actually performs, and it is where writing only the permanent field
 		// would leave the fill short.
-		{"max then full", "p.set_max_life(500); p.heal_full()", func(p *player.Player) bool {
+		{"max then full", "480e816f4ca35a60", func(p *player.Player) bool {
 			return p.SetMaxLife(500) && p.HealFull()
 		}},
-	}
-
-	for _, c := range cases {
+	} {
 		t.Run(c.name, func(t *testing.T) {
-			var want struct {
-				Buf string `json:"buf"`
-				OK  bool   `json:"ok"`
-			}
-			askPython(t, preamble+c.python+`
-print(json.dumps({"buf": mem.buf.hex(), "ok": True}))`, &want)
-
 			mem, p := plant(t)
 			require.True(t, c.run(p), "the write was refused")
-			require.Equal(t, want.Buf, mem.Hex(), "the two left different memory behind")
+			require.Equal(t, c.digest, image(mem),
+				"different bytes; if that was deliberate, update the digest")
 		})
 	}
+}
+
+// image is the whole planted buffer, as one short string.
+func image(mem *memtest.FakeMem) string {
+	sum := sha256.Sum256([]byte(mem.Hex()))
+	return hex.EncodeToString(sum[:8])
 }
 
 /*
@@ -149,18 +119,12 @@ reading is how that shows. Filling to a cap that could not be read would write
 whatever the last value happened to be.
 */
 func TestAnUnreadablePlayerIsRefused(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble+`
-gone = Player(mem, 0x20000000)
-print(json.dumps({"life": gone.stat_life, "heal": gone.heal_full(),
-                  "mana": gone.mana_full(), "set": gone.set_life(1)}))`, &want)
-	require.Nil(t, want["life"], "the Python read a player that is not mapped")
-
 	mem, _ := plant(t)
 	gone := player.New(mem, 0x20000000)
+
 	_, ok := gone.StatLife()
 	require.False(t, ok, "life was read from unmapped memory")
-	require.Equal(t, want["heal"], gone.HealFull(), "healing disagrees")
-	require.Equal(t, want["mana"], gone.ManaFull(), "filling mana disagrees")
-	require.Equal(t, want["set"], gone.SetLife(1), "writing disagrees")
+	require.False(t, gone.HealFull(), "a player that could not be read was healed")
+	require.False(t, gone.ManaFull(), "and had their mana filled")
+	require.False(t, gone.SetLife(1), "and was written to")
 }
