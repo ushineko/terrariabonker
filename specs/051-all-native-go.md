@@ -394,8 +394,41 @@ build the differential habit this port depends on.
    `grabitems` keeps a literal patch site, by documented exception, so it stops resolving
    once `pickup` is applied -- which it was. On a clean game it resolves.
 
-   **Not yet done against a live game**: applying a patch. That is the maintainer's call to
-   make and to verify.
+   **Validated against a live game.** All fifteen patches were applied to a running
+   Terraria by the Go patcher and confirmed working by the maintainer. Every jump was
+   checked arithmetically before the game was touched -- the site jump reaching the slot,
+   the slot falling out of the injection's index in `SlotOrder` rather than a search, and
+   the jump home landing on the byte after *all* the displaced bytes rather than after the
+   five the jump occupies.
+
+   | patch | kind | what it exercised |
+   | --- | --- | --- |
+   | `mining`, `reach` | in place | a fixed byte swap plus a player field, in every copy |
+   | `fast_place`, `max_minions` | in place, tunable | bytes built from the value, not fixed |
+   | `tool_reach` | injection | the arena bootstrap: VirtualAlloc through a per-frame springboard |
+   | `pickup`, `spawn_rate`, `smart_cursor` | injection | a stub built from a value |
+   | `loot` | injection, multi-site | four structural twins, four slots, four jumps |
+   | `vanity_accs` | injection + edits | a stub *and* two loop bounds, on and off together |
+   | `inventory_accs` | injection, live state | three managed call targets resolved and baked |
+   | `teleport` | injection, managed call | calls back into `Player.Teleport` with a hand-built frame |
+   | `ore_extract`, `auto_use` | injection, live state | the arena's data words and the queue |
+
+   Three things the live run established that a planted game could not:
+
+   * The arena bootstrap works. No arena existed; the springboard was hooked at
+     `borders_movement+0x12`, VirtualAlloc ran within a frame, and the hook was removed
+     and scrubbed. The result was a stamped 64 KB read-write-execute mapping at the
+     address chosen beforehand.
+   * `teleport` resolved the **live** player rather than the inert snapshot sharing its
+     name, which is the distinction `ResolveLocalPlayer` exists for and the one a planted
+     game cannot prove.
+   * Enabling `mining` leaves the live player's `pickSpeed` reading 0.3 rather than the 0.2
+     written, while the inert copy keeps 0.2. That was checked against the Python before
+     being reported: it does the same. So it is the game writing that field after the
+     reset is nopped, not a difference between implementations.
+
+   `pylons` is the one patch not applied: it needs a pylon already placed so the game
+   compiles the method it patches.
 8. **`xnb` and `sprites`.** Decoding the game's containers and building the PNG cache.
    Pillow leaves with them; Go's `image/png` writes the cache. Differential test: decode
    the same `Item_<id>.xnb` in both and compare the PNG bytes, or the pixels.
