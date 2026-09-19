@@ -73,3 +73,29 @@ var sellingOffsets = map[string]int64{
 	"SELL_SLOTS":     SellSlots,
 	"COIN_SLOTS":     CoinSlots,
 }
+
+/*
+The player's buffs: two parallel arrays of equal length, one of types and one of
+times, that the game counts down once per frame.
+
+That is the whole mechanism, and it is why holding an effect up needs no code
+patch: writing the pair is what the game itself does, and a buff whose time stops
+being renewed expires on its own. The game already uses renewal this way -- stand
+next to a campfire and its buff sits at a single tick, re-applied every frame,
+which is why it lapses the moment you walk away rather than needing anything to
+switch it off.
+
+The pointers sit just before the inventory's, as sibling fields do. There are 44
+slots on this build, not the 22 of older versions -- worth stating, because a
+search for a 22-element array finds nothing at all.
+*/
+const (
+	BuffTypePtrOff = -0x670
+	BuffTimePtrOff = -0x66C
+)
+
+// buffOffsets is those under the Python's names for them.
+var buffOffsets = map[string]int64{
+	"BUFF_TYPE_PTR_OFF": BuffTypePtrOff,
+	"BUFF_TIME_PTR_OFF": BuffTimePtrOff,
+}

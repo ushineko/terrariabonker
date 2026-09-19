@@ -41,7 +41,7 @@ func TestEveryOffsetMatchesThePython(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", "-c", mixedNames+`
 import json
-from terrariabonker import inventory, layout, npcs, player, projectiles, recipes, selling, service
+from terrariabonker import buffs, inventory, layout, npcs, player, projectiles, recipes, selling, service
 out = {}
 # Modules that are nothing but layout: everything in them is compared.
 for mod in (layout, player, inventory, npcs, recipes):
@@ -52,7 +52,7 @@ for mod in (layout, player, inventory, npcs, recipes):
         out[k] = v
 # And the ones that hold game rules as well, from which only the layout is taken.
 for mod, names in ((selling, MIXED_SELLING), (service, MIXED_SERVICE),
-                   (projectiles, MIXED_PROJECTILES)):
+                   (projectiles, MIXED_PROJECTILES), (buffs, MIXED_BUFFS)):
     for k in names:
         v = getattr(mod, k)
         assert out.get(k, v) == v, f"{k} disagrees with itself across modules"
@@ -106,7 +106,7 @@ print(json.dumps(out))
 mixedNames says which constants to take from the two modules that are not purely
 layout.
 
-selling, service and projectiles hold the game's own rules -- which item is a
+selling, service, projectiles and buffs hold the game's own rules -- which item is a
 Piggy Bank, what a coin is worth, how far a catch counter climbs -- beside the
 offsets they reach memory with. Only the offsets are this package's business, and listing
 them is how that line is drawn: a number added to one of those modules is
@@ -116,6 +116,7 @@ const mixedNames = `
 MIXED_SELLING = ("ITEM_VALUE", "BANK_PTR_OFF", "SAFE_PTR_OFF", "CHEST_ITEM_OFF",
                  "COPY_LO", "BANK_SLOTS", "SELL_SLOTS", "COIN_SLOTS")
 MIXED_SERVICE = ("ITEM_COPY_LO", "ITEM_COPY_HI")
+MIXED_BUFFS = ("BUFF_TYPE_PTR_OFF", "BUFF_TIME_PTR_OFF")
 MIXED_PROJECTILES = ("WET_OFF", "AI_OFF", "LOCALAI_OFF", "ACTIVE_OFF", "SCALE_OFF",
                      "BOBBER_OFF", "TYPE_OFF", "TIMELEFT_OFF", "PENETRATE_OFF",
                      "MAXPENETRATE_OFF", "TILECOLLIDE_OFF", "EXTRAUPDATES_OFF",

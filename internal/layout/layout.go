@@ -81,7 +81,7 @@ recognise. It exists for the test that compares the two implementations, which
 checks both directions: a number on one side and not the other fails rather than
 diverging quietly.
 */
-var Offsets = merge(mainOffsets, playerOffsets, itemOffsets, npcOffsets, recipeOffsets, sellingOffsets, projectileOffsets)
+var Offsets = merge(mainOffsets, playerOffsets, itemOffsets, npcOffsets, recipeOffsets, sellingOffsets, projectileOffsets, buffOffsets)
 
 // merge is the maps above in one, and refuses a name declared twice -- which is
 // the whole failure this package exists to end, so it is a panic at startup and
