@@ -1,0 +1,92 @@
+name: Build
+
+# Linux only, deliberately: the cheats are x86 stubs written into a Windows
+# Terraria running under Proton, and the memory side is /proc and ptrace. There
+# is nothing to build for macOS or Windows.
+#
+# The version is .tag, which the Makefile stamps into internal/buildinfo.
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test + Lint
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        check-latest: true
+    - name: Install the GUI's build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols
+    - name: Test
+      run: make test
+    - name: Lint
+      run: make lint
+
+  build:
+    name: Build the tarball
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        check-latest: true
+    - name: Install the GUI's build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols
+    - name: Build
+      run: make release
+    - name: Smoke-test both binaries
+      # Everything past this needs a running Terraria, so what can be checked
+      # here is that the binaries start and report the version they were
+      # stamped with.
+      run: |
+        WANT=$(tr -d 'v[:space:]' < .tag)
+        GOT=$(./bin/terrariabonker --version | awk '{print $3}')
+        [ "$WANT" = "$GOT" ] || { echo "::error::the CLI reports $GOT, .tag says $WANT"; exit 1; }
+        ./bin/terrariabonker-gui --version
+        ./bin/terrariabonker --help > /dev/null
+    - uses: actions/upload-artifact@v4
+      with:
+        name: linux-amd64
+        path: dist/*
+
+  release:
+    name: Create Release
+    needs: [test, build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - name: Refuse a tag that does not match .tag
+      run: |
+        WANT=$(tr -d '[:space:]' < .tag)
+        GOT="${GITHUB_REF#refs/tags/}"
+        [ "$WANT" = "$GOT" ] || { echo "::error::tag $GOT does not match .tag $WANT"; exit 1; }
+    - uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
