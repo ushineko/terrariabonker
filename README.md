@@ -14,15 +14,15 @@ side in order to re-derive patch offsets after a game update. See
 *This edits your own single-player game in memory. It writes nothing to disk and
 holds no state.*
 
-![Effects tab: the freezes for godmode and infinite mana; a Fishing group switched on with bait kept at 30 and rod power 255; and passive potions switched on with a minimum stack of 1 — above a note that these need the trainer running while the Patches tab keeps working until the game restarts](assets/screenshot-effects.png)
+![The Effects section: godmode and infinite mana unticked; a Fishing group with "Rod and bait, and bait that does not run out" ticked, bait kept at 30 and rod power 255, and "Reel in for me" and "and cast" both ticked; Fishing potion effects with Fishing power on and Sonar and Crates off; passive potions on with a minimum stack of 1; and auto-sell on, over a sell list of 156 items. The log below reads "auto-restore: 14 cheats applied"](assets/screenshot-effects.png)
 
-![Patches tab: the Build group of code patches, all ticked, with their per-patch values — mining speed, placement reach, multiple pylons, fast placement, tool and interaction reach, smart-cursor radius, and the ore extractor set to sweep ores and gems](assets/screenshot-patches.png)
+![The Patches section, Build group: global mining speed unticked at 0.2, and ticked below it placement reach at 75 extra tiles, multiple pylons per biome, fast placement set to Hyper, tool and interaction reach at 75 tiles, smart cursor search radius at 20, and the ore extractor set to ores and gems. The footer reads "build 1.4.5.8+24893155 verified"](assets/screenshot-patches.png)
 
-![Inventory tab: the item grid mirroring the in-game layout — hotbar, main inventory and coins, with the ammo row below — showing sprite icons, rarity-tinted slot borders and stack counts](assets/screenshot-inventory.png)
+![The Inventory section: the item grid mirroring the in-game layout — a hotbar of ten weapons and tools, the main inventory with stack counts on potions and materials, a coin row of platinum, gold, silver and copper, and the ammo row below. Each slot shows its sprite and a border tinted by rarity](assets/screenshot-inventory.png)
 
-![Recipes tab: the craftable-item browser showing a grid of item icons over all 3214 craftable items, with a filter box and a mode selector for what an item makes or what it is used in](assets/screenshot-recipes.png)
+![The Recipes section: a grid of item icons with a "Makes" selector and a filter box, over the whole craftable set. The footer reads "3214 of 3214 item(s)" beside "Re-extract from the game" and "Extract item icons"](assets/screenshot-recipes.png)
 
-![Compendium tab: the item and NPC browser filtered to bosses, listing Brain of Cthulhu, Deerclops, Duke Fishron, Empress of Light, Eye of Cthulhu, Golem, King Slime, Lunatic Cultist and Martian Saucer with their damage, defense, life and ID, sortable by any column](assets/screenshot-compendium.png)
+![The Compendium section filtered to Boss: a table of Brain of Cthulhu, Deerclops, Duke Fishron, Empress of Light, Eye of Cthulhu, Golem and King Slime, each with its sprite, damage, defense, life and ID. The footer reads "22 of 6954 entries match" beside Give one, Open the wiki and Re-scan from the game](assets/screenshot-compendium.png)
 
 ## Table of Contents
 
