@@ -1,16 +1,11 @@
 package proc_test
 
 import (
-	"context"
-	"encoding/json"
+	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -26,68 +21,58 @@ addresses past anything a 32-bit game has. So the test hands both
 implementations the same real listing and compares what each makes of it.
 */
 
-const pythonTimeout = 2 * time.Minute
-
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
-
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
-
 /*
-Both implementations make the same regions of the same listing.
+A real listing parses into regions that satisfy the rules the parser exists for.
 
-The listing is the Python's own process, which has everything awkward in it: a
-64-bit address space, file-backed mappings, and whatever the interpreter has
-loaded. Its raw text comes back with the answer so the Go side parses exactly
-what the Python parsed.
+This process's own /proc listing is what is parsed: it has everything awkward in
+it -- a 64-bit address space, file-backed mappings, whatever the runtime has
+loaded -- and none of it is written by the test, so the parser meets lines
+nobody chose for it.
+
+Every kept region is writable, is not a device, and fits a uint32 -- which is
+the width every address in the 32-bit game has. Nothing here asserts *which*
+regions, because that is the machine's business and changes between runs.
 */
-func TestTheSameListingGivesTheSameRegions(t *testing.T) {
-	var got struct {
-		Maps    string    `json:"maps"`
-		Regions [][]int64 `json:"regions"`
-	}
-	askPython(t, `
-import json, os
-from terrariabonker.proc import Mem
-pid = os.getpid()
-print(json.dumps({
-    "maps": open(f"/proc/{pid}/maps").read(),
-    "regions": Mem(pid).regions(),
-}))
-`, &got)
-	require.NotEmpty(t, got.Maps)
+func TestARealListingParsesIntoScannableRegions(t *testing.T) {
+	raw, err := os.ReadFile("/proc/self/maps")
+	require.NoError(t, err)
+	require.NotEmpty(t, raw)
 
-	// This listing is the Python interpreter's own: a 64-bit process, which is
-	// why it has regions the game never would. The Python keeps them because
-	// its integers have no width; this keeps the ones that fit a uint32, which
-	// is the width every address in a 32-bit game has.
-	var want [][]int64
-	for _, r := range got.Regions {
-		if r[0] <= 0xFFFFFFFF && r[1] <= 0xFFFFFFFF {
-			want = append(want, r)
+	regions := proc.ParseRegions(strings.NewReader(string(raw)))
+	require.NotEmpty(t, regions, "a real listing produced no scannable region at all")
+
+	kept := map[string]bool{}
+	for i, r := range regions {
+		require.Lessf(t, r.Start, r.End, "region %d is empty or backwards", i)
+		require.Equalf(t, int(r.End-r.Start), r.Size(), "region %d is a different size", i)
+		kept[fmt.Sprintf("%x-%x", r.Start, r.End)] = true
+	}
+
+	// And every line the parser kept really is one it should have: writable,
+	// anonymous, and inside a 32-bit address space.
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
 		}
-	}
-
-	regions := proc.ParseRegions(strings.NewReader(got.Maps))
-	require.Len(t, regions, len(want), "a different number of regions was kept")
-	for i, r := range want {
-		require.Equalf(t, uint32(r[0]), regions[i].Start, "region %d starts elsewhere", i)
-		require.Equalf(t, uint32(r[1]), regions[i].End, "region %d ends elsewhere", i)
-		require.Equalf(t, int(r[1]-r[0]), regions[i].Size(), "region %d is a different size", i)
+		bounds := strings.SplitN(fields[0], "-", 2)
+		if len(bounds) != 2 {
+			continue
+		}
+		start, err1 := strconv.ParseUint(bounds[0], 16, 64)
+		end, err2 := strconv.ParseUint(bounds[1], 16, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		key := fmt.Sprintf("%x-%x", start, end)
+		if !kept[key] {
+			continue
+		}
+		require.Containsf(t, fields[1], "w", "%s was kept and is not writable", key)
+		require.Lessf(t, end, uint64(1<<32), "%s was kept and does not fit a uint32", key)
+		if len(fields) > 5 {
+			require.NotContainsf(t, fields[5], "/dev/", "%s was kept and is a device", key)
+		}
 	}
 }
 
@@ -107,53 +92,6 @@ func TestWhatIsNotAScannableRegion(t *testing.T) {
 	require.Len(t, got, 2)
 	require.Equal(t, uint32(0x08049000), got[0].Start)
 	require.Equal(t, uint32(0x0804a000), got[1].Start)
-}
-
-/*
-Both implementations make the same executable regions of the running game.
-
-The interpreter's own listing cannot carry this one: it is a 64-bit process and
-every executable mapping in it is above four gigabytes, so the comparison would
-have nothing left in it. The game is the 32-bit process this parser exists for,
-and its listing is the one being got wrong that would matter -- a region kept on
-one side and skipped on the other means the two find get_LocalPlayer in
-different places, or one of them does not find it and falls back to guessing
-which player is live.
-
-Skipped when the game is not running, because there is nothing to agree about.
-*/
-func TestTheGameGivesBothTheSameExecutableRegions(t *testing.T) {
-	var got struct {
-		Running bool       `json:"running"`
-		Maps    string     `json:"maps"`
-		Regions [][]uint64 `json:"regions"`
-	}
-	askPython(t, `
-import json
-from terrariabonker import locate as L
-from terrariabonker.proc import Mem, find_pid
-try:
-    pid = find_pid()
-except Exception:
-    print(json.dumps({"running": False}))
-else:
-    print(json.dumps({
-        "running": True,
-        "maps": open(f"/proc/{pid}/maps").read(),
-        "regions": L._exec_regions(Mem(pid)),
-    }))
-`, &got)
-	if !got.Running {
-		t.Skip("the game is not running")
-	}
-	require.NotEmpty(t, got.Regions, "the game maps no executable memory")
-
-	regions := proc.ParseExecRegions(strings.NewReader(got.Maps))
-	require.Len(t, regions, len(got.Regions), "a different number of regions was kept")
-	for i, r := range got.Regions {
-		require.Equalf(t, uint32(r[0]), regions[i].Start, "region %d starts elsewhere", i)
-		require.Equalf(t, uint32(r[1]), regions[i].End, "region %d ends elsewhere", i)
-	}
 }
 
 // The executable listing keeps what the writable one drops and drops what it
@@ -180,55 +118,3 @@ Proton's wrapper scripts name Terraria.exe on their command lines; only the game
 maps it executable. Skipped when the game is not running, because there is
 nothing to agree about.
 */
-func TestFindingTheGameAgreesWithThePython(t *testing.T) {
-	/*
-		Which refusal it is matters, not just that there was one.
-
-		"No game" and "more than one game" are different answers and the second
-		really happens: a process can map Terraria.exe executable for a moment
-		while the game is up -- one did, mid-run, and was gone before it could be
-		looked at. Both implementations refuse in that case, which is right, but
-		a test that took any refusal for "no game" reported that as a
-		disagreement about a game that was plainly running.
-	*/
-	var want struct {
-		PID   *int   `json:"pid"`
-		Error string `json:"error"`
-	}
-	askPython(t, `
-import json
-from terrariabonker import proc
-try:
-    print(json.dumps({"pid": proc.find_pid()}))
-except proc.ProcError as e:
-    print(json.dumps({"error": "multiple" if "multiple" in str(e) else "none"}))
-`, &want)
-
-	pid, err := proc.FindPID()
-	switch {
-	case want.Error == "none":
-		require.ErrorIs(t, err, proc.ErrNoGame, "the game is not running for either of us")
-		return
-	case want.Error == "multiple":
-		require.Error(t, err, "the Python saw more than one game and this saw one")
-		require.Contains(t, err.Error(), "multiple", "and refused for a different reason")
-		return
-	}
-	require.NoError(t, err)
-	require.Equal(t, *want.PID, pid)
-
-	// And the same file behind it.
-	var path any
-	askPython(t, `
-import json
-from terrariabonker import proc
-print(json.dumps(proc.Mem(proc.find_pid()).exe_path()))
-`, &path)
-	require.Equal(t, path, proc.New(pid).ExePath())
-
-	// Its regions are readable without privilege, which is what makes a scan
-	// plannable before anything is elevated.
-	require.NotEmpty(t, proc.New(pid).Regions())
-	_, err = os.Stat(filepath.Join("/proc", strconv.Itoa(pid), "mem"))
-	require.NoError(t, err)
-}

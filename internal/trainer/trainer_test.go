@@ -2,11 +2,6 @@ package trainer
 
 import (
 	"context"
-	"encoding/json"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +18,8 @@ Everything here is about the loop noticing rather than about the write, which
 the player package already covers: a pass that restored nothing is not the same
 as a pass that could not read, and telling them apart is what makes a world
 reload recoverable instead of fatal.
+
+The expectations were agreed with the implementation this was ported from.
 */
 
 const (
@@ -37,67 +34,22 @@ func fake(t *testing.T, block []int32) *memtest.FakeMem {
 	return m
 }
 
-// pyTrainer puts the same question to the Python.
-func pyTrainer(t *testing.T, script string, into any) {
-	t.Helper()
-	_, file, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(file)))
-
-	cmd := exec.CommandContext(t.Context(), "python3", "-c", `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker.player import Player
-from terrariabonker.trainer import Freezer
-BASE = `+itoa(base)+`
-LIFE = `+itoa(life)+`
-`+script) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
-
-func itoa(v int) string {
-	b, _ := json.Marshal(v)
-	return string(b)
-}
-
 /*
 A pass puts a value that has moved back, and counts it.
 
 The count is what the command line prints when the loop ends, so it is the only
 evidence a person has that anything was held at all.
 */
-func TestATickRestoresLifeMatchingThePython(t *testing.T) {
-	var want struct {
-		Life  int32 `json:"life"`
-		Saves int   `json:"saves"`
-		OK    bool  `json:"ok"`
-	}
-	pyTrainer(t, `
-m = FakeMem(BASE, 0x4000)
-m.plant_player(LIFE, [100, 100, 100, 20, 20, 20], name_ptr=0)
-fr = Freezer(m, godmode=True)
-fr.players = [Player(m, LIFE)]
-Player(m, LIFE).set_life(30)
-ok = fr._tick()
-print(json.dumps({"life": Player(m, LIFE).stat_life, "saves": fr.saves, "ok": ok}))`, &want)
-
+func TestATickRestoresLife(t *testing.T) {
 	mem := fake(t, []int32{100, 100, 100, 20, 20, 20})
 	f := New(mem, true, false, DefaultHz)
 	f.players = []*player.Player{player.New(mem, life)}
 	player.New(mem, life).SetLife(30) // a hit lands
 
-	require.Equal(t, want.OK, f.Tick(), "a different verdict on the pass")
+	require.True(t, f.Tick(), "a readable player was reported as stale")
 	got, _ := player.New(mem, life).StatLife()
-	require.Equal(t, want.Life, got, "a different life was left behind")
-	require.Equal(t, want.Saves, f.Saves, "a different number of restores was counted")
 	require.EqualValues(t, 100, got, "the hit was not undone")
+	require.Equal(t, 1, f.Saves, "the restore was not counted")
 }
 
 /*
@@ -123,21 +75,13 @@ A reload leaves the addresses pointing at nothing, and the loop has to tell that
 from a pass with nothing to do -- those are the same number of writes and
 opposite situations.
 */
-func TestATickOnDeadAddressesMatchesThePython(t *testing.T) {
-	var want bool
-	pyTrainer(t, `
-m = FakeMem(BASE, 0x4000)
-m.plant_player(LIFE, [100, 100, 80, 20, 15, 20], name_ptr=0)
-fr = Freezer(m, godmode=True)
-fr.players = [Player(m, BASE + 0x999999)]
-print(json.dumps(fr._tick()))`, &want)
-
+func TestATickOnDeadAddresses(t *testing.T) {
 	mem := fake(t, []int32{100, 100, 80, 20, 15, 20})
 	f := New(mem, true, false, DefaultHz)
 	f.players = []*player.Player{player.New(mem, base+0x999999)}
 
-	require.Equal(t, want, f.Tick(), "a different verdict on dead addresses")
 	require.False(t, f.Tick(), "an unreadable player was reported as fine")
+	require.Zero(t, f.Saves, "a pass that read nothing counted a restore")
 }
 
 /*

@@ -1,17 +1,12 @@
 package proc
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -21,10 +16,12 @@ Who ends up owning the caches the privileged side writes.
 
 None of this can be exercised for real without being root, and being root is
 exactly what makes it matter -- so the three system calls are answered by the
-test and what is compared is the decision: was a chown attempted, on what, and
-for whom. The same question is put to the Python, which has the same decision in
-it, because the two run against the same home directory on the same machine and
-a rule about paths is the kind that diverges over a trailing separator.
+test, and what is checked is the decision: was a chown attempted, on what, and
+for whom.
+
+Every case was agreed with the implementation this was ported from, while both
+existed. The paths are built under a scratch directory so the rule is what is
+being tested rather than where the test ran.
 */
 
 // recordChowns answers the system calls and collects every chown attempted.
@@ -135,7 +132,7 @@ func (c giveBackCase) build(t *testing.T) (home, path string) {
 	return home, path
 }
 
-func TestGivingBackMatchesThePython(t *testing.T) {
+func TestGivingBack(t *testing.T) {
 	for _, c := range giveBackCases {
 		t.Run(c.name, func(t *testing.T) {
 			home, path := c.build(t)
@@ -156,78 +153,8 @@ func TestGivingBackMatchesThePython(t *testing.T) {
 			}
 			require.Equal(t, want, append([]string{}, *calls...),
 				"a different decision about who owns it")
-			require.Equal(t, pyGiveBack(t, c, home, path), append([]string{}, *calls...),
-				"the Python decided differently")
 		})
 	}
-}
-
-// pyGiveBack puts the same case to the Python and returns the chowns it made.
-func pyGiveBack(t *testing.T, c giveBackCase, home, path string) []string {
-	t.Helper()
-	_, file, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(file)))
-
-	script := fmt.Sprintf(`
-import json, os, pwd, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import proc
-calls = []
-os.geteuid = lambda: %d
-os.chown = lambda p, u, g: calls.append("%%s %%d %%d" %% (p, u, g))
-home = %q
-if home:
-    pwd.getpwuid = lambda _uid: type("P", (), {"pw_dir": home})()
-else:
-    def _boom(_uid): raise KeyError("no such user")
-    pwd.getpwuid = _boom
-proc.give_back_to_user(%q)
-print(json.dumps(calls))
-`, c.euid, home, path)
-
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "HOME="+realHome)
-	if c.sudoUID != "" {
-		cmd.Env = append(cmd.Env, "SUDO_UID="+c.sudoUID)
-	} else {
-		cmd.Env = withoutVar(cmd.Env, "SUDO_UID")
-	}
-	if c.sudoGID != "" {
-		cmd.Env = append(cmd.Env, "SUDO_GID="+c.sudoGID)
-	} else {
-		cmd.Env = withoutVar(cmd.Env, "SUDO_GID")
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-
-	var got []string
-	require.NoError(t, json.Unmarshal(out, &got))
-	if got == nil {
-		got = []string{}
-	}
-	return got
-}
-
-// realHome is the home directory as it was before any test moved it, so the
-// Python child can still find its own packages.
-var realHome = os.Getenv("HOME")
-
-// withoutVar is the environment with one name removed, for the cases about an
-// invoker who is not sudo.
-func withoutVar(env []string, name string) []string {
-	out := env[:0:0]
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, name+"=") {
-			out = append(out, kv)
-		}
-	}
-	return out
 }
 
 /*

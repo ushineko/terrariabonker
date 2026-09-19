@@ -1,15 +1,9 @@
 package builds_test
 
 import (
-	"context"
-	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -19,52 +13,15 @@ import (
 /*
 The decisions this machine has made about game builds.
 
-Both implementations read and write one file while both exist, so the file is
-the contract -- and the comparison is the bytes rather than the meaning: the
-Python writes it indented and key-sorted, and a rewrite in a different shape
-would show up in the user's config directory as every decision changing at once.
+The file is compared as bytes rather than as meaning. It is written indented and
+key-sorted, and a rewrite in a different shape would show up in somebody's
+config directory as every decision changing at once -- which is not wrong, but
+is the kind of thing that should be a decision rather than a side effect of a
+refactor.
+
+Every file below is the one the implementation this was ported from wrote, while
+both existed.
 */
-
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
-
-// realHome is the home directory before the test moved it, so the Python child
-// can still find its own packages.
-var realHome = os.Getenv("HOME")
-
-/*
-pyBuilds runs a script against the same file.
-
-The module path is pointed at the scratch file rather than HOME being moved,
-because moving HOME costs the child its own packages and turns a comparison into
-a silent skip.
-*/
-func pyBuilds(t *testing.T, path, script string) string {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import builds
-builds._PATH = `+quote(path)+`
-`+script) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "HOME="+realHome)
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	return string(out)
-}
-
-func quote(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
 
 // atHome puts the config directory somewhere disposable and says where.
 func atHome(t *testing.T) string {
@@ -79,76 +36,105 @@ const (
 	another  = "1.4.5.8+25000000"
 )
 
-// Remembering a decision writes the same file, byte for byte.
-func TestRememberingMatchesThePython(t *testing.T) {
+// Remembering a decision writes the file out, byte for byte.
+func TestRememberingWritesTheFile(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		how     string
 		failed  []string
 		runtime string
-		python  string
+		want    string
 	}{
-		{name: "accepted, nothing failed", how: builds.Accepted, failed: nil,
+		{
+			name: "accepted, nothing failed", how: builds.Accepted,
 			runtime: "wine-mono-11.2.0",
-			python:  `builds.remember(KEY, builds.ACCEPTED, (), runtime="wine-mono-11.2.0")`},
-		{name: "degraded, with failures", how: builds.Degraded,
+			want: `{
+ "` + oneBuild + `": {
+  "decision": "accepted",
+  "failed": [],
+  "runtime": "wine-mono-11.2.0"
+ }
+}`,
+		},
+		{
+			name: "degraded, with failures", how: builds.Degraded,
 			failed: []string{"teleport", "loot"}, runtime: "wine-mono-11.2.0",
-			python: `builds.remember(KEY, builds.DEGRADED, ("teleport", "loot"), runtime="wine-mono-11.2.0")`},
+			want: `{
+ "` + oneBuild + `": {
+  "decision": "degraded",
+  "failed": [
+   "loot",
+   "teleport"
+  ],
+  "runtime": "wine-mono-11.2.0"
+ }
+}`,
+		},
 		{
 			// A decision made before the runtime was tracked reports none,
 			// which is the truth about it rather than a guess.
-			name: "no runtime recorded", how: builds.Accepted, failed: nil, runtime: "",
-			python: `builds.remember(KEY, builds.ACCEPTED, ())`,
+			name: "no runtime recorded", how: builds.Accepted,
+			want: `{
+ "` + oneBuild + `": {
+  "decision": "accepted",
+  "failed": []
+ }
+}`,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			pyPath := filepath.Join(t.TempDir(), "accepted-builds.json")
-			pyBuilds(t, pyPath, "KEY = "+quote(oneBuild)+"\n"+c.python)
-			want, err := os.ReadFile(pyPath)
-			require.NoError(t, err)
-
 			path := atHome(t)
 			require.NoError(t, builds.Remember(oneBuild, c.how, c.failed, c.runtime))
-			got, err := os.ReadFile(path)
-			require.NoError(t, err)
-			require.Equal(t, string(want), string(got), "a differently shaped file")
+			require.Equal(t, c.want, read(t, path), "a differently shaped file")
 		})
 	}
 }
 
-// And a second decision joins the first rather than replacing the file.
-func TestASecondDecisionMatchesThePython(t *testing.T) {
-	script := "KEY = " + quote(oneBuild) + "\nOTHER = " + quote(another) + `
-builds.remember(KEY, builds.ACCEPTED, (), runtime="wine-mono-11.2.0")
-builds.remember(OTHER, builds.DEGRADED, ("loot",))
-builds.forget(KEY)
-builds.remember(KEY, builds.DEGRADED, ("teleport",))
-`
-	pyPath := filepath.Join(t.TempDir(), "accepted-builds.json")
-	pyBuilds(t, pyPath, script)
-	want, err := os.ReadFile(pyPath)
+// read is a file as it was written.
+func read(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path) //nolint:gosec // a path this test made
 	require.NoError(t, err)
+	return string(raw)
+}
 
+// And a second decision joins the first rather than replacing the file.
+func TestASecondDecision(t *testing.T) {
 	path := atHome(t)
 	require.NoError(t, builds.Remember(oneBuild, builds.Accepted, nil, "wine-mono-11.2.0"))
 	require.NoError(t, builds.Remember(another, builds.Degraded, []string{"loot"}, ""))
 	require.NoError(t, builds.Forget(oneBuild))
 	require.NoError(t, builds.Remember(oneBuild, builds.Degraded, []string{"teleport"}, ""))
 
-	got, err := os.ReadFile(path)
-	require.NoError(t, err)
-	require.Equal(t, string(want), string(got), "a differently shaped file")
+	require.Equal(t, `{
+ "`+oneBuild+`": {
+  "decision": "degraded",
+  "failed": [
+   "teleport"
+  ]
+ },
+ "`+another+`": {
+  "decision": "degraded",
+  "failed": [
+   "loot"
+  ]
+ }
+}`, read(t, path), "a differently shaped file")
 }
 
-// What the Python wrote, this reads back as the same decision.
-func TestReadingBackWhatThePythonWrote(t *testing.T) {
-	path := atHome(t)
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	pyBuilds(t, path, "KEY = "+quote(oneBuild)+`
-builds.remember(KEY, builds.DEGRADED, ("teleport", "loot"), runtime="wine-mono-11.2.0")`)
+/*
+A decision written out is read back as itself.
+
+The file is the only thing between one run and the next, so a field renamed on
+one side of it is a machine that forgets what it decided and asks again.
+*/
+func TestADecisionIsReadBack(t *testing.T) {
+	atHome(t)
+	require.NoError(t, builds.Remember(oneBuild, builds.Degraded,
+		[]string{"teleport", "loot"}, "wine-mono-11.2.0"))
 
 	got, known := builds.Get(oneBuild)
-	require.True(t, known, "the decision the Python recorded was not found")
+	require.True(t, known, "the decision was not found")
 	require.Equal(t, builds.Decision{Decision: builds.Degraded,
 		Failed: []string{"loot", "teleport"}, Runtime: "wine-mono-11.2.0"}, got)
 	require.Equal(t, map[string]bool{"loot": true, "teleport": true},
@@ -199,25 +185,20 @@ Forgetting one build leaves the others, and asks again about that one.
 Separate from the round above, where the forgotten build is recorded again
 immediately: there, a forget that did nothing at all is invisible.
 */
-func TestForgettingOneBuildMatchesThePython(t *testing.T) {
-	script := "KEY = " + quote(oneBuild) + "\nOTHER = " + quote(another) + `
-builds.remember(KEY, builds.ACCEPTED, ())
-builds.remember(OTHER, builds.DEGRADED, ("loot",))
-builds.forget(KEY)
-`
-	pyPath := filepath.Join(t.TempDir(), "accepted-builds.json")
-	pyBuilds(t, pyPath, script)
-	want, err := os.ReadFile(pyPath)
-	require.NoError(t, err)
-
+func TestForgettingOneBuild(t *testing.T) {
 	path := atHome(t)
 	require.NoError(t, builds.Remember(oneBuild, builds.Accepted, nil, ""))
 	require.NoError(t, builds.Remember(another, builds.Degraded, []string{"loot"}, ""))
 	require.NoError(t, builds.Forget(oneBuild))
 
-	got, err := os.ReadFile(path)
-	require.NoError(t, err)
-	require.Equal(t, string(want), string(got), "a differently shaped file")
+	require.Equal(t, `{
+ "`+another+`": {
+  "decision": "degraded",
+  "failed": [
+   "loot"
+  ]
+ }
+}`, read(t, path), "a differently shaped file")
 
 	_, known := builds.Get(oneBuild)
 	require.False(t, known, "the forgotten build is still decided")
