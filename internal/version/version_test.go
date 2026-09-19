@@ -1,16 +1,9 @@
 package version_test
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -19,158 +12,165 @@ import (
 )
 
 /*
-The build gate is compared with the Python's, case for case.
+The build gate, case for case.
 
 What it decides is whether anything is allowed to write to the game, so its two
 failure directions are not symmetric. Refusing a build that would have worked
 costs the player their cheats; accepting one whose offsets have moved writes
-numbers into the wrong fields of a live save. And saying "I cannot tell" is not a
-third kind of wrong -- it is recoverable, because the caller retries.
+numbers into the wrong fields of a live save. And saying "I cannot tell" is not
+a third kind of wrong -- it is recoverable, because the caller retries.
+
+Every expected value here was agreed with the implementation this was ported
+from, while both existed. They are written out rather than compared, now that
+there is only one.
 */
 
-const pythonTimeout = time.Minute
-
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
-
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
+// The build this project targets, and the key it is known by.
+func TestTheKnownBuild(t *testing.T) {
+	require.Equal(t, "1.4.5.8", version.KnownVersion)
+	require.Equal(t, "24893155", version.KnownBuildID)
+	require.Equal(t, "1.4.5.8+24893155", version.KnownBuildKey,
+		"the key is the version and the build id, joined")
 }
 
-// The build this project targets, and the key it is known by, are the same.
-func TestTheKnownBuildMatchesThePython(t *testing.T) {
-	var want map[string]string
-	askPython(t, `
-import json
-from terrariabonker import version as V
-print(json.dumps({"version": V.KNOWN_VERSION, "buildid": V.KNOWN_BUILDID,
-                  "key": V.KNOWN_BUILD_KEY}))`, &want)
+/*
+A build key reads the same when half of it is missing.
 
-	require.Equal(t, want["version"], version.KnownVersion)
-	require.Equal(t, want["buildid"], version.KnownBuildID)
-	require.Equal(t, want["key"], version.KnownBuildKey)
-}
-
-// A build key reads the same, including when half of it is missing.
-func TestBuildKeyMatchesThePython(t *testing.T) {
-	cases := [][2]string{
-		{"1.4.5.8", "24893155"},
-		{"1.4.5.7", "24825745"},
-		{"", "24893155"},
-		{"1.4.5.8", ""},
-		{"", ""},
-	}
-	var want []string
-	askPython(t, fmt.Sprintf(`
-import json
-from terrariabonker import version as V
-print(json.dumps([V.build_key(v or None, b or None) for v, b in %s]))`,
-		pyPairs(cases)), &want)
-
-	for i, c := range cases {
-		require.Equalf(t, want[i], version.BuildKey(c[0], c[1]),
-			"the key for %q/%q differs", c[0], c[1])
+The half that is missing is written as a question mark rather than left out: a
+key of "1.4.5.8" and a key of "1.4.5.8+?" are different claims, and the ledger
+of verified builds is keyed on the difference.
+*/
+func TestBuildKey(t *testing.T) {
+	for _, c := range []struct {
+		version, buildID, want string
+	}{
+		{"1.4.5.8", "24893155", "1.4.5.8+24893155"},
+		{"1.4.5.7", "24825745", "1.4.5.7+24825745"},
+		{"", "24893155", "?+24893155"},
+		{"1.4.5.8", "", "1.4.5.8+?"},
+		{"", "", "?+?"},
+	} {
+		require.Equalf(t, c.want, version.BuildKey(c.version, c.buildID),
+			"the key for %q/%q", c.version, c.buildID)
 	}
 }
 
 /*
-Every build is classified the same way, and for the same stated reason.
+Every build is classified, and says why.
 
-The reason is compared as well as the verdict: it is what the window puts in
-front of somebody deciding whether to override the gate, and a verdict without
-its reason is a number nobody can act on.
+The reason matters as much as the verdict: it is what the window puts in front
+of somebody deciding whether to override the gate, and a verdict without its
+reason is a word nobody can act on.
 */
-func TestCompatibilityMatchesThePython(t *testing.T) {
-	cases := [][2]string{
-		{version.KnownVersion, version.KnownBuildID}, // the build this targets
-		{version.KnownVersion, "99999999"},           // a Steam rebuild of it
-		{version.KnownVersion, ""},                   // no manifest to read
-		{"1.4.5.9", version.KnownBuildID},            // a fourth-component hotfix
-		{"1.4.5", version.KnownBuildID},              // the same three, spelled shorter
-		{"1.4.6.0", version.KnownBuildID},            // a real update
-		{"1.3.5.3", ""},                              // the previous era
-		{"2.0.50727", ""},                            // the runtime's own version
-		{"", ""},                                     // nothing readable yet
-	}
-
-	var want [][]string
-	askPython(t, fmt.Sprintf(`
-import json
-from terrariabonker import version as V
-print(json.dumps([list(V.compatibility(v or None, b or None)) for v, b in %s]))`,
-		pyPairs(cases)), &want)
-
-	for i, c := range cases {
-		level, msg := version.Compatibility(c[0], c[1])
-		require.Equalf(t, want[i][0], string(level), "%q/%q is classified differently", c[0], c[1])
-		require.Equalf(t, want[i][1], msg, "%q/%q is explained differently", c[0], c[1])
+func TestCompatibility(t *testing.T) {
+	for _, c := range []struct {
+		name             string
+		version, buildID string
+		level            version.Level
+		message          string
+	}{
+		{
+			name: "the build this targets", version: version.KnownVersion,
+			buildID: version.KnownBuildID, level: version.Exact,
+			message: "Terraria 1.4.5.8 (matches known-good build)",
+		},
+		{
+			name: "a Steam rebuild of it", version: version.KnownVersion,
+			buildID: "99999999", level: version.Hotfix,
+			message: "version 1.4.5.8 matches but Steam buildid 99999999 != known " +
+				"24893155; likely a rebuild, offsets probably fine but unverified",
+		},
+		{
+			name: "no manifest to read", version: version.KnownVersion,
+			level: version.Exact, message: "Terraria 1.4.5.8 (matches known-good build)",
+		},
+		{
+			name: "a fourth-component hotfix", version: "1.4.5.9",
+			buildID: version.KnownBuildID, level: version.Hotfix,
+			message: "hotfix 1.4.5.9 vs known 1.4.5.8: offsets MIGHT still be valid " +
+				"but are unproven on this build",
+		},
+		{
+			name: "the same three, spelled shorter", version: "1.4.5",
+			buildID: version.KnownBuildID, level: version.Hotfix,
+			message: "hotfix 1.4.5 vs known 1.4.5.8: offsets MIGHT still be valid " +
+				"but are unproven on this build",
+		},
+		{
+			name: "a real update", version: "1.4.6.0", buildID: version.KnownBuildID,
+			level: version.Incompatible,
+			message: "Terraria 1.4.6.0 differs from 1.4.5.8 in major/minor/patch; " +
+				"the offsets are almost certainly wrong",
+		},
+		{
+			name: "the previous era", version: "1.3.5.3", level: version.Incompatible,
+			message: "Terraria 1.3.5.3 differs from 1.4.5.8 in major/minor/patch; " +
+				"the offsets are almost certainly wrong",
+		},
+		{
+			name: "the runtime's own version", version: "2.0.50727",
+			level: version.Incompatible,
+			message: "Terraria 2.0.50727 differs from 1.4.5.8 in major/minor/patch; " +
+				"the offsets are almost certainly wrong",
+		},
+		{
+			name: "nothing readable yet", level: version.Unknown,
+			message: "could not read the game version from memory",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			level, message := version.Compatibility(c.version, c.buildID)
+			require.Equal(t, c.level, level, "classified differently")
+			require.Equal(t, c.message, message, "explained differently")
+		})
 	}
 }
 
 /*
-A version is read out of memory the same way, including the cases that once got
-it wrong.
+A version read out of memory, including the cases that once got it wrong.
 
 The frequency vote is the fallback, and it is the part with history: the runtime
 string outnumbering the game's at startup, and a single baked-in constant being
 mistaken for the version being run.
 */
-func TestDetectingFromMemoryMatchesThePython(t *testing.T) {
+func TestDetectingFromMemory(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		planted map[string]int // version string -> how many copies
+		want    string
 	}{
-		{"nothing at all", nil},
-		{"one copy, which is a constant and not the running version",
-			map[string]int{"1.4.5.8": 1}},
-		{"two copies, which is the running version",
-			map[string]int{"1.4.5.8": 2}},
-		// What actually happens on this build: stale data outnumbers the truth.
-		{"stale data outnumbering the real one",
-			map[string]int{"1.4.5.7": 4, "1.4.5.8": 2}},
-		// And the one that concluded the game was "Terraria 2.0.50727".
-		{"the runtime's own version, which is not a game version",
-			map[string]int{"2.0.50727": 6}},
-		{"the runtime alongside the game",
-			map[string]int{"2.0.50727": 6, "1.4.5.8": 2}},
-		{"a short version, which is not one", map[string]int{"1.4": 5}},
+		{name: "nothing at all"},
+		{
+			name:    "one copy, which is a constant and not the running version",
+			planted: map[string]int{"1.4.5.8": 1},
+		},
+		{
+			name:    "two copies, which is the running version",
+			planted: map[string]int{"1.4.5.8": 2}, want: "1.4.5.8",
+		},
+		{
+			// What actually happens on this build: stale data outnumbers the truth.
+			name:    "stale data outnumbering the real one",
+			planted: map[string]int{"1.4.5.7": 4, "1.4.5.8": 2}, want: "1.4.5.7",
+		},
+		{
+			// And the one that concluded the game was "Terraria 2.0.50727".
+			name:    "the runtime's own version, which is not a game version",
+			planted: map[string]int{"2.0.50727": 6},
+		},
+		{
+			name:    "the runtime alongside the game",
+			planted: map[string]int{"2.0.50727": 6, "1.4.5.8": 2}, want: "1.4.5.8",
+		},
+		{name: "a short version, which is not one", planted: map[string]int{"1.4": 5}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			var want any
-			askPython(t, fmt.Sprintf(`
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import version as V
-mem = FakeMem(0x10000000, 0x8000)
-mem.exe_path = lambda: None
-at = 0x10000100
-for text, n in %s:
-    for _ in range(n):
-        mem.poke_bytes(at, ("v" + text).encode("utf-16-le"))
-        at += 0x80
-print(json.dumps(V.detect_version(mem)))`, pyPlant(c.planted)), &want)
-
-			mem := plant(c.planted)
-			got := version.Detect(mem, -1)
-			if want == nil {
-				require.Empty(t, got, "a version was read where the Python read none")
+			got := version.Detect(plant(c.planted), -1)
+			if c.want == "" {
+				require.Empty(t, got, "a version was read where there is none")
 				return
 			}
-			require.Equal(t, want, got, "a different version was read")
+			require.Equal(t, c.want, got, "a different version was read")
 		})
 	}
 }
@@ -180,8 +180,8 @@ type noExe struct{ *memtest.FakeMem }
 
 func (noExe) ExePath() string { return "" }
 
-// plant writes each version string into memory the given number of times, as the
-// game stores it.
+// plant writes each version string into memory the given number of times, as
+// the game stores it.
 func plant(counts map[string]int) noExe {
 	mem := memtest.New(0x10000000, 0x8000)
 	at := uint32(0x10000100)
@@ -210,81 +210,76 @@ executable.
 A missing manifest is nothing rather than an error: the game can be run from
 outside Steam, and a build key of "1.4.5.8+?" is still a usable one.
 */
-func TestReadingTheBuildIDMatchesThePython(t *testing.T) {
+func TestReadingTheBuildID(t *testing.T) {
 	dir := t.TempDir()
 	game := filepath.Join(dir, "steamapps", "common", "Terraria")
 	require.NoError(t, os.MkdirAll(game, 0o755))
 	exe := filepath.Join(game, "Terraria.exe")
-	require.NoError(t, os.WriteFile(exe, []byte("MZ"), 0o644))
+	require.NoError(t, os.WriteFile(exe, []byte("MZ"), 0o600))
 
 	manifest := filepath.Join(dir, "steamapps", "appmanifest_105600.acf")
 	require.NoError(t, os.WriteFile(manifest, []byte(
-		"\"AppState\"\n{\n\t\"buildid\"\t\t\"24893155\"\n}\n"), 0o644))
+		"\"AppState\"\n{\n\t\"buildid\"\t\t\"24893155\"\n}\n"), 0o600))
 
-	for _, c := range []struct{ name, path string }{
-		{"beside a manifest", exe},
-		{"no path at all", ""},
-		{"a path with no manifest", filepath.Join(dir, "elsewhere", "x", "y", "Terraria.exe")},
+	for _, c := range []struct{ name, path, want string }{
+		{name: "beside a manifest", path: exe, want: "24893155"},
+		{name: "no path at all"},
+		{
+			name: "a path with no manifest",
+			path: filepath.Join(dir, "elsewhere", "x", "y", "Terraria.exe"),
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			var want any
-			askPython(t, fmt.Sprintf(`
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import version as V
-print(json.dumps(V.read_buildid(%q or None)))`, c.path), &want)
-
 			got := version.ReadBuildID(c.path)
-			if want == nil {
-				require.Empty(t, got, "a build id was read where the Python read none")
+			if c.want == "" {
+				require.Empty(t, got, "a build id was read where there is none")
 				return
 			}
-			require.Equal(t, want, got, "a different build id")
+			require.Equal(t, c.want, got, "a different build id")
 		})
 	}
 }
 
 /*
-The version read out of the game's own executable is the authority.
+The version in the game's own executable is the authority, and only when the
+file holds exactly one plausible version.
 
-Both implementations prefer it to the memory scan, and both accept it only when
-the file holds exactly one plausible version: a file with two is a file this
-cannot speak for.
+A file with two is a file this cannot speak for -- and one of the two would be
+picked, which is worse than admitting it does not know.
 */
-func TestReadingTheVersionFromAnExecutableMatchesThePython(t *testing.T) {
+func TestReadingTheVersionFromAnExecutable(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		contents []string
+		want     string
 	}{
-		{"one version", []string{"1.4.5.8"}},
-		{"the same one twice", []string{"1.4.5.8", "1.4.5.8"}},
-		{"two different ones", []string{"1.4.5.8", "1.4.5.7"}},
-		{"none", nil},
-		{"one, beside the runtime's", []string{"1.4.5.8", "2.0.50727"}},
+		{name: "one version", contents: []string{"1.4.5.8"}, want: "1.4.5.8"},
+		{
+			name: "the same one twice", contents: []string{"1.4.5.8", "1.4.5.8"},
+			want: "1.4.5.8",
+		},
+		{name: "two different ones", contents: []string{"1.4.5.8", "1.4.5.7"}},
+		{name: "none"},
+		{
+			name:     "one, beside the runtime's",
+			contents: []string{"1.4.5.8", "2.0.50727"}, want: "1.4.5.8",
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, "Terraria.exe")
+			path := filepath.Join(t.TempDir(), "Terraria.exe")
 			var body []byte
 			for _, v := range c.contents {
 				body = append(body, utf16le("v"+v)...)
 				body = append(body, make([]byte, 16)...)
 			}
-			require.NoError(t, os.WriteFile(path, body, 0o644))
-
-			var want any
-			askPython(t, fmt.Sprintf(`
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import version as V
-print(json.dumps(V._version_from_exe(%q)))`, path), &want)
+			require.NoError(t, os.WriteFile(path, body, 0o600))
 
 			got := version.VersionFromExe(path)
-			if want == nil {
-				require.Empty(t, got, "a version was read where the Python read none")
+			if c.want == "" {
+				require.Empty(t, got, "a version was read where there is none")
 				return
 			}
-			require.Equal(t, want, got, "a different version was read from the file")
+			require.Equal(t, c.want, got, "a different version was read from the file")
 		})
 	}
 }

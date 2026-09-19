@@ -1,14 +1,7 @@
 package layout_test
 
 import (
-	"context"
-	"encoding/json"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -16,163 +9,156 @@ import (
 )
 
 /*
-Every offset is the Python's offset, and there are no others on either side.
+Every offset this project declares, frozen.
 
-The Python spreads them over eight modules and spells several of them twice under
-different names; this declares each one once. So the comparison is against the
-union of the five, a name appearing in more than one module must agree with
-itself, and a second Python name for a number Go already has is listed as an
-alias and checked for agreeing in value rather than being declared again. Adding
-a second Go spelling to satisfy the test would be the exact duplication this
-package exists to end.
+An offset is a number somebody derived from a running game, and it is the kind
+of thing that gets "tidied" -- a field renamed, a constant moved, a value copied
+into a second place and then only one of them corrected. None of that fails
+visibly: a wrong offset reads a neighbouring field, and the number that comes
+back looks like a number.
 
-These numbers are build-specific and hand-derived, and they now exist in two
-languages -- which is the exact failure the Python module was created to end,
-after they were once spelled five times under four names. Nothing here checks a
-number against what was typed beside it: the whole set is asked for and compared
-by name, so an offset added on one side and missed on the other fails rather than
-diverging quietly.
+So the whole table is written out here. Changing one is then two edits in two
+files, which is what makes it deliberate. A game update is the routine event in
+this project and re-deriving an offset is expected -- what is not expected is an
+offset changing because of a refactor.
+
+This replaces a comparison against the Python implementation these were ported
+from, which is gone. The values are the ones that comparison agreed on.
 */
-func TestEveryOffsetMatchesThePython(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(file)))
+var goldenOffsets = map[string]int64{
+	"ACTIVE_OFF":               120,
+	"AI_OFF":                   68,
+	"ARRAY_LEN":                1001,
+	"ARR_DATA_OFF":             16,
+	"ARR_LEN_OFF":              12,
+	"BANK_PTR_OFF":             -1624,
+	"BANK_SLOTS":               40,
+	"BOBBER_OFF":               136,
+	"BUFF_TIME_PTR_OFF":        -1644,
+	"BUFF_TYPE_PTR_OFF":        -1648,
+	"CHEST_ITEM_OFF":           8,
+	"COIN_SLOTS":               54,
+	"COPY_LO":                  28,
+	"EXTRAUPDATES_OFF":         260,
+	"INVENTORY_PTR_OFF":        -1636,
+	"INVENTORY_SLOTS":          59,
+	"ITEM_ACCESSORY":           125,
+	"ITEM_AUTOREUSE":           190,
+	"ITEM_AXE":                 148,
+	"ITEM_BAIT":                92,
+	"ITEM_BODY_SLOT":           220,
+	"ITEM_BUFF_TYPE":           304,
+	"ITEM_CONSUMABLE":          189,
+	"ITEM_COPY_HI":             320,
+	"ITEM_CREATE_TILE":         160,
+	"ITEM_CRIT":                336,
+	"ITEM_DAMAGE":              172,
+	"ITEM_DEFENSE":             212,
+	"ITEM_FAVORITED":           112,
+	"ITEM_FISHING_POLE":        88,
+	"ITEM_HAMMER":              152,
+	"ITEM_HEAD_SLOT":           216,
+	"ITEM_HEAL_LIFE":           180,
+	"ITEM_HEAL_MANA":           184,
+	"ITEM_KNOCKBACK":           176,
+	"ITEM_LEG_SLOT":            224,
+	"ITEM_MAGIC":               350,
+	"ITEM_MANA":                284,
+	"ITEM_MELEE":               349,
+	"ITEM_PICK":                144,
+	"ITEM_PLACE_STYLE":         168,
+	"ITEM_PREFIX":              348,
+	"ITEM_RANGED":              351,
+	"ITEM_RARE":                248,
+	"ITEM_SCALE":               204,
+	"ITEM_SHOOT":               252,
+	"ITEM_SHOOTSPEED":          256,
+	"ITEM_STACK":               136,
+	"ITEM_SUMMON":              352,
+	"ITEM_TILEBOOST":           156,
+	"ITEM_TYPE":                108,
+	"ITEM_USE_ANIM":            128,
+	"ITEM_USE_TIME":            132,
+	"ITEM_VALUE":               292,
+	"LOCALAI_OFF":              72,
+	"LOCALIZEDTEXT_VALUE":      12,
+	"MAIN_MAX_TILES_OFF":       1444,
+	"MAIN_NPC_FRAME_COUNT_OFF": 3124,
+	"MAIN_NPC_OFF":             2480,
+	"MAIN_PLAYER_OFF":          2684,
+	"MAIN_PROJECTILE_OFF":      2492,
+	"MAIN_RECIPE_OFF":          2664,
+	"MAIN_TILE_OFF":            2460,
+	"MAIN_WORLD_NAME_OFF":      1632,
+	"MAXPENETRATE_OFF":         220,
+	"MAX_NPCS":                 200,
+	"MAX_NPC_FRAMES":           64,
+	"MAX_NPC_TYPE":             2000,
+	"NPC_ACTIVE":               459,
+	"NPC_BOSS":                 460,
+	"NPC_COLOR":                424,
+	"NPC_DAMAGE":               352,
+	"NPC_DEFENSE":              356,
+	"NPC_HEIGHT":               56,
+	"NPC_LIFE_MAX":             368,
+	"NPC_NET_ID":               488,
+	"NPC_OBJECT_SIZE":          664,
+	"NPC_OLD_POSITION_X":       28,
+	"NPC_POSITION_X":           12,
+	"NPC_POSITION_Y":           16,
+	"NPC_TOWN":                 532,
+	"NPC_TYPE":                 320,
+	"NPC_VELOCITY_X":           20,
+	"NPC_WHO_AMI":              8,
+	"NPC_WIDTH":                52,
+	"OFF_NAME_PTR":             -1728,
+	"OFF_STAT_LIFE":            0,
+	"OFF_STAT_LIFE_MAX":        -4,
+	"OFF_STAT_LIFE_MAX2":       -8,
+	"OFF_STAT_MANA":            4,
+	"OFF_STAT_MANA_MAX":        8,
+	"OFF_STAT_MANA_MAX2":       12,
+	"PENETRATE_OFF":            212,
+	"RECIPE_CREATE_ITEM":       8,
+	"RECIPE_REQUIRED_ITEM":     12,
+	"RECIPE_REQUIRED_TILE":     28,
+	"SAFE_PTR_OFF":             -1620,
+	"SCALE_OFF":                140,
+	"SELECTED_ITEM_OFF":        -1684,
+	"SELL_SLOTS":               58,
+	"TILECOLLIDE_OFF":          256,
+	"TIMELEFT_OFF":             180,
+	"TYPE_OFF":                 148,
+	"WET_OFF":                  60,
+}
 
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", mixedNames+`
-import json
-from terrariabonker import buffs, inventory, layout, npcs, player, projectiles, recipes, selling, service
-out = {}
-# Modules that are nothing but layout: everything in them is compared.
-for mod in (layout, player, inventory, npcs, recipes):
-    for k, v in vars(mod).items():
-        if not k.isupper() or not isinstance(v, int) or isinstance(v, bool):
-            continue
-        assert out.get(k, v) == v, f"{k} disagrees with itself across modules"
-        out[k] = v
-# And the ones that hold game rules as well, from which only the layout is taken.
-for mod, names in ((selling, MIXED_SELLING), (service, MIXED_SERVICE),
-                   (projectiles, MIXED_PROJECTILES), (buffs, MIXED_BUFFS)):
-    for k in names:
-        v = getattr(mod, k)
-        assert out.get(k, v) == v, f"{k} disagrees with itself across modules"
-        out[k] = v
-print(json.dumps(out))
-`) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
+/*
+TestEveryOffsetIsWhatItWas compares the table both ways.
 
-	var want map[string]int64
-	require.NoError(t, json.Unmarshal(out, &want))
-	require.NotEmpty(t, want)
-
-	for name, value := range want {
-		if target, isAlias := aliases[name]; isAlias {
-			got, known := layout.Offsets[target]
-			require.Truef(t, known, "%s is aliased to %s, which does not exist", name, target)
-			require.Equalf(t, value, got,
-				"%s and %s are the same number in the Python and differ here", name, target)
-			continue
-		}
+Both directions, because the two failures are different: an offset whose value
+changed is a field being read in the wrong place, and an offset that appeared or
+vanished is a number declared somewhere this file does not know about -- which
+is the duplication this package exists to prevent.
+*/
+func TestEveryOffsetIsWhatItWas(t *testing.T) {
+	for name, want := range goldenOffsets {
 		got, known := layout.Offsets[name]
-		require.Truef(t, known, "%s is an offset the Python has and this does not", name)
-		require.Equalf(t, value, got, "%s is a different number here", name)
+		require.Truef(t, known, "%s is no longer declared", name)
+		require.Equalf(t, want, got, "%s has changed", name)
 	}
 	for name := range layout.Offsets {
-		_, known := want[name]
-		require.Truef(t, known, "%s is an offset this has and the Python does not", name)
-	}
-	/*
-		And every alias names something that is really there.
-
-		Without this the list is a place to hide: an entry for a name the Python
-		does not have excuses nothing and goes unnoticed, and one whose target
-		does not exist turns a missing offset into a passing test. There was a
-		dead entry here within an hour of the list existing.
-	*/
-	for name, target := range aliases {
-		_, aliased := want[name]
-		require.Truef(t, aliased, "%s is aliased but the Python does not have it", name)
-		_, exists := layout.Offsets[target]
-		require.Truef(t, exists, "%s is aliased to %s, which this does not declare", name, target)
+		_, known := goldenOffsets[name]
+		require.Truef(t, known, "%s is new and is not written down here", name)
 	}
 }
 
 /*
-mixedNames says which constants to take from the two modules that are not purely
-layout.
+And the copy spans, which are not numbers and so are not in the table above.
 
-selling, service, projectiles and buffs hold the game's own rules -- which item is a
-Piggy Bank, what a coin is worth, how far a catch counter climbs -- beside the
-offsets they reach memory with. Only the offsets are this package's business, and listing
-them is how that line is drawn: a number added to one of those modules is
-compared here when somebody says it is layout, and not before.
+A span is exactly the kind of thing that gets widened on one side only, because
+widening it looks harmless until a spawned NPC shares an array with the template
+it was copied from.
 */
-const mixedNames = `
-MIXED_SELLING = ("ITEM_VALUE", "BANK_PTR_OFF", "SAFE_PTR_OFF", "CHEST_ITEM_OFF",
-                 "COPY_LO", "BANK_SLOTS", "SELL_SLOTS", "COIN_SLOTS")
-MIXED_SERVICE = ("ITEM_COPY_LO", "ITEM_COPY_HI")
-MIXED_BUFFS = ("BUFF_TYPE_PTR_OFF", "BUFF_TIME_PTR_OFF")
-MIXED_PROJECTILES = ("WET_OFF", "AI_OFF", "LOCALAI_OFF", "ACTIVE_OFF", "SCALE_OFF",
-                     "BOBBER_OFF", "TYPE_OFF", "TIMELEFT_OFF", "PENETRATE_OFF",
-                     "MAXPENETRATE_OFF", "TILECOLLIDE_OFF", "EXTRAUPDATES_OFF",
-                     "ARRAY_LEN", "ARRAY_LEN_OFF", "ARRAY_DATA_OFF")
-`
-
-/*
-aliases are the numbers the Python spells twice, and the one Go name for each.
-
-Every one of these is a module importing a constant from another and re-exporting
-it under a shorter name, so the two spellings cannot disagree there. They could
-disagree here, which is what the test above checks: the alias is followed to the
-single Go declaration and the value compared.
-
-A new entry belongs here only when the Python really does have two names for one
-number. A Go constant added to satisfy one would be the duplication this package
-was created to end.
-*/
-var aliases = map[string]string{
-	"ARR_LEN":  "ARR_LEN_OFF",
-	"ARR_DATA": "ARR_DATA_OFF",
-	// service and selling each name the low end of the template block.
-	"ITEM_COPY_LO": "COPY_LO",
-	// projectiles names the array header the way the rest of the project does,
-	// one module along.
-	"ARRAY_LEN_OFF":  "ARR_LEN_OFF",
-	"ARRAY_DATA_OFF": "ARR_DATA_OFF",
-}
-
-/*
-TestCopySpansMatchThePython covers the one piece of layout that is not a number.
-
-The sweep above compares integers, so a pair of spans passes through it
-untouched -- and a span is exactly the kind of thing that would be widened on one
-side only, because widening it looks harmless until a spawned NPC shares an array
-with the template it came from.
-*/
-func TestCopySpansMatchThePython(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(file)))
-
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c",
-		`import json
-from terrariabonker import npcs
-print(json.dumps([list(s) for s in npcs.NPC_COPY_SPANS]))
-`)
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-
-	var want [][2]int
-	require.NoError(t, json.Unmarshal(out, &want))
-	require.Equal(t, want, layout.NPCCopySpans)
+func TestTheCopySpansAreWhatTheyWere(t *testing.T) {
+	require.Equal(t, [][2]int{{0x2C, 0x44}, {0x70, 0x298}}, layout.NPCCopySpans)
 }

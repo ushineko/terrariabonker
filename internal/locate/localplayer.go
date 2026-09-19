@@ -44,6 +44,10 @@ var localPlayerTail = []byte{
 	0x8D, 0x44, 0x88, 0x10, 0x8B, 0x00, 0xC3,
 }
 
+// LocalPlayerTail is a copy of that, so a test can check it against its own
+// without being able to change it.
+func LocalPlayerTail() []byte { return append([]byte{}, localPlayerTail...) }
+
 // Where the two operands sit behind the tail, and the shape of the two
 // instructions that carry them.
 const (
