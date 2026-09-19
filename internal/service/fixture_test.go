@@ -13,6 +13,7 @@ import (
 	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/proc"
+	"github.com/ushineko/terrariabonker/internal/selling"
 )
 
 /*
@@ -1015,3 +1016,104 @@ func plantFavorite(mem *execMem, slot int) {
 // itoa and sprintf keep the tests readable.
 func itoa(v int) string                 { return fmt.Sprintf("%d", v) }
 func sprintf(f string, a ...any) string { return fmt.Sprintf(f, a...) }
+
+// Where a sellable stack and the bank go in the planted game.
+const (
+	sellableSlot = 9
+	sellableAt   = liveItems + sellableSlot*itemStride
+	bankChestAt  = base + 0x44000
+	bankArrAt    = base + 0x45000
+	bankItemsAt  = base + 0x46000
+	carriedSlot  = 10
+	carriedAt    = liveItems + carriedSlot*itemStride
+)
+
+// plantSellableInto gives the player a stack worth selling.
+func plantSellableInto(mem *execMem) {
+	mem.PokeBytes(liveArr+layout.ArrDataOff+sellableSlot*4, u32(sellableAt))
+	mem.PokeBytes(sellableAt, u32(itemVTable))
+	mem.PokeI32(sellableAt+uint32(layout.ItemType), 9)   //nolint:gosec // a field offset
+	mem.PokeI32(sellableAt+uint32(layout.ItemStack), 99) //nolint:gosec // a field offset
+	mem.PokeI32(sellableAt+layout.ItemValue, 500)
+}
+
+// plantFavoriteOnly marks a slot favorited without making it a potion.
+func plantFavoriteOnly(mem *execMem, slot int) {
+	at := liveItems + uint32(slot)*itemStride                 //nolint:gosec // a slot index
+	mem.PokeBytes(at+uint32(layout.ItemFavorited), []byte{1}) //nolint:gosec // a field offset
+}
+
+// plantCarriedBank gives the player a piggy bank to carry.
+func plantCarriedBank(mem *execMem) {
+	mem.PokeBytes(liveArr+layout.ArrDataOff+carriedSlot*4, u32(carriedAt))
+	mem.PokeBytes(carriedAt, u32(itemVTable))
+	mem.PokeI32(carriedAt+uint32(layout.ItemType), selling.PiggyBankItem) //nolint:gosec // a field offset
+	mem.PokeI32(carriedAt+uint32(layout.ItemStack), 1)                    //nolint:gosec // a field offset
+}
+
+// plantBankInto gives the player a bank chest with room in it.
+func plantBankInto(mem *execMem) {
+	plantCarriedBank(mem)
+	mem.PokeBytes(uint32(int64(liveLife)+layout.BankPtrOff), u32(bankChestAt)) //nolint:gosec // a delta
+	mem.PokeBytes(bankChestAt+layout.ChestItemOff, u32(bankArrAt))
+	mem.PokeI32(bankArrAt+layout.ArrLenOff, layout.BankSlots)
+	for i := range layout.BankSlots {
+		at := uint32(bankItemsAt + uint32(i)*0x200) //nolint:gosec // a slot index
+		mem.PokeBytes(bankArrAt+layout.ArrDataOff+uint32(i)*4, u32(at))
+		mem.PokeBytes(at, u32(itemVTable))
+	}
+}
+
+/*
+fillEverySlot leaves the player nowhere to put a coin.
+
+Every slot the sell path may pay into holds something that is not a coin and is
+not on the list, which is what "no room" looks like.
+*/
+func fillEverySlot(mem *execMem) {
+	for i := range layout.CoinSlots {
+		if i == sellableSlot {
+			continue
+		}
+		at := uint32(liveItems + uint32(i)*itemStride) //nolint:gosec // a slot index
+		mem.PokeBytes(liveArr+layout.ArrDataOff+uint32(i)*4, u32(at))
+		mem.PokeBytes(at, u32(itemVTable))
+		mem.PokeI32(at+uint32(layout.ItemType), 3507) //nolint:gosec // a field offset
+		mem.PokeI32(at+uint32(layout.ItemStack), 1)   //nolint:gosec // a field offset
+	}
+}
+
+// readCounter records how many times the game was read, for the tests about
+// what is asked once rather than every round.
+type readCounter struct {
+	*execMem
+	reads int
+}
+
+func (c *readCounter) Read(addr uint32, size int) []byte {
+	c.reads++
+	return c.execMem.Read(addr, size)
+}
+
+// plantBankCoins puts a stack of one denomination in a bank slot.
+func plantBankCoins(mem *execMem, slot int, coin, stack int32) {
+	at := uint32(bankItemsAt + uint32(slot)*0x200)  //nolint:gosec // a slot index
+	mem.PokeI32(at+uint32(layout.ItemType), coin)   //nolint:gosec // a field offset
+	mem.PokeI32(at+uint32(layout.ItemStack), stack) //nolint:gosec // a field offset
+}
+
+// plantSellableWorth gives the player a stack worth a chosen amount.
+func plantSellableWorth(mem *execMem, value, stack int32) {
+	plantSellableInto(mem)
+	mem.PokeI32(sellableAt+layout.ItemValue, value)
+	mem.PokeI32(sellableAt+uint32(layout.ItemStack), stack) //nolint:gosec // a field offset
+}
+
+// bankStacks is what the bank holds now.
+func bankStacks(mem *execMem) []selling.Row {
+	bank, ok := selling.Bank(mem, liveLife)
+	if !ok {
+		return nil
+	}
+	return bank.Rows()
+}

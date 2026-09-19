@@ -94,6 +94,11 @@ type Service struct {
 	projEditor *projectile.Editor
 	lastReel   time.Time
 	seenCast   bool
+
+	// Whether a piggy bank is placed in the loaded world, kept per world: the
+	// search is a whole-world one and the selling round asks on a timer.
+	bankPlaced *bool
+	bankWorld  World
 }
 
 // New is a service over memory that is already open.
@@ -115,6 +120,7 @@ func (s *Service) Invalidate() {
 	s.mainBase, s.haveBase = 0, false
 	s.templateAddrs = nil
 	s.projArr, s.projEditor = 0, nil
+	s.bankPlaced = nil
 }
 
 /*
