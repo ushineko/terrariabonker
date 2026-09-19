@@ -45,11 +45,28 @@ func NewPatcher(mem BuilderMem, pid int) *Patcher {
 	return p
 }
 
-// adoptArena takes up an arena this process was already given, and tells the
-// scanner to keep out of it.
+/*
+adoptArena takes up an arena this process was already given, and tells the
+scanner to keep out of it.
+
+The record is consulted first and the game second. Looking in the game at all is
+this port's own: the Python waits until something asks for an arena, which leaves
+a window where the record has been lost -- a different pid, a deleted file -- and
+the scanner does not yet know to skip a region full of live stubs. A cave search
+in that window can hand out space one of them is running in, which is the exact
+failure the skip exists to prevent. Finding it here costs one pass over the
+mappings and closes the window.
+
+It never *allocates*. That needs the game to be running frames and is the
+caller's decision, not a side effect of constructing a patcher.
+*/
 func (p *Patcher) adoptArena() {
 	if p.state.Arena != 0 && ArenaOK(p.Mem, p.state.Arena) {
 		p.setArena(p.state.Arena)
+		return
+	}
+	if found, ok := FindArena(p.Mem); ok {
+		p.setArena(found)
 	}
 }
 

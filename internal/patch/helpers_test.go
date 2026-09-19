@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/ushineko/terrariabonker/internal/patch"
 )
 
 const pythonTimeout = time.Minute
@@ -187,4 +189,24 @@ func sameMemory(t *testing.T, want, got, msg string) {
 	hi := min(len(want)/2, at/2+16)
 	require.Failf(t, msg, "first difference at %#x\n  want % s\n  got  % s",
 		addr, want[lo*2:hi*2], got[lo*2:hi*2])
+}
+
+// watcher records where writes went, for a test about the order of two of them.
+type watcher struct {
+	*planted
+	writes []uint32
+}
+
+func (w *watcher) Write(addr uint32, data []byte) bool {
+	w.writes = append(w.writes, addr)
+	return w.planted.Write(addr, data)
+}
+
+// pyTiles is a list of coordinate pairs as a Python literal.
+func pyTiles(tiles []patch.Tile) string {
+	parts := make([]string, len(tiles))
+	for i, t := range tiles {
+		parts[i] = fmt.Sprintf("(%d, %d)", t.X, t.Y)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
