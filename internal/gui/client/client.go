@@ -230,32 +230,56 @@ func GiveArgv(itemType, stack int) []string {
 
 // --- static catalogs -----------------------------------------------------------
 
+/*
+Stats are one entry's stats, as the game reports them.
+
+Not numbers: an item's damage class and whether it is an accessory are
+booleans, and an NPC's colour is a four-byte array. Decoding into
+map[string]float64 fails on the first `"accessory": false` and takes the whole
+6,954-entry catalog with it, which is what an empty Compendium tab was.
+*/
+type Stats map[string]any
+
 // Item is one entry of the item catalog. Stats come from the game's own
 // template objects, so they are empty for a build that has not been scanned.
 type Item struct {
-	ID      int                `json:"id"`
-	Name    string             `json:"name"`
-	Kind    string             `json:"kind"`
-	Tooltip string             `json:"tooltip"`
-	Wiki    string             `json:"wiki"`
-	Stats   map[string]float64 `json:"stats"`
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Tooltip string `json:"tooltip"`
+	Wiki    string `json:"wiki"`
+	Stats   Stats  `json:"stats"`
 }
 
 // NPC is one entry of the NPC catalog.
 type NPC struct {
-	ID    int                `json:"id"`
-	Name  string             `json:"name"`
-	Kind  string             `json:"kind"`
-	Wiki  string             `json:"wiki"`
-	NetID int                `json:"net_id"`
-	Stats map[string]float64 `json:"stats"`
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`
+	Wiki  string `json:"wiki"`
+	NetID int    `json:"net_id"`
+	Stats Stats  `json:"stats"`
 }
 
-// Stat reads one of an entry's stats, and says whether it was reported at all:
-// a damage of 0 and a damage the game never told us apart.
-func Stat(stats map[string]float64, key string) (float64, bool) {
-	v, ok := stats[key]
-	return v, ok
+/*
+Stat reads one of an entry's stats as a number, and says whether it was
+reported at all: a damage of 0 and a damage the game never told us apart.
+
+A flag counts as 1 or 0, the way the game stores it. Anything else -- the
+colour array -- is not a number and is reported as absent rather than as zero.
+*/
+func Stat(stats Stats, key string) (float64, bool) {
+	switch v := stats[key].(type) {
+	case float64:
+		return v, true
+	case bool:
+		if v {
+			return 1, true
+		}
+		return 0, true
+	default:
+		return 0, false
+	}
 }
 
 // Compendium is the full catalog: every item, and every NPC.

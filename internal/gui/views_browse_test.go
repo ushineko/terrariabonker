@@ -2,12 +2,14 @@ package gui
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -21,23 +23,45 @@ import (
 	"github.com/ushineko/terrariabonker/internal/gui/client"
 )
 
-// seedCatalog gives a window a small catalog: two bosses and four items, which
-// is enough for both filters and for a name lookup.
+/*
+seedCatalog gives a window a small catalog: two bosses and four items, which is
+enough for both filters and for a name lookup.
+
+Built by decoding the CLI's own JSON rather than by filling the structs in, so
+the fixture cannot drift from the wire format. A hand-filled one did: it carried
+only numeric stats, while the game reports `accessory` and the damage classes as
+booleans and an NPC's colour as an array, and the tab was empty against every
+real game while every test passed.
+*/
 func seedCatalog(u *ui) {
-	u.takeCatalog(&client.Compendium{
-		Items: []client.Item{
-			{ID: 4, Name: "Eye of Cthulhu Trophy", Kind: "Trophy", Stats: map[string]float64{"rare": 1}},
-			{ID: 9, Name: "Wood", Kind: "Material", Stats: map[string]float64{"rare": 0}},
-			{ID: 757, Name: "Terra Blade", Kind: "Sword", Stats: map[string]float64{"damage": 95, "rare": 8}},
-			{ID: 3506, Name: "Copper Pickaxe", Kind: "Pickaxe", Stats: map[string]float64{"damage": 4, "rare": 0}},
-		},
-		NPCs: []client.NPC{
-			{ID: 266, NetID: 266, Name: "Brain of Cthulhu", Kind: "Boss",
-				Stats: map[string]float64{"damage": 30, "defense": 14, "life": 1250}},
-			{ID: 4, NetID: 4, Name: "Eye of Cthulhu", Kind: "Boss",
-				Stats: map[string]float64{"damage": 15, "defense": 12, "life": 2800}},
-		},
-	})
+	const catalog = `{"items":[
+		{"id":4,"name":"Eye of Cthulhu Trophy","kind":"Trophy",
+		 "stats":{"type":4,"rare":1,"accessory":false,"melee":false,"ranged":false,
+		          "magic":false,"summon":false}},
+		{"id":9,"name":"Wood","kind":"Material",
+		 "stats":{"type":9,"rare":0,"accessory":false,"melee":false,"ranged":false,
+		          "magic":false,"summon":false}},
+		{"id":757,"name":"Terra Blade","kind":"Sword",
+		 "stats":{"type":757,"damage":95,"rare":8,"accessory":false,"melee":true,
+		          "ranged":false,"magic":false,"summon":false}},
+		{"id":3506,"name":"Copper Pickaxe","kind":"Pickaxe",
+		 "stats":{"type":3506,"damage":4,"rare":0,"accessory":false,"melee":true,
+		          "ranged":false,"magic":false,"summon":false}}],
+	 "npcs":[
+		{"id":266,"net_id":266,"name":"Brain of Cthulhu","kind":"Boss",
+		 "stats":{"type":266,"net_id":266,"damage":30,"defense":14,"life":1250,
+		          "boss":true,"town":false,"color":[0,0,0,0]}},
+		{"id":4,"net_id":4,"name":"Eye of Cthulhu","kind":"Boss",
+		 "stats":{"type":4,"net_id":4,"damage":15,"defense":12,"life":2800,
+		          "boss":true,"town":false,"color":[0,0,0,0]}}]}`
+
+	// The CLI answers on one line; the fixture is wrapped to be readable.
+	flat := strings.ReplaceAll(strings.ReplaceAll(catalog, "\n", ""), "\t", "")
+	cat, ok := client.ParseCompendium(flat)
+	if !ok {
+		panic("the seeded catalog does not parse")
+	}
+	u.takeCatalog(cat)
 }
 
 // seedRecipes gives a window a three-recipe book, one of which needs a station.
@@ -92,11 +116,18 @@ func TestTheCatalogIsNarrowedByKindAndByText(t *testing.T) {
 // A stat of zero and a stat the game never reported are different facts: a
 // pickaxe that does no damage is not a pickaxe whose damage nobody read.
 func TestAnUnreadStatIsNotAZero(t *testing.T) {
-	stats := map[string]float64{"damage": 0}
+	stats := client.Stats{"damage": float64(0)}
 	require.Equal(t, "0", statText(stats, "damage"))
 	require.Equal(t, "—", statText(stats, "defense"))
 	require.Equal(t, "—", statText(nil, "damage"))
-	require.Equal(t, "95", statText(map[string]float64{"damage": 95}, "damage"))
+	require.Equal(t, "95", statText(client.Stats{"damage": float64(95)}, "damage"))
+
+	// A flag is a stat too: the catalog reports accessory and the damage
+	// classes as booleans, and the colour of an NPC as an array, which is not a
+	// number and must read as absent rather than as zero.
+	require.Equal(t, "1", statText(client.Stats{"accessory": true}, "accessory"))
+	require.Equal(t, "0", statText(client.Stats{"accessory": false}, "accessory"))
+	require.Equal(t, "—", statText(client.Stats{"color": []any{float64(0)}}, "color"))
 }
 
 /*
@@ -320,4 +351,33 @@ func TestSeveralSellListItemsCanBeRemovedAtOnce(t *testing.T) {
 	// Removing sends one command per item and reads the list back once.
 	u.removeFromSellList()
 	require.Empty(t, u.fx.sellList.Picked(), "the picks are row numbers, and the rows changed")
+}
+
+/*
+TestTheCatalogDrawsOnlyAScreenfulsWorth: the tab is a search over 6,954 entries,
+and Fyne's SetRowHeight refreshes the whole table on every call, so a row costs
+something to build whether or not anyone looks at it. Drawing them all took
+gigabytes and stopped the window answering.
+*/
+func TestTheCatalogDrawsOnlyAScreenfulsWorth(t *testing.T) {
+	u := testUI(t)
+	rows := make([]catalogEntry, 0, maxRows*3)
+	for i := range maxRows * 3 {
+		rows = append(rows, catalogEntry{
+			ID: i, Name: fmt.Sprintf("Item %d", i), Kind: "Sword",
+			Stats: client.Stats{"damage": float64(i), "accessory": false},
+		})
+	}
+	u.cp.entries = rows
+
+	table, ok := u.compendiumTable(rows).(*widget.Table)
+	require.True(t, ok, "the catalog is drawn as a table")
+	drawn, _ := table.Length()
+	require.Equal(t, maxRows, drawn, "every match was drawn, not just a screenful")
+
+	// And the count says so, rather than leaving the reader to wonder where the
+	// other matches went.
+	require.Equal(t, "first 300 of 900 matches (of 900) -- narrow the filter",
+		countText(len(rows), len(u.cp.entries)))
+	require.Equal(t, "12 of 900 entries match", countText(12, len(u.cp.entries)))
 }

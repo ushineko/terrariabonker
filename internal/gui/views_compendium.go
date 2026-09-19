@@ -50,7 +50,7 @@ type catalogEntry struct {
 	Kind  string
 	Wiki  string
 	IsNPC bool
-	Stats map[string]float64
+	Stats client.Stats
 }
 
 // buildCompendium is everything the game knows about, searchable.
@@ -67,11 +67,11 @@ func (u *ui) buildCompendium() fyne.CanvasObject {
 	filter.SetText(u.cp.filter)
 
 	rows := u.visibleEntries()
-	count := widget.NewLabel(fmt.Sprintf("%d of %d entries match", len(rows), len(u.cp.entries)))
+	count := widget.NewLabel(countText(len(rows), len(u.cp.entries)))
 
 	refresh := func() {
 		rows = u.visibleEntries()
-		count.SetText(fmt.Sprintf("%d of %d entries match", len(rows), len(u.cp.entries)))
+		count.SetText(countText(len(rows), len(u.cp.entries)))
 		u.cp.picked = -1
 		u.sh.Refresh()
 	}
@@ -109,7 +109,29 @@ that fit on screen.
 const (
 	kindWidth float32 = 200
 	rowHeight float32 = 48
+
+	/*
+		maxRows is how many matches the table draws at once.
+
+		The catalog is 6,954 entries and the tab is a search, not a list to
+		scroll: nobody reads past the first screenful without narrowing it. The
+		cap is not cosmetic. Fyne's SetRowHeight refreshes the whole table on
+		every call, so a row is not free to build even before its icon is read
+		off disk -- 6,954 of them cost 94 MiB and 1.2 million allocations per
+		rebuild, and the section rebuilds on every keystroke and every status
+		poll. That is what made the tab take gigabytes and stop answering.
+	*/
+	maxRows = 300
 )
+
+// countText says how many matched, and how many of them are on screen.
+func countText(shown, total int) string {
+	if shown > maxRows {
+		return fmt.Sprintf("first %d of %d matches (of %d) -- narrow the filter",
+			maxRows, shown, total)
+	}
+	return fmt.Sprintf("%d of %d entries match", shown, total)
+}
 
 /*
 compendiumTable draws the visible rows.
@@ -130,8 +152,13 @@ func (u *ui) compendiumTable(rows []catalogEntry) fyne.CanvasObject {
 	t.Header("", "Name", "Kind", "Damage", "Defense", "Life", "Rarity", "ID")
 	t.SetWidths(table.ThumbCellSize, 320, 150, 90, 90, 90, 90, 80)
 
-	thumbs := make([][]byte, 0, len(rows))
-	for _, e := range rows {
+	shown := rows
+	if len(shown) > maxRows {
+		shown = shown[:maxRows]
+	}
+
+	thumbs := make([][]byte, 0, len(shown))
+	for _, e := range shown {
 		t.Row(fd.StatusInfo, "", e.Name, e.Kind,
 			statText(e.Stats, "damage"), statText(e.Stats, "defense"),
 			statText(e.Stats, "life"), statText(e.Stats, "rare"),
@@ -142,7 +169,7 @@ func (u *ui) compendiumTable(rows []catalogEntry) fyne.CanvasObject {
 
 	w := t.Widget()
 	w.SetRowHeight(-1, rowHeight)
-	for i := range rows {
+	for i := range shown {
 		w.SetRowHeight(i, rowHeight)
 	}
 	w.OnSelected = func(id widget.TableCellID) { u.cp.picked = id.Row - 1 }
@@ -161,7 +188,7 @@ func (u *ui) thumbFor(e catalogEntry) []byte {
 
 // statText renders one stat, or an em dash when the game never reported it: a
 // damage of zero and a damage nobody read are different facts.
-func statText(stats map[string]float64, key string) string {
+func statText(stats client.Stats, key string) string {
 	v, ok := client.Stat(stats, key)
 	if !ok {
 		return "—"
