@@ -1,15 +1,10 @@
 package sprites_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -21,41 +16,9 @@ The draw data is a file two programs share, so its shape is the contract.
 
 The extractor runs unprivileged and the scan that produces this runs as root, so
 nothing but the file connects them -- which makes the JSON the interface, and a
-key spelled differently on either side a silent loss of every tinted icon. Both
-implementations are asked to write it and then to read the other's.
+key spelled differently at either end a silent loss of every tinted icon. So the
+file itself is written out below, not just the round trip through it.
 */
-
-/*
-pyDrawData runs a script against a chosen file, without moving HOME.
-
-Pointing HOME at a scratch directory is how the file would naturally be
-redirected, and it is what broke this: the child interpreter works out where the
-user's packages are from HOME at startup, numpy goes missing, and the helper
-reports "the Python is not importable" and *skips*. Three comparisons here
-skipped in silence before the file was chosen this way instead.
-*/
-func pyDrawData(t *testing.T, at, script string) string {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	prelude := `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import sprites
-`
-	if at != "" {
-		prelude += "sprites._NPC_FRAMES_FILE = " + strconv.Quote(at) + "\n"
-	}
-	cmd := exec.CommandContext(ctx, "python3", "-c", prelude+script) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "HOME="+realHome)
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	return string(out)
-}
 
 var (
 	frames = map[int32]int32{1: 2, 4: 15, 245: 1}
@@ -65,59 +28,55 @@ var (
 	}
 )
 
-// What this writes, the Python reads back as the same thing.
-func TestThePythonReadsWhatThisWrote(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+/*
+What is written is the file the extractor reads, key for key.
+
+The shape is the contract between two programs, so it is spelled out here rather
+than checked by writing and reading it back -- which would pass with any pair of
+names as long as they matched.
+*/
+func TestTheFileIsTheAgreedShape(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	require.NoError(t, sprites.SaveNPCDrawData(frames, tints))
 
-	out := pyDrawData(t, sprites.NPCFramesFile(), `
-f, t = sprites.load_npc_draw_data()
-print(json.dumps({"frames": {str(k): v for k, v in f.items()},
-                  "tints": {str(k): v for k, v in t.items()}}))`)
+	raw, err := os.ReadFile(sprites.NPCFramesFile())
+	require.NoError(t, err)
 
-	var got struct {
-		Frames map[string]int32           `json:"frames"`
-		Tints  map[string]sprites.NPCTint `json:"tints"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &got))
-	require.Equal(t, map[string]int32{"1": 2, "4": 15, "245": 1}, got.Frames,
-		"the Python read different frame counts")
-	require.Equal(t, sprites.NPCTint{Type: 1, Color: [4]byte{0, 80, 255, 100}}, got.Tints["1"],
-		"the Python read a different tint")
-	require.Equal(t, sprites.NPCTint{Type: 1, Color: [4]byte{102, 204, 106, 255}},
-		got.Tints["-3"], "the negative netID did not survive the round trip")
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Equal(t, map[string]any{
+		"frames": map[string]any{"1": 2.0, "4": 15.0, "245": 1.0},
+		"tints": map[string]any{
+			"1":  map[string]any{"type": 1.0, "color": []any{0.0, 80.0, 255.0, 100.0}},
+			"-3": map[string]any{"type": 1.0, "color": []any{102.0, 204.0, 106.0, 255.0}},
+		},
+	}, got, "the file is a different shape")
 }
 
-// And the other way round: what the Python writes, this reads back.
-func TestThisReadsWhatThePythonWrote(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	pyDrawData(t, sprites.NPCFramesFile(), `
-sprites.save_npc_draw_data({1: 2, 4: 15, 245: 1},
-                           {1: {"type": 1, "color": [0, 80, 255, 100]},
-                            -3: {"type": 1, "color": [102, 204, 106, 255]}})
-print("{}")`)
+// And it reads back as what went in, including the negative netID a variant is
+// keyed by.
+func TestTheFileIsReadBack(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, sprites.SaveNPCDrawData(frames, tints))
 
 	gotFrames, gotTints := sprites.LoadNPCDrawData()
 	require.Equal(t, frames, gotFrames, "different frame counts came back")
 	require.Equal(t, tints, gotTints, "different tints came back")
+	require.Contains(t, gotTints, int32(-3), "the negative netID did not survive")
 }
 
 /*
-The two agree on where the file goes, which is the other half of sharing one.
+The file sits beside the icon cache rather than in the config directory.
 
-Asked of the real home directory rather than a scratch one, because that is the
-only home both can be asked about: the child cannot be pointed somewhere else
-without losing its own packages.
+Extraction runs unprivileged, and the config directory can end up root-owned
+from a sudo memory command -- which would make this unwritable by the side that
+has to read it.
 */
-func TestTheFilePathMatchesThePython(t *testing.T) {
-	out := pyDrawData(t, "", `print(json.dumps(sprites._NPC_FRAMES_FILE))`)
-
-	var want string
-	require.NoError(t, json.Unmarshal([]byte(out), &want))
-	t.Setenv("HOME", realHome)
-	require.Equal(t, want, sprites.NPCFramesFile())
+func TestTheFilePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.Equal(t, filepath.Join(home, ".cache", "terrariabonker", "npcframes.json"),
+		sprites.NPCFramesFile())
 }
 
 // Nothing there is not a failure: the extractor runs before the first scan has

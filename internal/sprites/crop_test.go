@@ -1,20 +1,13 @@
 package sprites_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"image"
 	"image/color"
-	"image/png"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -27,14 +20,13 @@ Cropping a sheet down to one picture.
 Every rule here is a judgement about a picture, and a judgement that is slightly
 wrong produces an icon that is slightly wrong -- half a slime, a row of little
 pictures, a staff cut in two -- which nobody reports as a bug because it looks
-like the game's own art. So each is put to the implementation it replaces over
-the same pixels.
-*/
+like the game's own art.
 
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
+So each case names the size and the pixels it produces. Those were agreed with
+the implementation this was ported from, while both existed, and are frozen
+here: a change to any of these rules is a change to what an icon looks like, and
+is meant to be a decision.
+*/
 
 // strip is a vertical animation: blocks of opaque rows in equal slots, the
 // remainder transparent.
@@ -136,96 +128,18 @@ func itoa(v int) string {
 	return string(raw)
 }
 
-// writePNG puts an image where the Python can read it.
-func writePNG(t *testing.T, img image.Image) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "in.png")
-	f, err := os.Create(path) //nolint:gosec // a path this test made
-	require.NoError(t, err)
-	require.NoError(t, png.Encode(f, img))
-	require.NoError(t, f.Close())
-	return path
-}
-
-/*
-askPython hands one image over and gets back what the other implementation made
-of it.
-
-Compared by hash rather than by looking at the picture, because what matters is
-that the two produce the same pixels -- and because "the same pixels" is the
-only claim worth making about an icon.
-*/
-func askPython(t *testing.T, path, call string) shape {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", `
-import hashlib, json, os, sys
-sys.path.insert(0, os.getcwd())
-from PIL import Image
-from terrariabonker import sprites
-img = Image.open(`+quote(path)+`).convert("RGBA")
-out = `+call+`
-out = out.convert("RGBA")
-print(json.dumps({"size": "%dx%d" % out.size,
-                  "sum": hashlib.sha256(out.tobytes()).hexdigest()[:16]}))
-`) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "HOME="+realHome)
-	raw, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(raw), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", raw)
-
-	var got shape
-	require.NoError(t, json.Unmarshal(raw, &got))
-	return got
-}
-
-/*
-realHome is the home directory before a test moved it.
-
-The Python child works out where its own packages are from HOME at startup, so
-a test that points HOME at a scratch directory and then asks the other
-implementation a question gets "not importable" and a silent skip instead of an
-answer.
-*/
-var realHome = os.Getenv("HOME")
-
-// pyScript asks the Python something that is not about an image.
-func pyScript(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", //nolint:gosec // a generated fixture
-		"import json, os, sys\nsys.path.insert(0, os.getcwd())\n"+script)
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "HOME="+realHome)
-	raw, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(raw), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", raw)
-	require.NoError(t, json.Unmarshal(raw, into))
-}
-
-func quote(s string) string {
-	raw, _ := json.Marshal(s)
-	return string(raw)
-}
-
 // De-animating a strip takes its first frame, and leaves everything else alone.
-func TestDeanimateMatchesThePython(t *testing.T) {
+func TestDeanimate(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		img  image.Image
+		want shape
 	}{
-		{"a four-frame strip", strip(10, 12, 4, 10)},
-		{"a two-frame strip", strip(16, 20, 2, 18)},
-		{"frames that fill their slots", strip(8, 8, 5, 8)},
-		{"one tall block, like a staff", blob(10, 30, 0, 5, 10, 25)},
-		{"wider than it is tall", blob(32, 20, 0, 0, 32, 20)},
+		{"a four-frame strip", strip(10, 12, 4, 10), shape{"10x12", "14dbc99a7fd4c520"}},
+		{"a two-frame strip", strip(16, 20, 2, 18), shape{"16x20", "1e41585be82bfc1f"}},
+		{"frames that fill their slots", strip(8, 8, 5, 8), shape{"8x40", "f232749538acee34"}},
+		{"one tall block, like a staff", blob(10, 30, 0, 5, 10, 25), shape{"10x30", "9995cb9c350b9078"}},
+		{"wider than it is tall", blob(32, 20, 0, 0, 32, 20), shape{"32x20", "8f7448c93b145223"}},
 		/*
 			Two even bands in a wide image, which is not a strip.
 
@@ -233,10 +147,10 @@ func TestDeanimateMatchesThePython(t *testing.T) {
 			the inside, and it would be cropped in half -- a sword with a
 			separate hilt, cut at the grip.
 		*/
-		{"two bands in a wide image", bands(32, 20, 2, 8)},
+		{"two bands in a wide image", bands(32, 20, 2, 8), shape{"32x20", "4c054037b0721055"}},
 		// And a strip whose height does not divide by the blocks in it.
-		{"blocks that do not divide the height", bands(10, 25, 2, 8)},
-		{"a strip whose blocks straddle their slots", strip(10, 12, 3, 14)},
+		{"blocks that do not divide the height", bands(10, 25, 2, 8), shape{"10x25", "8c49285e89d7f725"}},
+		{"a strip whose blocks straddle their slots", strip(10, 12, 3, 14), shape{"10x36", "333e0d6cb69b42d3"}},
 		/*
 			Three separate blocks that do not line up with their frames.
 
@@ -245,14 +159,12 @@ func TestDeanimateMatchesThePython(t *testing.T) {
 			first twelve rows would cut the second block in half.
 		*/
 		{"blocks that sit across the frame lines", blocksAt(10, 36,
-			[][2]int{{0, 6}, {10, 16}, {24, 30}})},
-		{"nothing in it at all", image.NewNRGBA(image.Rect(0, 0, 10, 40))},
+			[][2]int{{0, 6}, {10, 16}, {24, 30}}), shape{"10x36", "074185326ae1d359"}},
+		{"nothing in it at all", image.NewNRGBA(image.Rect(0, 0, 10, 40)), shape{"10x40", "e61f41d57db208c5"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := writePNG(t, tc.img)
-			require.Equal(t, askPython(t, path, "sprites._deanimate(img)"),
-				describe(t, sprites.Deanimate(tc.img)),
-				"the two cropped it differently")
+			require.Equal(t, tc.want, describe(t, sprites.Deanimate(tc.img)),
+				"a different crop; if that was deliberate, update the shape")
 		})
 	}
 }
@@ -275,26 +187,24 @@ func TestDeanimateCropsAStrip(t *testing.T) {
 }
 
 // Cropping an NPC sheet with the game's own frame count matches.
-func TestFirstFrameMatchesThePython(t *testing.T) {
+func TestFirstFrame(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		img    image.Image
 		frames int32
+		want   shape
 	}{
-		{"a two-frame vertical strip", strip(32, 26, 2, 24), 2},
-		{"one frame, left alone", blob(573, 804, 20, 20, 500, 700), 1},
-		{"sixteen frames in two columns", grid(30, 40, 2, 8, 2), 16},
-		{"a three by three grid", grid(24, 24, 3, 3, 4), 9},
-		{"five columns", grid(20, 30, 5, 2, 2), 10},
-		{"a count that does not divide the height", strip(16, 20, 3, 18), 7},
-		{"frames too short to be frames", strip(16, 2, 8, 2), 8},
+		{"a two-frame vertical strip", strip(32, 26, 2, 24), 2, shape{"32x26", "519b937a115d0945"}},
+		{"one frame, left alone", blob(573, 804, 20, 20, 500, 700), 1, shape{"573x804", "642d665e853f0cec"}},
+		{"sixteen frames in two columns", grid(30, 40, 2, 8, 2), 16, shape{"30x41", "4fef6547410e9390"}},
+		{"a three by three grid", grid(24, 24, 3, 3, 4), 9, shape{"24x26", "b42429be6490b201"}},
+		{"five columns", grid(20, 30, 5, 2, 2), 10, shape{"20x31", "a1b7eab760314d55"}},
+		{"a count that does not divide the height", strip(16, 20, 3, 18), 7, shape{"16x8", "9f56cda75fefeab9"}},
+		{"frames too short to be frames", strip(16, 2, 8, 2), 8, shape{"16x16", "5f4ecdb7b71c3e40"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := writePNG(t, tc.img)
-			call := "sprites._first_frame(img, " + itoa(int(tc.frames)) + ")"
-			require.Equal(t, askPython(t, path, call),
-				describe(t, sprites.FirstFrame(tc.img, tc.frames)),
-				"the two cropped it differently")
+			require.Equal(t, tc.want, describe(t, sprites.FirstFrame(tc.img, tc.frames)),
+				"a different crop; if that was deliberate, update the shape")
 		})
 	}
 }
@@ -306,21 +216,20 @@ not.
 That second case is what the evenness rule exists for: the blocks of a grid are
 the same size and the pieces of one sprite are not.
 */
-func TestFirstGridCellMatchesThePython(t *testing.T) {
+func TestFirstGridCell(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		img  image.Image
+		want shape
 	}{
-		{"a three by three grid", grid(24, 24, 3, 3, 4)},
-		{"two columns", grid(30, 40, 2, 1, 6)},
-		{"one sprite with a detached piece", detached()},
-		{"one solid block", blob(40, 40, 0, 0, 40, 40)},
+		{"a three by three grid", grid(24, 24, 3, 3, 4), shape{"24x24", "21984266105bb7ae"}},
+		{"two columns", grid(30, 40, 2, 1, 6), shape{"30x40", "7f83105557a0c568"}},
+		{"one sprite with a detached piece", detached(), shape{"60x30", "bf96d6109cf92884"}},
+		{"one solid block", blob(40, 40, 0, 0, 40, 40), shape{"40x40", "8e934f054326c8c6"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := writePNG(t, tc.img)
-			require.Equal(t, askPython(t, path, "sprites._first_grid_cell(img)"),
-				describe(t, sprites.FirstGridCell(tc.img)),
-				"the two cropped it differently")
+			require.Equal(t, tc.want, describe(t, sprites.FirstGridCell(tc.img)),
+				"a different crop; if that was deliberate, update the shape")
 		})
 	}
 }
@@ -343,15 +252,21 @@ func detached() *image.NRGBA {
 }
 
 // A chest is assembled out of the four tiles of its style.
-func TestCompositeChestMatchesThePython(t *testing.T) {
+func TestCompositeChest(t *testing.T) {
 	sheet := grid(16, 16, 8, 6, 2)
-	path := writePNG(t, sheet)
-	for _, style := range []int{0, 1, 3, 7} {
-		t.Run("style "+itoa(style), func(t *testing.T) {
-			call := "sprites._composite_chest(img, " + itoa(style) + ")"
-			require.Equal(t, askPython(t, path, call),
-				describe(t, sprites.CompositeChest(sheet, style)),
-				"the two assembled different chests")
+	for _, c := range []struct {
+		style int
+		want  shape
+	}{
+		{0, shape{"32x32", "8ba3de936ae89581"}},
+		{1, shape{"32x32", "7e472f59772110a0"}},
+		// Past the end of a row, which is where the wrap is.
+		{3, shape{"32x32", "6b8ab95bc2f2af72"}},
+		{7, shape{"32x32", "50cad851b4a1befc"}},
+	} {
+		t.Run("style "+itoa(c.style), func(t *testing.T) {
+			require.Equal(t, c.want, describe(t, sprites.CompositeChest(sheet, c.style)),
+				"a different chest; if that was deliberate, update the shape")
 		})
 	}
 }
@@ -362,20 +277,39 @@ The tint is the game's own: the sheet is attenuated and the colour added on top.
 Multiplying instead comes out far too dark to read at icon size, which is a
 thing that looks like a rendering bug rather than a wrong formula.
 */
-func TestTintedMatchesThePython(t *testing.T) {
+func TestTinted(t *testing.T) {
 	sheet := grid(12, 12, 2, 2, 2)
-	path := writePNG(t, sheet)
-	for _, tint := range [][4]byte{
-		{0, 80, 255, 100}, {102, 204, 106, 255}, {0, 0, 0, 0}, {255, 255, 255, 255},
+	for _, c := range []struct {
+		tint [4]byte
+		want shape
+	}{
+		{[4]byte{0, 80, 255, 100}, shape{"26x26", "bf08c46eef912a01"}},
+		{[4]byte{102, 204, 106, 255}, shape{"26x26", "ec4cf7bea2500bb4"}},
+		// No tint at all still attenuates, which is what makes an untinted
+		// sheet visibly different from one nobody painted.
+		{[4]byte{0, 0, 0, 0}, shape{"26x26", "1f7b1ce59b912837"}},
+		{[4]byte{255, 255, 255, 255}, shape{"26x26", "ac240fe59cec8b38"}},
 	} {
-		name := itoa(int(tint[0])) + "," + itoa(int(tint[1])) + "," + itoa(int(tint[2]))
+		name := itoa(int(c.tint[0])) + "," + itoa(int(c.tint[1])) + "," + itoa(int(c.tint[2]))
 		t.Run(name, func(t *testing.T) {
-			call := "sprites._tinted(img, [" + itoa(int(tint[0])) + ", " +
-				itoa(int(tint[1])) + ", " + itoa(int(tint[2])) + ", " +
-				itoa(int(tint[3])) + "])"
-			require.Equal(t, askPython(t, path, call),
-				describe(t, sprites.Tinted(sheet, tint)),
-				"the two painted it differently")
+			require.Equal(t, c.want, describe(t, sprites.Tinted(sheet, c.tint)),
+				"a different painting; if that was deliberate, update the shape")
 		})
 	}
 }
+
+// quote is a path as a JSON string, for writing one into a file this test
+// builds.
+func quote(s string) string {
+	raw, _ := json.Marshal(s)
+	return string(raw)
+}
+
+/*
+realHome is the home directory before a test moved it.
+
+The learned content path lives there, and every test here points HOME at a
+scratch directory -- so the one thing that has to be read from the real one is
+read through this.
+*/
+var realHome = os.Getenv("HOME")

@@ -29,32 +29,31 @@ func atHome(t *testing.T) string {
 	return home
 }
 
-// The two implementations put the icons in the same place.
-func TestTheCachePathsMatchThePython(t *testing.T) {
-	var want struct {
-		Dir    string `json:"dir"`
-		Item   string `json:"item"`
-		NPC    string `json:"npc"`
-		Tinted string `json:"tinted"`
-		Paths  string `json:"paths"`
-		Scope  string `json:"scope"`
-	}
-	pyScript(t, `
-from terrariabonker import sprites
-print(json.dumps({"dir": sprites.cache_dir(), "item": sprites.icon_path(757),
-                  "npc": sprites.npc_icon_path(1),
-                  "tinted": sprites.npc_tinted_icon_path(-3),
-                  "paths": sprites._PATHS_FILE, "scope": sprites._SCOPE}))`, &want)
+/*
+The icons go where the window looks for them.
 
-	t.Setenv("HOME", realHome)
-	require.Equal(t, want.Dir, sprites.CacheDir(""), "a different cache directory")
-	require.Equal(t, want.Item, sprites.IconPath(757, ""), "a different item icon path")
-	require.Equal(t, want.NPC, sprites.NPCIconPath(1, ""), "a different NPC icon path")
-	require.Equal(t, want.Tinted, sprites.NPCTintedIconPath(-3, ""),
-		"a different tinted icon path")
-	require.Equal(t, want.Paths, sprites.PathsFile(), "a different remembered-paths file")
-	require.Equal(t, want.Scope, sprites.Scope,
-		"the two disagree about what a complete cache holds")
+The paths are written out rather than derived from the functions that build
+them, because the window and the extractor are different programs reaching the
+same directory: a path that changed in one place is an icon cache nobody reads.
+*/
+func TestTheCachePaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	require.Equal(t, filepath.Join(home, ".cache", "terrariabonker", "sprites",
+		version.KnownVersion), sprites.CacheDir(""))
+	require.Equal(t, filepath.Join(sprites.CacheDir(""), "Item_757.png"),
+		sprites.IconPath(757, ""))
+	require.Equal(t, filepath.Join(sprites.CacheDir(""), "NPC_1.png"),
+		sprites.NPCIconPath(1, ""))
+	require.Equal(t, filepath.Join(sprites.CacheDir(""), "NPCt_-3.png"),
+		sprites.NPCTintedIconPath(-3, ""))
+	require.Equal(t, filepath.Join(home, ".cache", "terrariabonker", "paths.json"),
+		sprites.PathsFile())
+
+	// Under ~/.cache rather than ~/.config: extraction runs unprivileged, and
+	// the config directory can end up root-owned from a sudo memory command.
+	require.NotContains(t, sprites.CacheDir(""), ".config")
 }
 
 // An empty cache has nothing in it, and says so.

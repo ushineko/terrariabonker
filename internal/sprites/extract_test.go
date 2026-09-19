@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/sprites"
-	"github.com/ushineko/terrariabonker/internal/version"
 )
 
 /*
@@ -83,36 +82,63 @@ var someTints = map[int32]sprites.NPCTint{
 }
 
 /*
-An extraction produces the same icons as the implementation it replaces.
+An extraction produces exactly these icons, pixel for pixel, out of the game's
+own files.
 
-Compared file by file rather than by count: two extractions that both wrote
-nothing agree perfectly, and two that cropped differently produce the same
-number of files.
+Every one is named and every one carries its size and its pixels, because the
+interesting failures are in the joins: 3210 is a trapped chest with no sprite
+file of its own and is drawn from the tile sheet; the NPC sheets are cropped
+with a count that comes from a file the privileged side wrote; and the tinted
+variants are painted from the type's icon, which has to exist by then.
+
+These were agreed with the implementation this was ported from, over the same
+game files.
 */
-func TestExtractingMatchesThePython(t *testing.T) {
-	content := gameFiles(t)
+func TestExtractingTheGamesIcons(t *testing.T) {
+	gameFiles(t)
 	plantDrawData(t)
 
 	got, err := sprites.Extract(sprites.Options{ItemIDs: someItems})
 	require.NoError(t, err)
 	require.Positive(t, got.OK, "nothing was extracted at all")
 
-	pyDir := filepath.Join(t.TempDir(), "python")
-	pyExtract(t, content, pyDir)
+	want := map[string]shape{
+		"Item_1.png":    {"32x32", "f9bda977d5d7a7a3"},
+		"Item_8.png":    {"14x16", "9380f2d7df5a2f12"},
+		"Item_9.png":    {"24x22", "3f1a4e893a6a2569"},
+		"Item_24.png":   {"32x32", "11ecdb365e349724"},
+		"Item_29.png":   {"22x22", "05ba35eadf57eb27"},
+		"Item_75.png":   {"22x26", "138efc12100672f7"},
+		"Item_149.png":  {"28x30", "d033010f0485e618"},
+		"Item_757.png":  {"46x54", "92a3c5cf7f3a3fee"},
+		"Item_2294.png": {"48x48", "60d44c91d00fa468"},
+		"Item_2676.png": {"24x24", "81fc65175d485d98"},
+		// The trapped chest, drawn from the tile sheet because it has no
+		// sprite of its own.
+		"Item_3210.png": {"34x32", "ae82064d9cfd5529"},
+		"Item_3509.png": {"32x32", "a758d292cd126f09"},
+		"Item_5000.png": {"34x32", "6ca4bc3183f807da"},
+		// The NPC sheets, cropped with the counts the privileged side published.
+		"NPC_1.png":  {"32x26", "6bd0ada19ec41a1a"},
+		"NPC_4.png":  {"110x66", "67d93c9a0fc91634"},
+		"NPC_16.png": {"44x34", "8cfa1c932a54a625"},
+		// And the two variants, painted from the slime's own icon.
+		"NPCt_-3.png": {"32x26", "f7827b99c02690f0"},
+		"NPCt_1.png":  {"32x26", "b7845b36d68c8b52"},
+	}
 
-	mine := sprites.CacheDir("")
-	names := iconsIn(t, mine)
-	require.Equal(t, iconsIn(t, filepath.Join(pyDir, version.KnownVersion)), names,
-		"the two wrote different sets of icons")
-	require.NotEmpty(t, names)
-
+	dir := sprites.CacheDir("")
+	names := iconsIn(t, dir)
+	require.Len(t, names, len(want), "a different set of icons was written")
 	for _, name := range names {
-		require.Equalf(t, pixels(t, filepath.Join(pyDir, version.KnownVersion, name)),
-			pixels(t, filepath.Join(mine, name)), "%s came out differently", name)
+		expected, known := want[name]
+		require.Truef(t, known, "%s was written and is not one of these", name)
+		require.Equalf(t, expected, pixels(t, filepath.Join(dir, name)),
+			"%s came out differently", name)
 	}
 
 	// And the paths this promises are the paths it wrote.
-	require.FileExists(t, sprites.IconPath(757, ""), "the Zenith's icon is not where it says")
+	require.FileExists(t, sprites.IconPath(757, ""), "the Terra Blade's icon is not where it says")
 	require.FileExists(t, sprites.NPCIconPath(1, ""), "the slime's icon is not where it says")
 	require.FileExists(t, sprites.NPCTintedIconPath(-3, ""),
 		"the tinted variant's icon is not where it says")
@@ -174,26 +200,6 @@ func TestExtractingWithNoGameFiles(t *testing.T) {
 func plantDrawData(t *testing.T) {
 	t.Helper()
 	require.NoError(t, sprites.SaveNPCDrawData(someNPCs, someTints))
-}
-
-// pyExtract runs the other implementation over the same files, into its own
-// directory.
-func pyExtract(t *testing.T, content, into string) {
-	t.Helper()
-	items, err := json.Marshal(someItems)
-	require.NoError(t, err)
-	pyScript(t, `
-from terrariabonker import sprites
-sprites._CACHE_ROOT = `+quote(into)+`
-sprites._PATHS_FILE = `+quote(filepath.Join(into, "paths.json"))+`
-sprites._NPC_FRAMES_FILE = `+quote(sprites.NPCFramesFile())+`
-sprites._save_content_dir(`+quote(content)+`)
-ok, failed, total = sprites.extract(item_ids=`+string(items)+`)
-print(json.dumps({"ok": ok, "failed": failed, "total": total}))`, &struct {
-		OK     int `json:"ok"`
-		Failed int `json:"failed"`
-		Total  int `json:"total"`
-	}{})
 }
 
 // iconsIn is the PNGs in a directory, in order.
