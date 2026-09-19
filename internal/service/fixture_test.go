@@ -40,10 +40,18 @@ const (
 	snapName = base + 0x40
 	liveName = base + 0x80
 
-	// get_LocalPlayer and the two statics it reads.
+	/*
+		get_LocalPlayer and the two statics it reads.
+
+		Main.player's static sits at its own offset inside Main's block, because
+		that is how the base is derived: the resolver finds this address and
+		subtracts the offset. Putting it anywhere else would leave the derived
+		base pointing at nothing, and the world would read as unloaded however
+		carefully it was planted.
+	*/
 	code           = base + 0x1000
-	playerStatic   = base + 0x100
-	myPlayerStatic = base + 0x104
+	playerStatic   = staticAt + 0xA7C // layout.MainPlayerOff
+	myPlayerStatic = playerStatic + 4
 	playerArray    = base + 0x200
 	myPlayer       = 2
 
@@ -321,6 +329,97 @@ func ints(b []int32) string {
 		parts[i] = fmt.Sprintf("%d", v)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+/*
+plantWorldInto puts a world in the fixture: a name, a tile buffer and the
+dimensions.
+
+Every world the tests plant is the same size, so the name is the only thing
+telling them apart -- which is the point.
+*/
+func plantWorldInto(mem *execMem, name string) { plantWorldAt(mem, staticAt, name) }
+
+/*
+plantWorldAt is the same at a chosen static base, plus the statics that lead
+there.
+
+A world reload moves Main's block, so recovering means finding it again through
+get_LocalPlayer -- which is why this repoints that too.
+*/
+func plantWorldAt(mem *execMem, at uint32, name string) {
+	staticAt := at
+	tileBufAt, tileBoundsAt := at+0x1000, at+0x2000
+	worldNameAt := at + 0x3000
+	mem.PokeBytes(staticAt+0xA7C, u32(playerArray)) // Main.player, which the base is derived from
+	mem.PokeBytes(code+2, u32(staticAt+0xA7C))      // and what get_LocalPlayer reads
+
+	mem.PokeBytes(staticAt+layout.MainTileOff, u32(tileBufAt))
+	mem.PokeI32(staticAt+layout.MainMaxTilesOff, worldWidth)
+	mem.PokeI32(staticAt+layout.MainMaxTilesOff+4, worldHeight)
+	mem.PokeBytes(tileBufAt+0x08, u32(tileBoundsAt))
+	mem.PokeI32(tileBoundsAt+0x04, 0)
+	mem.PokeI32(tileBoundsAt+0x08, worldHeight)
+	mem.PokeI32(tileBoundsAt+0x0C, 0)
+
+	mem.PlantMonoString(worldNameAt, name)
+	mem.PokeBytes(staticAt+layout.MainWorldNameOff, u32(worldNameAt))
+}
+
+// movedStaticAt is where a world reload puts Main's block the second time.
+const movedStaticAt = base + 0x20000
+
+/*
+plantWorld is the same, as Python source.
+
+The static base is fixed rather than scanned for: what is being compared is what
+the two make of a world, not how each finds Main.
+*/
+func plantWorld(name string) string {
+	return fmt.Sprintf(`
+from terrariabonker import layout as L, locate as LC
+mem.poke_bytes(%d + L.MAIN_TILE_OFF, struct.pack("<I", %d))
+mem.poke_i32(%d + L.MAIN_MAX_TILES_OFF, %d)
+mem.poke_i32(%d + L.MAIN_MAX_TILES_OFF + 4, %d)
+mem.poke_bytes(%d + 0x08, struct.pack("<I", %d))
+mem.poke_i32(%d + 0x04, 0)
+mem.poke_i32(%d + 0x08, %d)
+mem.poke_i32(%d + 0x0C, 0)
+mem.plant_mono_string(%d, %q)
+mem.poke_bytes(%d + L.MAIN_WORLD_NAME_OFF, struct.pack("<I", %d))
+LC.main_static_base = lambda m: %d
+svc._main_base = %d
+`, staticAt, tileBufAt, staticAt, worldWidth, staticAt, worldHeight,
+		tileBufAt, tileBoundsAt, tileBoundsAt, tileBoundsAt, worldHeight, tileBoundsAt,
+		worldNameAt, name, staticAt, worldNameAt, staticAt, staticAt)
+}
+
+// Where the world goes in the planted game.
+const (
+	staticAt     = base + 0x10000
+	tileBufAt    = base + 0x11000
+	tileBoundsAt = base + 0x12000
+	worldNameAt  = base + 0x13000
+	worldWidth   = 4200
+	worldHeight  = 1200
+)
+
+/*
+countingMem records how many times the executable mappings were listed.
+
+Listing them is the first step of the scan that finds Main's statics, and the
+scan is the expensive thing -- over a second against a real process. Counting
+reads would say nothing here, because a planted game's code is a few hundred
+bytes; counting the scans says exactly what the caching is for.
+*/
+type countingMem struct {
+	*execMem
+	scans int
+}
+
+func (c *countingMem) ExecRegions() []proc.Region {
+	c.scans++
+	return c.execMem.ExecRegions()
 }
 
 // layoutArrData is where an array's elements start, from the same table the

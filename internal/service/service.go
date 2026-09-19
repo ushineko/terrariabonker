@@ -77,6 +77,11 @@ type Service struct {
 	anchor uint32         // where get_LocalPlayer was found
 	found  bool           // and whether it was
 	build  *Build         // the running build, once it reads as a real one
+
+	// Main's static block, found once. Finding it is a full memory scan, and
+	// the statics do not move while the process lives.
+	mainBase uint32
+	haveBase bool
 }
 
 // New is a service over memory that is already open.
@@ -95,6 +100,7 @@ func Connect() (*Service, error) {
 // Invalidate drops what was located, so the next call scans from scratch.
 func (s *Service) Invalidate() {
 	s.blocks, s.anchor, s.found, s.build = nil, 0, false, nil
+	s.mainBase, s.haveBase = 0, false
 }
 
 /*
