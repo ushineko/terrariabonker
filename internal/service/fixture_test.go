@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/locate"
 	"github.com/ushineko/terrariabonker/internal/memtest"
+	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/proc"
 )
 
@@ -32,7 +34,7 @@ accident.
 
 const (
 	base = 0x10000000
-	size = 0x40000
+	size = 0x80000 // wide enough to hold the world, the templates and an arena
 
 	// The two inert snapshots, and the live player behind get_LocalPlayer.
 	snapLife  = base + 0x3000
@@ -70,6 +72,10 @@ const (
 	// The vtable every item object is behind, planted so the template search has
 	// something to recognise.
 	itemVTable = 0xDEADBEEF
+
+	// Where the executable part of the fixture ends, which is everything the
+	// scans look at and nothing this program allocated.
+	codeEnd = base + 0x58000
 )
 
 /*
@@ -198,10 +204,41 @@ carry on without one.
 */
 func (m *execMem) ExePath() string { return "" }
 
+/*
+AllRegions is the one mapping this fake has, read-write-execute.
+
+The patcher wants the whole listing rather than the scannable part: it is looking
+for somewhere to put an arena and for what is already taken, and a mapping
+nobody scans still occupies its addresses.
+*/
+func (m *execMem) AllRegions() []proc.Region {
+	return []proc.Region{{
+		Start: base, End: base + size,
+		Readable: true, Writable: true, Executable: true,
+	}}
+}
+
 // plant writes the whole image into a Go fake.
 func plant() *execMem {
 	mem := memtest.New(base, size)
-	mem.Exec = []proc.Region{{Start: code, End: code + 0x100}}
+	/*
+		The whole buffer is executable, so a patch anchor can be planted anywhere
+		in it.
+
+		The pattern search reads only what a listing says is code, and with a
+		hundred-byte window there is nowhere to put an anchor but on top of
+		something else.
+	*/
+	/*
+		The code the scans look at: everything up to the arena, and not the arena
+		itself.
+
+		A scanner excludes the region holding this program's own arena, because
+		memory it put something in is never padding -- and it excludes the whole
+		region. With one mapping covering the arena too, that skip swallowed
+		everything and no anchor could be found at all.
+	*/
+	mem.Exec = []proc.Region{{Start: base, End: codeEnd, Executable: true}}
 
 	mem.PlantMonoString(snapName, "Nakama")
 	mem.PlantMonoString(liveName, "Nakama")
@@ -415,8 +452,17 @@ const (
 	tileBufAt    = base + 0x11000
 	tileBoundsAt = base + 0x12000
 	worldNameAt  = base + 0x13000
-	worldWidth   = 4200
-	worldHeight  = 1200
+	/*
+		A small world, because the fixture's memory has to hold it.
+
+		The buffer is one pointer per tile and the objects are twenty-four bytes
+		each, so a real world's four million tiles would index a hundred megabytes
+		past the end of a planted one. Both implementations read nothing there and
+		agree about it perfectly, which is why the tests about a vein assert its
+		size rather than only that the two matched.
+	*/
+	worldWidth  = 40
+	worldHeight = 60
 )
 
 /*
@@ -487,4 +533,248 @@ func sameMemory(t *testing.T, want, got, msg string) {
 	lo, hi := max(0, at/2-8), min(len(want)/2, at/2+16)
 	require.Failf(t, msg, "first difference at %#x\n  want % s\n  got  % s",
 		base+at/2, want[lo*2:hi*2], got[lo*2:hi*2])
+}
+
+/*
+Where the world's tile objects go, and how one is planted.
+
+The buffer is column-major, so the entry for a coordinate is at
+stride*x + y and the objects sit contiguously down each column -- which is what
+the whole-world search depends on.
+*/
+const (
+	tileObjectsAt = base + 0x30000
+	tileRecord    = 24
+)
+
+// plantTile puts one tile in the planted world: its id, and whether it is really
+// there.
+func plantTile(mem *execMem, x, y int32, id uint16, active bool) {
+	idx := worldHeight*x + y
+	at := uint32(tileObjectsAt + uint32(idx)*tileRecord)              //nolint:gosec // a planted address
+	mem.PokeBytes(tileBufAt+layout.ArrDataOff+uint32(idx)*4, u32(at)) //nolint:gosec // an index
+	mem.PokeBytes(at+0x08, []byte{byte(id), byte(id >> 8)})
+	var header uint16
+	if active {
+		header = 0x20
+	}
+	mem.PokeBytes(at+0x0E, []byte{byte(header), byte(header >> 8)})
+}
+
+// pyTile is the same, as Python source.
+func pyTile(x, y int32, id uint16, active bool) string {
+	idx := worldHeight*x + y
+	at := tileObjectsAt + uint32(idx)*tileRecord //nolint:gosec // a planted address
+	header := 0
+	if active {
+		header = 0x20
+	}
+	return fmt.Sprintf(`
+mem.poke_bytes(%d + L.ARR_DATA_OFF + %d * 4, struct.pack("<I", %d))
+mem.poke_bytes(%d + 0x08, struct.pack("<H", %d))
+mem.poke_bytes(%d + 0x0E, struct.pack("<H", %d))
+`, tileBufAt, idx, at, at, id, at, header)
+}
+
+// plantPositionInto puts the player somewhere in the world, in world pixels.
+func plantPositionInto(mem *execMem, px, py float32) {
+	obj := uint32(liveLife) - 0x738
+	mem.WriteF32(obj+0x0C, px)
+	mem.WriteF32(obj+0x10, py)
+}
+
+// plantPosition is the same, as Python source.
+func plantPosition(px, py float32) string {
+	return fmt.Sprintf(`
+mem.write_f32(%d + 0x0C, %v)
+mem.write_f32(%d + 0x10, %v)
+`, liveLife-0x738, px, liveLife-0x738, py)
+}
+
+/*
+patchFor is a patcher over the planted game, with its record kept somewhere
+disposable.
+
+enabledPatcher is the same with the extractor applied, for the tests about what
+happens once it is.
+*/
+func patchFor(t *testing.T, mem *execMem) *patch.Patcher {
+	t.Helper()
+	atHome(t)
+	return patch.NewPatcher(mem, -1)
+}
+
+/*
+enabledPatcher is a patcher over a game the extractor is really applied to.
+
+A record alone is not evidence and is not treated as any: whether a cheat is on
+is answered by reading the bytes at its site. So the anchor is planted and a jump
+written over its injection point, which is what an applied cheat looks like.
+*/
+func enabledPatcher(t *testing.T, mem *execMem) *patch.Patcher {
+	t.Helper()
+	inj := patch.Injections["ore_extract"]
+	anchor := patch.Anchors[inj.Anchor].Pattern
+
+	body := make([]byte, anchor.Len())
+	for i := range body {
+		body[i] = 0xCC
+		if anchor.Mask[i] {
+			body[i] = anchor.Raw[i]
+		}
+	}
+	mem.PokeBytes(anchorAt, body)
+	mem.PokeBytes(uint32(int64(anchorAt)+int64(inj.InjectOff)), []byte{0xE9, 0, 0, 0, 0})
+	return patchFor(t, mem)
+}
+
+/*
+anchorAt is where a patch anchor is planted.
+
+Clear of the tile objects, which run from 0x30000 for twenty-four bytes per tile
+of the world -- it sat inside them at first, and planting the world wrote over
+the anchor, so the cheat read as off however carefully it was applied.
+*/
+const anchorAt = base + 0x50000
+
+// atHome points the patch record at a scratch directory.
+func atHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return home
+}
+
+/*
+miningMem is a planted game that actually mines.
+
+Nothing in a fake breaks a tile, so the loop that hands a vein over a batch at a
+time -- and re-finds it between batches -- had nothing to walk. This watches for
+the queue's count being written, which is the last thing an arm does, and clears
+exactly the tiles it names. That is what the stub does in the game.
+*/
+type miningMem struct {
+	*execMem
+	arena uint32
+	// falls makes the tiles drop by one row when they are taken, as silt and
+	// slush do, so the re-find between batches has something to re-find.
+	falls bool
+	armed int
+	/*
+		pending is the batch the stub has been handed but has not run yet.
+
+		The stub runs on the game's next frame, not when the queue is written, so
+		an instant fake would let a caller that never waited look correct. This
+		one takes a batch when it is armed and breaks it on the next look at the
+		world.
+	*/
+	pending []patch.Tile
+	// waits is how many looks at the world go by before the batch is broken,
+	// standing in for the frames the stub waits for.
+	waits int
+	// deaf is a game that takes a queue and never runs it, which is what a
+	// paused one looks like.
+	deaf bool
+}
+
+// framesToMine is how many reads a batch takes to break.
+//
+// More than one on purpose. With a fake that mines on the next read, a caller
+// that armed and counted immediately would see everything gone and look
+// correct -- the wait it is supposed to do would be testing nothing.
+const framesToMine = 4
+
+func (m *miningMem) AllRegions() []proc.Region {
+	return append(m.execMem.AllRegions(), proc.Region{
+		Start: m.arena, End: m.arena + patch.ArenaSize,
+		Readable: true, Writable: true, Executable: true,
+	})
+}
+
+func (m *miningMem) Write(addr uint32, data []byte) bool {
+	ok := m.execMem.Write(addr, data)
+	if addr != m.arena+patch.OreQueueOff || len(data) != 4 {
+		return ok
+	}
+	n := int32(binary.LittleEndian.Uint32(data)) //nolint:gosec // a count, as its bits
+	if n <= 0 {
+		return ok
+	}
+	m.armed++
+	pairs := m.execMem.Read(m.arena+patch.OreQueueOff+4, int(n)*8)
+	m.pending, m.waits = nil, framesToMine
+	for i := range int(n) {
+		m.pending = append(m.pending, patch.Tile{
+			X: int32(binary.LittleEndian.Uint32(pairs[i*8:])),   //nolint:gosec // a coordinate
+			Y: int32(binary.LittleEndian.Uint32(pairs[i*8+4:])), //nolint:gosec // a coordinate
+		})
+	}
+	return ok
+}
+
+/*
+Read runs the pending batch before answering.
+
+The stub runs on the game's next frame rather than when the queue is written, so
+a caller that armed and looked immediately would see nothing gone. Breaking the
+batch on the next look is the closest a fake gets to that, and it is what makes
+"wait for the tiles to be gone" a rule a test can hold this to.
+*/
+func (m *miningMem) Read(addr uint32, size int) []byte {
+	if m.waits > 0 {
+		m.waits--
+	}
+	if m.pending != nil && m.waits == 0 && !m.deaf {
+		batch := m.pending
+		m.pending = nil
+		for _, q := range batch {
+			id, _ := readTile(m.execMem, q.X, q.Y)
+			plantTile(m.execMem, q.X, q.Y, 0, false)
+			if m.falls {
+				// It did not vanish: it fell one row, onto whatever is below.
+				plantTile(m.execMem, q.X, q.Y+1, id, true)
+			}
+		}
+	}
+	return m.execMem.Read(addr, size)
+}
+
+// readTile is one planted tile's id.
+func readTile(mem *execMem, x, y int32) (uint16, bool) {
+	idx := worldHeight*x + y
+	at := uint32(tileObjectsAt + uint32(idx)*tileRecord) //nolint:gosec // a planted address
+	raw := mem.Read(at+0x08, 2)
+	if len(raw) < 2 {
+		return 0, false
+	}
+	return binary.LittleEndian.Uint16(raw), true
+}
+
+/*
+miningGame is a planted game with an arena, so the queue can be armed, and a
+stub that mines what lands in it.
+*/
+func miningGame(t *testing.T, falls bool) (*miningMem, *patch.Patcher) {
+	t.Helper()
+	mem := plant()
+	plantWorldInto(mem, "Nakama's World")
+
+	const arena = base + 0x60000
+	mem.PokeBytes(arena+patch.ArenaMagicOff, patch.ArenaMagic)
+	game := &miningMem{execMem: mem, arena: arena, falls: falls}
+
+	inj := patch.Injections["ore_extract"]
+	anchor := patch.Anchors[inj.Anchor].Pattern
+	body := make([]byte, anchor.Len())
+	for i := range body {
+		body[i] = 0xCC
+		if anchor.Mask[i] {
+			body[i] = anchor.Raw[i]
+		}
+	}
+	mem.PokeBytes(anchorAt, body)
+	mem.PokeBytes(uint32(int64(anchorAt)+int64(inj.InjectOff)), []byte{0xE9, 0, 0, 0, 0})
+
+	atHome(t)
+	return game, patch.NewPatcher(game, -1)
 }
