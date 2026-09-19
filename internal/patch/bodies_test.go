@@ -1,7 +1,6 @@
 package patch_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -79,101 +78,9 @@ func plantForStubs() *planted {
 	return &planted{mem}
 }
 
-// pyStubs is the Python with the same planting and a patcher over it.
-func pyStubs() string {
-	return pyMapped(fmt.Sprintf(`
-for key, at in (("equip_apply", %d), ("equip_benefits", %d), ("pick_tile", %d)):
-    pat = P.ANCHORS[key].pattern
-    mem.poke_bytes(at, bytes((b if m else 0xCC) for b, m in zip(pat.raw, pat.mask)))
-import struct
-from terrariabonker import locate as L
-code = (b"\x8b\x05" + struct.pack("<I", %d) + b"\x8b\x0d" + struct.pack("<I", %d)
-        + L._LOCALPLAYER_TAIL)
-mem.poke_bytes(%d, code)
-mem.poke_bytes(%d, struct.pack("<I", %d))
-mem.poke_i32(%d, 0)
-mem.poke_bytes(%d + 0x10, struct.pack("<I", %d))
-mem.plant_mono_string(0x10000040, "Nakama")
-mem.plant_player(%d + L.STATLIFE_FROM_OBJ, [500, 500, 137, 200, 220, 220], 0x10000040)
-L._exec_regions = lambda m: [(0x10000000, 0x10030000)]`,
-		atEquipApply, atEquipBenefits, atPickTile,
-		atPlayerStatic, atMyPlayerStat, atLocalPlayer,
-		atPlayerStatic, atPlayerArray, atMyPlayerStat,
-		atPlayerArray, atPlayerObj, atPlayerObj)) + fmt.Sprintf(`
-p._arena = %d
-p.arena = lambda *a, **k: %d
-`, stubArena, stubArena)
-}
-
 // goBuilder is the Go side over the same image.
 func goBuilder(mem *planted) *patch.Builder {
 	return &patch.Builder{Scanner: patch.NewScanner(mem), Mem: mem, Arena: stubArena}
-}
-
-// Where a call inside an anchor match goes is the same address.
-func TestCallTargetsMatchThePython(t *testing.T) {
-	cases := []struct {
-		anchor string
-		off    int
-	}{
-		{"equip_apply", 15},    // ApplyEquipFunctional
-		{"equip_benefits", 20}, // GrantPrefixBenefits
-		{"equip_benefits", 36}, // GrantArmorBenefits
-	}
-
-	var want []uint32
-	askPython(t, pyStubs()+fmt.Sprintf(`
-print(json.dumps([p._call_target(a, o) for a, o in %s]))`, pyCalls(cases)), &want)
-
-	b := goBuilder(plantForStubs())
-	for i, c := range cases {
-		got, err := patch.CallTarget(b, c.anchor, c.off)
-		require.NoErrorf(t, err, "%s+%d did not resolve", c.anchor, c.off)
-		require.Equalf(t, want[i], got, "%s+%d calls somewhere else", c.anchor, c.off)
-	}
-}
-
-// The three stubs built from live state assemble to the same bytes.
-func TestTheBuiltStubsMatchThePython(t *testing.T) {
-	for _, name := range []string{"inventory_accs", "ore_extract", "auto_use"} {
-		t.Run(name, func(t *testing.T) {
-			var want string
-			askPython(t, pyStubs()+fmt.Sprintf(`
-inj = P.INJECTIONS[%q]
-print(json.dumps(inj.build_body(p, inj).hex()))`, name), &want)
-			require.NotEmpty(t, want)
-
-			mem := plantForStubs()
-			inj := patch.Injections[name]
-			got, err := inj.BuildBody(goBuilder(mem), inj)
-			require.NoError(t, err)
-			require.Equal(t, want, hexOf(got), "the stub assembles differently")
-
-			// A stub has to fit the slot it is given, jump back included.
-			require.LessOrEqual(t, len(got)+5, patch.ArenaSlot,
-				"the stub no longer fits an arena slot")
-		})
-	}
-}
-
-/*
-The managed-call stub is the same, and it carries the addresses it was given.
-
-It is the only stub that calls back into the game's own code, so the entry it
-bakes is the difference between a teleport and a jump into whatever is at that
-address.
-*/
-func TestTheTeleportStubMatchesThePython(t *testing.T) {
-	const playerBase, target = 0x0AC00000, 0x21001234
-
-	var want string
-	askPython(t, fmt.Sprintf(`
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import patcher as P
-print(json.dumps(P._teleport_body(%d, %d).hex()))`, playerBase, target), &want)
-
-	require.Equal(t, want, hexOf(patch.TeleportBody(playerBase, target)))
 }
 
 /*

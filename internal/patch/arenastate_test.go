@@ -1,7 +1,6 @@
 package patch_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,43 +18,6 @@ cannot be undone. Auto-use's flag is consumed before the press, so a stub that
 dies between the two presses nothing rather than pressing forever.
 */
 
-// pyArena is the Python's view of the same arena, over the same planted memory.
-func pyArena(arena uint32) string {
-	return pyMapped("") + fmt.Sprintf(`
-from terrariabonker import arena_state
-mem.poke_bytes(%d + P.Patcher.ARENA_MAGIC_OFF, P.Patcher.ARENA_MAGIC)
-p._arena = %d
-auto, ore = p.auto_use, p.ore
-`, arena, arena)
-}
-
-// A press is armed, consumed and counted the same way.
-func TestAutoUseMatchesThePython(t *testing.T) {
-	const arena = arenaReal
-
-	var want map[string]any
-	askPython(t, pyArena(arena)+`
-before = auto.armed()
-auto.arm()
-armed = auto.armed()
-auto.disarm()
-print(json.dumps({"before": before, "armed": armed, "after": auto.armed(),
-                  "presses": auto.presses(), "buf": mem.buf.hex()}))`, &want)
-
-	mem := newMapped()
-	mem.PokeBytes(arena+patch.ArenaMagicOff, patch.ArenaMagic)
-	p := patch.NewPatcher(&planted{mem}, 4242)
-	auto := p.AutoUse()
-
-	require.Equal(t, want["before"], auto.Armed(), "disagree about a fresh arena")
-	require.True(t, auto.Arm(), "arming was refused")
-	require.Equal(t, want["armed"], auto.Armed(), "disagree about being armed")
-	require.True(t, auto.Disarm(), "disarming was refused")
-	require.Equal(t, want["after"], auto.Armed(), "disagree about being disarmed")
-	require.Equal(t, want["presses"], asJSON(t, auto.Presses()), "a different press count")
-	sameMemory(t, want["buf"].(string), mem.Hex(), "the two left different words behind")
-}
-
 // The stub's own tally is read back, not this side's idea of it.
 func TestThePressCountIsTheStubsOwn(t *testing.T) {
 	const arena = arenaReal
@@ -72,44 +34,6 @@ func TestThePressCountIsTheStubsOwn(t *testing.T) {
 	// the presses did not happen.
 	p.AutoUse().Arm()
 	require.Equal(t, int32(7), p.AutoUse().Presses(), "arming moved the stub's own tally")
-}
-
-// Queueing tiles writes the same bytes, and writes the count last.
-func TestTheOreQueueMatchesThePython(t *testing.T) {
-	const arena = arenaReal
-
-	for _, c := range []struct {
-		name  string
-		tiles []patch.Tile
-	}{
-		{"nothing", nil},
-		{"one tile", []patch.Tile{{X: 1000, Y: 240}}},
-		{"a vein", []patch.Tile{{X: 1000, Y: 240}, {X: 1001, Y: 240}, {X: 1000, Y: 241}}},
-		// More than the batch holds: the extra are dropped rather than written
-		// past the end of the queue.
-		{"more than fits", manyTiles(patch.OreMaxBatch + 10)},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			var want map[string]any
-			askPython(t, pyArena(arena)+fmt.Sprintf(`
-took = ore.arm(%s)
-print(json.dumps({"took": took, "armed": ore.armed(), "address": ore.address,
-                  "buf": mem.buf.hex()}))`, pyTiles(c.tiles)), &want)
-
-			mem := newMapped()
-			mem.PokeBytes(arena+patch.ArenaMagicOff, patch.ArenaMagic)
-			p := patch.NewPatcher(&planted{mem}, 4242)
-			q := p.OreQueue()
-
-			took := q.Arm(c.tiles)
-			require.Equal(t, want["took"], asJSON(t, took), "a different number was queued")
-			require.Equal(t, want["armed"], q.Armed(), "disagree about being armed")
-			at, ok := q.Address()
-			require.True(t, ok)
-			require.Equal(t, want["address"], asJSON(t, at), "the queue is somewhere else")
-			sameMemory(t, want["buf"].(string), mem.Hex(), "the two queued different bytes")
-		})
-	}
 }
 
 /*

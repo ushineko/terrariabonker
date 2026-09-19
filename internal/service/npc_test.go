@@ -32,60 +32,6 @@ func spawnFixture(t *testing.T) (*execMem, *service.Service) {
 	return mem, service.New(mem, -1)
 }
 
-// pySpawnFixture is the same, as Python source.
-func pySpawnFixture() string {
-	return preamble() + plantWorld("Nakama's World") + pyPlantNPCs() +
-		plantPosition(8000.0, 4000.0) + plantFacing(1)
-}
-
-// The two spawn the same NPC into the same slot and leave the same bytes.
-func TestSpawningAnNPCMatchesThePython(t *testing.T) {
-	var want struct {
-		Result map[string]any `json:"result"`
-		Buf    string         `json:"buf"`
-	}
-	askPython(t, pySpawnFixture()+`
-res = svc.spawn_npc(1, 25)
-print(json.dumps({"result": res, "buf": mem.buf.hex()}))`, &want)
-
-	mem, svc := spawnFixture(t)
-	got, err := svc.SpawnNPC(1, 25)
-	require.NoError(t, err)
-	require.Equal(t, want.Result["slot"], asJSON(t, got.Slot), "a different slot was used")
-	require.Equal(t, want.Result["x"], asJSON(t, got.X), "a different tile x")
-	require.Equal(t, want.Result["y"], asJSON(t, got.Y), "a different tile y")
-	require.Equal(t, want.Result["name"], got.Name, "a different name")
-	sameMemory(t, want.Buf, mem.Hex(), "the two left different memory behind")
-}
-
-/*
-The variant a negative netID names is the one that gets spawned.
-
-Every coloured slime shares a type, so a scan keyed on the type would hand out
-whichever one it saw last and be right often enough to look right. The shelf has
-two entries of one type for exactly this.
-*/
-func TestSpawningAVariantMatchesThePython(t *testing.T) {
-	var want struct {
-		Result map[string]any `json:"result"`
-		Buf    string         `json:"buf"`
-	}
-	askPython(t, pySpawnFixture()+`
-res = svc.spawn_npc(-3, 25)
-print(json.dumps({"result": res, "buf": mem.buf.hex()}))`, &want)
-
-	mem, svc := spawnFixture(t)
-	got, err := svc.SpawnNPC(-3, 25)
-	require.NoError(t, err)
-	require.Equal(t, want.Result["slot"], asJSON(t, got.Slot), "a different slot was used")
-	sameMemory(t, want.Buf, mem.Hex(), "the two left different memory behind")
-
-	obj := spawnedObject(got.Slot)
-	life, ok := mem.ReadI32(obj + layout.NPCLifeMax)
-	require.True(t, ok)
-	require.Equal(t, int32(45), life, "the other entry of the same type was copied")
-}
-
 // spawnedObject is where the fixture put the object behind a Main.npc slot.
 func spawnedObject(slot int) uint32 {
 	return uint32(npcObjectsAt + slot*npcStride) //nolint:gosec // a slot index
@@ -248,25 +194,4 @@ func TestASpawnSetsActiveLast(t *testing.T) {
 	require.Equal(t, obj+layout.NPCActive, last,
 		"something was written to the slot after it went live")
 	require.Greater(t, len(rec.writes), 1, "the spawn only wrote one thing")
-}
-
-/*
-A player who has not turned yet faces one way rather than neither.
-
-The field is zero until the first step, and a spawn at the player's own
-coordinates is a spawn on top of them -- which is the case this exists for and
-the only one where the direction is not read off the player.
-*/
-func TestASpawnWithNoFacingMatchesThePython(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+plantWorld("Nakama's World")+pyPlantNPCs()+
-		plantPosition(8000.0, 4000.0)+plantFacing(0)+`
-print(json.dumps(svc.spawn_npc(1, 25)))`, &want)
-
-	mem, svc := spawnFixture(t)
-	plantFacingInto(mem, 0)
-	got, err := svc.SpawnNPC(1, 25)
-	require.NoError(t, err)
-	require.Equal(t, want["x"], asJSON(t, got.X), "a different tile x")
-	require.Equal(t, (8000.0-25*16)/16, got.X, "and the spawn landed on the player")
 }

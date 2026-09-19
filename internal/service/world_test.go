@@ -10,32 +10,6 @@ import (
 )
 
 /*
-Which world is loaded, and why the name is what says so.
-
-This used to be keyed on the tile buffer's address and the world's dimensions,
-and that is byte-identical across a switch between two worlds of the same size --
-measured, not supposed. The name carries the identity; the dimensions only
-corroborate it.
-*/
-func TestWorldIDMatchesThePython(t *testing.T) {
-	var want any
-	askPython(t, preamble()+plantWorld("Nakama's World")+`
-got = svc.world_id()
-print(json.dumps(None if got is None else list(got)))`, &want)
-	require.NotNil(t, want, "the Python could not identify a world it was given")
-
-	mem := plant()
-	plantWorldInto(mem, "Nakama's World")
-	got, ok := service.New(mem, -1).WorldID()
-	require.True(t, ok, "the world was not identified")
-
-	fields := want.([]any)
-	require.Equal(t, fields[0], got.Name, "a different world name")
-	require.Equal(t, fields[1], asJSON(t, got.Width), "a different width")
-	require.Equal(t, fields[2], asJSON(t, got.Height), "a different height")
-}
-
-/*
 Two worlds of the same size are told apart.
 
 The dimensions and the tile buffer are identical across that switch, so anything

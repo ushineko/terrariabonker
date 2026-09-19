@@ -1,7 +1,6 @@
 package service_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,64 +8,6 @@ import (
 	"github.com/ushineko/terrariabonker/internal/service"
 	"github.com/ushineko/terrariabonker/internal/version"
 )
-
-/*
-The build gate decides whether anything may write to the game.
-
-Its two failure directions are not symmetric. Refusing a build that would have
-worked costs the player their cheats; accepting one whose offsets have moved puts
-numbers into the wrong fields of a live save. "I cannot tell yet" is not a third
-kind of wrong -- it is recoverable, and it is what startup looks like.
-*/
-func TestTheBuildGateMatchesThePython(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		planted string // the version string in the game's memory, twice over
-	}{
-		{"nothing readable", ""},
-		{"the build this targets", version.KnownVersion},
-		{"a fourth-component hotfix", "1.4.5.9"},
-		{"a real update", "1.5.0.0"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			var want map[string]any
-			askPython(t, preamble()+plantVersion(c.planted)+`
-level, msg = svc.compatibility()
-snap = svc.snapshot(with_inventory=False)
-try:
-    svc.require_compatible()
-    refused = False
-except Exception:
-    refused = True
-print(json.dumps({"level": level, "msg": msg, "refused": refused,
-                  "version": snap.version, "buildid": snap.buildid,
-                  "compat_level": snap.compat_level}))`, &want)
-
-			mem := plant()
-			plantVersionInto(mem, c.planted)
-			svc := service.New(mem, -1)
-
-			level, msg := svc.Compatibility()
-			require.Equal(t, want["level"], string(level), "a different verdict")
-			require.Equal(t, want["msg"], msg, "a different reason")
-			require.Equal(t, want["refused"], svc.RequireCompatible(false) != nil,
-				"disagree about whether a write may go ahead")
-
-			/*
-				The Python spells "nothing" as null and this spells it as an empty
-				string. That is a difference in spelling and not in meaning: the
-				window's own type declares these as strings, and Go decodes a JSON
-				null into exactly the empty string it would decode "" into. So
-				what is compared is the value, not the way it is written.
-			*/
-			snap := svc.Snapshot(false)
-			require.Equal(t, orEmpty(want["version"]), snap.Version, "a different version")
-			require.Equal(t, orEmpty(want["buildid"]), snap.BuildID, "a different build id")
-			require.Equal(t, want["compat_level"], string(snap.Level),
-				"the snapshot reports a different verdict")
-		})
-	}
-}
 
 /*
 An incompatible build can be forced past, and an unreadable one is not stopped at
@@ -130,17 +71,6 @@ func orEmpty(v any) string {
 		return ""
 	}
 	return v.(string)
-}
-
-// plantVersion is the Python planting the same version string.
-func plantVersion(v string) string {
-	if v == "" {
-		return ""
-	}
-	return fmt.Sprintf(`
-for i in range(2):
-    mem.poke_bytes(%d + i * 0x80, ("v%s").encode("utf-16-le"))
-`, versionAt, v)
 }
 
 // plantVersionInto writes the version where the game keeps it, twice, which is

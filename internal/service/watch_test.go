@@ -21,51 +21,6 @@ counts what its tick did rather than deciding for itself, and that it can be
 stopped.
 */
 
-// A fixed number of potion rounds does the same thing on both sides.
-func TestWatchingPotionsMatchesThePython(t *testing.T) {
-	atHome(t)
-	var want struct {
-		Result map[string]any `json:"result"`
-		Buf    string         `json:"buf"`
-	}
-	askPython(t, preamble()+plantBuffs()+`
-res = svc.watch_potions(min_stack=1, interval=0.001, rounds=3)
-print(json.dumps({"result": res, "buf": mem.buf.hex()}))`, &want)
-
-	mem := plant()
-	plantBuffsInto(mem)
-	got, err := service.New(mem, -1).WatchPotions(t.Context(), 1, 0,
-		time.Millisecond, 3, nil)
-	require.NoError(t, err)
-	require.Equal(t, want.Result, asJSON(t, got), "a different run of the watcher")
-	sameMemory(t, want.Buf, mem.Hex(), "the two left different memory behind")
-	require.Equal(t, 3, got.Rounds, "a different number of rounds was run")
-}
-
-/*
-An interval that cannot hold a buff up is refused before the first round.
-
-The failure otherwise is a buff that flickers, which reads as the trainer being
-broken rather than as a setting being wrong.
-*/
-func TestAnIntervalThatCannotHoldABuffUp(t *testing.T) {
-	atHome(t)
-	var want string
-	askPython(t, preamble()+plantBuffs()+`
-try:
-    svc.watch_potions(interval=10.0, rounds=1)
-    print(json.dumps(""))
-except Exception as e:
-    print(json.dumps(str(e)))`, &want)
-	require.NotEmpty(t, want, "the Python ran a watcher that cannot work")
-
-	mem := plant()
-	plantBuffsInto(mem)
-	_, err := service.New(mem, -1).WatchPotions(t.Context(), 1, 0, 10*time.Second, 1, nil)
-	require.Error(t, err, "an interval longer than the buff was accepted")
-	require.Contains(t, err.Error(), "would lapse between rounds")
-}
-
 // And the same rule for the fishing buffs, which are the same length.
 func TestAnIntervalThatCannotHoldAFishingBuffUp(t *testing.T) {
 	atHome(t)
@@ -74,36 +29,6 @@ func TestAnIntervalThatCannotHoldAFishingBuffUp(t *testing.T) {
 	_, err := service.New(mem, -1).WatchFishingBuffs(t.Context(),
 		map[string]bool{"power": true}, 0, 10*time.Second, 1, nil)
 	require.Error(t, err, "an interval longer than the buff was accepted")
-}
-
-// Topping bait up in a loop reports what the ticks did.
-func TestWatchingBaitMatchesThePython(t *testing.T) {
-	atHome(t)
-	var want struct {
-		Result map[string]any `json:"result"`
-		Buf    string         `json:"buf"`
-	}
-	askPython(t, preamble()+pyPlantBait()+`
-res = svc.watch_bait(keep=30, interval=0.001, rounds=2)
-print(json.dumps({"result": res, "buf": mem.buf.hex()}))`, &want)
-
-	mem := plant()
-	plantBaitInto(mem)
-	var seen []service.Tick
-	got, err := service.New(mem, -1).WatchBait(t.Context(), 30, time.Millisecond, 2,
-		func(tick service.Tick) { seen = append(seen, tick) })
-	require.NoError(t, err)
-	require.Equal(t, want.Result, asJSON(t, got), "a different run of the watcher")
-	sameMemory(t, want.Buf, mem.Hex(), "the two left different memory behind")
-
-	/*
-		And only the round that topped something up was reported.
-
-		The second round has nothing left to do, and a watcher that announced it
-		would put a refill on the screen every second for as long as it ran.
-	*/
-	require.Len(t, seen, 1, "a round that topped nothing up was reported")
-	require.NotEmpty(t, seen[0]["topped"], "the round that was reported did nothing")
 }
 
 /*

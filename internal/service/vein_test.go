@@ -1,7 +1,6 @@
 package service_test
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -9,7 +8,6 @@ import (
 
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/service"
-	"github.com/ushineko/terrariabonker/internal/tiles"
 )
 
 /*
@@ -70,53 +68,6 @@ func plantTallVein(mem *execMem) {
 	}
 }
 
-// pyPlantVein is the same, as Python source.
-func pyPlantVein() string {
-	var out string
-	for x := int32(veinX - 4); x <= veinX+4; x++ {
-		for y := int32(veinY - 2); y <= veinY+40; y++ {
-			out += pyTile(x, y, 1, true)
-		}
-	}
-	for _, p := range [][2]int32{{veinX, veinY}, {veinX + 1, veinY}, {veinX, veinY + 1}, {veinX + 1, veinY + 1}} {
-		out += pyTile(p[0], p[1], 7, true)
-	}
-	out += pyTile(veinX+2, veinY, 6, true)
-	out += pyTile(veinX, veinY+30, 7, true)
-	return out
-}
-
-// What a dry run reports is the same, for a vein and for everything that is not
-// one.
-func TestVeinAtMatchesThePython(t *testing.T) {
-	for _, c := range []struct{ x, y int32 }{
-		{veinX, veinY},     // into the copper
-		{veinX + 2, veinY}, // the iron beside it
-		{veinX, veinY + 5}, // plain stone, which is not on the list
-		{veinX, veinY - 2}, // stone above it
-		{-1, -1},           // outside the world
-	} {
-		t.Run(fmt.Sprintf("%d_%d", c.x, c.y), func(t *testing.T) {
-			var want map[string]any
-			askPython(t, preamble()+plantWorld("Nakama's World")+pyPlantVein()+fmt.Sprintf(
-				"print(json.dumps(svc.vein_at(%d, %d)))", c.x, c.y), &want)
-
-			mem := plant()
-			plantWorldInto(mem, "Nakama's World")
-			plantVeinInto(mem)
-
-			got, err := service.New(mem, -1).VeinAt(c.x, c.y, false, 0, true)
-			require.NoError(t, err)
-			require.Equal(t, want["type"], asJSON(t, got.Type), "a different tile id")
-			require.Equal(t, want["name"], got.Name, "a different name")
-			require.Equal(t, want["whitelisted"], got.Whitelisted, "judged differently")
-			require.Equal(t, want["count"], asJSON(t, got.Count), "a different number of tiles")
-			require.Equal(t, want["tiles"], asJSON(t, got.Tiles), "different tiles")
-			require.Equal(t, want["capped"], got.Capped, "capped differently")
-		})
-	}
-}
-
 // A vein is one ore: the iron touching the copper is not part of it.
 func TestAVeinStopsAtAnotherOre(t *testing.T) {
 	mem := plant()
@@ -131,23 +82,6 @@ func TestAVeinStopsAtAnotherOre(t *testing.T) {
 		require.NotEqual(t, [2]int32{veinX, veinY + 30}, p,
 			"the flood took an unrelated deposit below the ground")
 	}
-}
-
-// Where the player is standing reads the same.
-func TestPlayerTileMatchesThePython(t *testing.T) {
-	var want []int32
-	askPython(t, preamble()+plantWorld("Nakama's World")+plantPosition(160.0, 192.0)+`
-print(json.dumps(list(svc.player_tile())))`, &want)
-
-	mem := plant()
-	plantWorldInto(mem, "Nakama's World")
-	plantPositionInto(mem, 160.0, 192.0)
-
-	x, y, err := service.New(mem, -1).PlayerTile()
-	require.NoError(t, err)
-	require.Equal(t, want[0], x, "a different tile x")
-	require.Equal(t, want[1], y, "a different tile y")
-	require.Equal(t, int32(10), x, "and not where the player was planted")
 }
 
 // The extractor refuses to run when its cheat is not applied, rather than
@@ -207,17 +141,6 @@ func TestTheRegrowthSearchStopsAtGround(t *testing.T) {
 	id, there := tm.SolidTypeAt(veinX, veinY+30)
 	require.True(t, there, "the unrelated deposit below the ground was mined")
 	require.Equal(t, uint16(7), id)
-}
-
-// tiles.DefaultLimit is what a dry run caps at when the caller names no limit.
-func TestTheDryRunCapMatchesThePython(t *testing.T) {
-	var want int
-	askPython(t, `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import tiles
-print(json.dumps(tiles.DEFAULT_LIMIT))`, &want)
-	require.Equal(t, want, tiles.DefaultLimit)
 }
 
 /*

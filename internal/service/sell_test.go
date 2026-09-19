@@ -210,24 +210,6 @@ func TestADifferentWorldIsAskedAgain(t *testing.T) {
 	require.False(t, got.Reachable, "the last world's answer was carried into a new one")
 }
 
-// Coins are promoted the way the game promotes them: a hundred becomes one of
-// the next denomination up.
-func TestCoinsArePromotedMatchingThePython(t *testing.T) {
-	var want [][2]int32
-	askPython(t, `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import selling
-print(json.dumps([list(p) for p in selling.coin_stacks(1234567)]))`, &want)
-
-	got := selling.CoinStacks(1234567)
-	require.Len(t, got, len(want))
-	for i, w := range want {
-		require.Equal(t, w[0], got[i].Type)
-		require.Equal(t, w[1], got[i].Stack)
-	}
-}
-
 /*
 Coins merge into a stack that is already there, and a full stack is promoted.
 

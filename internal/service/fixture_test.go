@@ -311,71 +311,6 @@ const liveIs = uint32(liveLife)
 
 var _ = locate.StatLifeFromObj // the fixture's liveLife is built from it
 
-/*
-preamble is the same image as Python source, planted with the Python's own
-constants and its own fake.
-
-Generated from the tables above so the two images cannot drift, but every offset
-in it is looked up by name on the Python side.
-*/
-func preamble() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `
-import json, os, struct, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import inventory as I, locate as L
-from terrariabonker.service import Service
-mem = FakeMem(%d, %d)
-def u8(a, v): mem.poke_bytes(a, bytes([v]))
-def f32(a, v): mem.write_f32(a, v)
-def i32(a, v): mem.poke_i32(a, v)
-mem.plant_mono_string(%d, "Nakama")
-mem.plant_mono_string(%d, "Nakama")
-mem.plant_player(%d, %v, %d)
-mem.plant_player(%d, %v, %d)
-mem.plant_player(%d, %v, %d)
-code = (b"\x8b\x05" + struct.pack("<I", %d) + b"\x8b\x0d" + struct.pack("<I", %d)
-        + L._LOCALPLAYER_TAIL)
-mem.poke_bytes(%d, code)
-mem.poke_bytes(%d, struct.pack("<I", %d))
-mem.poke_i32(%d, %d)
-mem.poke_bytes(%d + I.ARR_DATA_OFF + %d * 4, struct.pack("<I", %d))
-L._exec_regions = lambda m: [(%d, %d)]
-`,
-		base, size, snapName, liveName,
-		snapLife, ints(snapBlock), snapName,
-		snap2Life, ints(snap2Block), snapName,
-		liveLife, ints(liveBlock), liveName,
-		playerStatic, myPlayerStatic, code,
-		playerStatic, playerArray, myPlayerStatic, myPlayer,
-		playerArray, myPlayer, liveObj,
-		code, code+0x100)
-
-	pythonInventory(&b, liveLife, liveArr, liveItems, liveItemsImage)
-	pythonInventory(&b, snapLife, snapArr, snapItems, snapItemsImage)
-	pythonInventory(&b, snap2Life, snap2Arr, snap2Items, snap2ItemsImage)
-	fmt.Fprintf(&b, "svc = Service(mem)\n")
-	return b.String()
-}
-
-// pythonInventory is one copy's inventory as Python source.
-func pythonInventory(b *strings.Builder, life, arr, items uint32, image []item) {
-	fmt.Fprintf(b, "mem.poke_i32(%d + I.INVENTORY_PTR_OFF, %d)\n", life, arr)
-	for _, it := range image {
-		if it.absent {
-			continue
-		}
-		addr := items + uint32(it.slot)*itemStride //nolint:gosec // a slot index
-		fmt.Fprintf(b, "mem.poke_i32(%d + I.ARR_DATA_OFF + %d * 4, %d)\n", arr, it.slot, addr)
-		fmt.Fprintf(b, "mem.poke_bytes(%d, struct.pack(\"<I\", %d))\n", addr, itemVTable)
-		for _, f := range it.fields {
-			fmt.Fprintf(b, "%s(%d + I.%s, %v)\n", f.kind, addr, f.name, f.value)
-		}
-	}
-}
-
 // ints is a block as a Python list.
 func ints(b []int32) string {
 	parts := make([]string, len(b))
@@ -422,31 +357,6 @@ func plantWorldAt(mem *execMem, at uint32, name string) {
 
 // movedStaticAt is where a world reload puts Main's block the second time.
 const movedStaticAt = base + 0x20000
-
-/*
-plantWorld is the same, as Python source.
-
-The static base is fixed rather than scanned for: what is being compared is what
-the two make of a world, not how each finds Main.
-*/
-func plantWorld(name string) string {
-	return fmt.Sprintf(`
-from terrariabonker import layout as L, locate as LC
-mem.poke_bytes(%d + L.MAIN_TILE_OFF, struct.pack("<I", %d))
-mem.poke_i32(%d + L.MAIN_MAX_TILES_OFF, %d)
-mem.poke_i32(%d + L.MAIN_MAX_TILES_OFF + 4, %d)
-mem.poke_bytes(%d + 0x08, struct.pack("<I", %d))
-mem.poke_i32(%d + 0x04, 0)
-mem.poke_i32(%d + 0x08, %d)
-mem.poke_i32(%d + 0x0C, 0)
-mem.plant_mono_string(%d, %q)
-mem.poke_bytes(%d + L.MAIN_WORLD_NAME_OFF, struct.pack("<I", %d))
-LC.main_static_base = lambda m: %d
-svc._main_base = %d
-`, staticAt, tileBufAt, staticAt, worldWidth, staticAt, worldHeight,
-		tileBufAt, tileBoundsAt, tileBoundsAt, tileBoundsAt, worldHeight, tileBoundsAt,
-		worldNameAt, name, staticAt, worldNameAt, staticAt, staticAt)
-}
 
 // Where the world goes in the planted game.
 const (
@@ -563,34 +473,11 @@ func plantTile(mem *execMem, x, y int32, id uint16, active bool) {
 	mem.PokeBytes(at+0x0E, []byte{byte(header), byte(header >> 8)})
 }
 
-// pyTile is the same, as Python source.
-func pyTile(x, y int32, id uint16, active bool) string {
-	idx := worldHeight*x + y
-	at := tileObjectsAt + uint32(idx)*tileRecord //nolint:gosec // a planted address
-	header := 0
-	if active {
-		header = 0x20
-	}
-	return fmt.Sprintf(`
-mem.poke_bytes(%d + L.ARR_DATA_OFF + %d * 4, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x08, struct.pack("<H", %d))
-mem.poke_bytes(%d + 0x0E, struct.pack("<H", %d))
-`, tileBufAt, idx, at, at, id, at, header)
-}
-
 // plantPositionInto puts the player somewhere in the world, in world pixels.
 func plantPositionInto(mem *execMem, px, py float32) {
 	obj := uint32(liveLife) - 0x738
 	mem.WriteF32(obj+0x0C, px)
 	mem.WriteF32(obj+0x10, py)
-}
-
-// plantPosition is the same, as Python source.
-func plantPosition(px, py float32) string {
-	return fmt.Sprintf(`
-mem.write_f32(%d + 0x0C, %v)
-mem.write_f32(%d + 0x10, %v)
-`, liveLife-0x738, px, liveLife-0x738, py)
 }
 
 /*
@@ -787,16 +674,6 @@ func miningGame(t *testing.T, falls bool) (*miningMem, *patch.Patcher) {
 	return game, patch.NewPatcher(game, -1)
 }
 
-// pyProfileAt points the Python's profile at a scratch file, so a test never
-// touches the maintainer's own.
-func pyProfileAt(home string) string {
-	return fmt.Sprintf(`
-import os
-from terrariabonker import profile
-profile._PATH = os.path.join(%q, ".config", "terrariabonker", "profile.json")
-`, home)
-}
-
 // Where the player's buff arrays go, and what is already running.
 const (
 	buffTypeArr = base + 0x34000
@@ -815,20 +692,6 @@ func plantBuffsInto(mem *execMem) {
 	mem.PokeI32(buffTimeArr+layout.ArrLenOff, buffSlots)
 	mem.PokeI32(buffTypeArr+layout.ArrDataOff, 121)
 	mem.PokeI32(buffTimeArr+layout.ArrDataOff, 28800)
-}
-
-// plantBuffs is the same, as Python source.
-func plantBuffs() string {
-	return fmt.Sprintf(`
-from terrariabonker import buffs as BF, layout as L2
-mem.poke_bytes(%d + BF.BUFF_TYPE_PTR_OFF, struct.pack("<I", %d))
-mem.poke_bytes(%d + BF.BUFF_TIME_PTR_OFF, struct.pack("<I", %d))
-mem.poke_i32(%d + L2.ARR_LEN_OFF, %d)
-mem.poke_i32(%d + L2.ARR_LEN_OFF, %d)
-mem.poke_i32(%d + L2.ARR_DATA_OFF, 121)
-mem.poke_i32(%d + L2.ARR_DATA_OFF, 28800)
-`, liveLife, buffTypeArr, liveLife, buffTimeArr,
-		buffTypeArr, buffSlots, buffTimeArr, buffSlots, buffTypeArr, buffTimeArr)
 }
 
 // writeWatcher counts writes, for the tests about what happens before what.
@@ -855,18 +718,6 @@ func plantBaitInto(mem *execMem) {
 	mem.PokeI32(at+uint32(layout.ItemType), 2675)         //nolint:gosec // a field offset
 	mem.PokeI32(at+uint32(layout.ItemStack), 12)          //nolint:gosec // a field offset
 	mem.PokeBytes(at+uint32(layout.ItemBait), []byte{15}) //nolint:gosec // a field offset
-}
-
-// pyPlantBait is the same, as Python source.
-func pyPlantBait() string {
-	const slot, at = 7, liveItems + 7*itemStride
-	return fmt.Sprintf(`
-mem.poke_bytes(%d + I.ARR_DATA_OFF + %d * 4, struct.pack("<I", %d))
-mem.poke_bytes(%d, struct.pack("<I", %d))
-mem.poke_i32(%d + I.ITEM_TYPE, 2675)
-mem.poke_i32(%d + I.ITEM_STACK, 12)
-mem.poke_bytes(%d + I.ITEM_BAIT, bytes([15]))
-`, liveArr, slot, at, at, itemVTable, at, at, at)
 }
 
 // Where a second rod goes, and what it was carrying.
@@ -1253,71 +1104,10 @@ func plantNPCsInto(mem *execMem) {
 	}
 }
 
-// pyPlantNPCs is the same shelf and the same slots, as Python source.
-func pyPlantNPCs() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `
-from terrariabonker import npcs as N
-mem.poke_bytes(%d + N.MAIN_NPC_OFF, struct.pack("<I", %d))
-mem.poke_i32(%d + I.ARR_LEN_OFF, %d)
-for _i in range(%d):
-    _obj = %d + _i * %d
-    mem.poke_bytes(%d + I.ARR_DATA_OFF + _i * 4, struct.pack("<I", _obj))
-    mem.poke_bytes(_obj, struct.pack("<I", %d))
-    u8(_obj + N.NPC_ACTIVE, 0)
-    mem.poke_i32(_obj + N.NPC_NET_ID, 0)
-for _slot in %s:
-    u8(%d + _slot * %d + N.NPC_ACTIVE, 1)
-mem.poke_i32(%d + N.NPC_NET_ID, 1)
-mem.poke_i32(%d + N.NPC_LIFE_MAX, %d)
-mem.poke_bytes(%d + I.ARR_DATA_OFF + %d * 4, struct.pack("<I", %d))
-mem.poke_bytes(%d, struct.pack("<I", %d))
-mem.poke_i32(%d + N.NPC_NET_ID, 1)
-mem.poke_i32(%d + N.NPC_LIFE_MAX, %d)
-u8(%d + N.NPC_ACTIVE, 0)
-`, staticAt, npcArrAt, npcArrAt, npcArrayLen, npcArrayLen, npcObjectsAt, npcStride,
-		npcArrAt, npcVTable, pyInts(npcTakenSlots), npcObjectsAt, npcStride,
-		npcObjectsAt+liveSlimeSlot*npcStride,
-		npcObjectsAt+liveSlimeSlot*npcStride, npcScaledLife,
-		npcArrAt, npcDespawnedSlot, npcDecoyAt,
-		npcDecoyAt, npcVTable, npcDecoyAt, npcDecoyAt, npcScaledLife, npcDecoyAt)
-	for i, tpl := range npcShelf {
-		obj := npcTemplateAt + i*npcStride
-		fmt.Fprintf(&b, `
-mem.poke_bytes(%d, struct.pack("<I", %d))
-mem.poke_i32(%d + N.NPC_NET_ID, %d)
-mem.poke_i32(%d + N.NPC_TYPE, %d)
-mem.poke_i32(%d + N.NPC_LIFE_MAX, %d)
-mem.poke_i32(%d + N.NPC_DAMAGE, %d)
-mem.poke_i32(%d + N.NPC_DEFENSE, %d)
-mem.poke_i32(%d + N.NPC_WIDTH, %d)
-mem.poke_i32(%d + N.NPC_HEIGHT, %d)
-mem.poke_bytes(%d + N.NPC_COLOR, bytes(%s))
-u8(%d + N.NPC_ACTIVE, 0)
-`, obj, npcVTable, obj, tpl.netID, obj, tpl.npcType, obj, tpl.life, obj, tpl.damage,
-			obj, tpl.defense, obj, tpl.width, obj, tpl.height, obj, pyBytes(tpl.color), obj)
-	}
-	return b.String()
-}
-
-// pyInts is a slot list as a Python list.
-func pyInts(v []int) string {
-	parts := make([]string, len(v))
-	for i, n := range v {
-		parts[i] = fmt.Sprint(n)
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
-}
-
 // plantFacingInto is which way the player is turned, which is the side a spawn
 // lands on.
 func plantFacingInto(mem *execMem, facing int32) {
 	mem.PokeI32(uint32(liveLife)-0x738+0x2C, facing)
-}
-
-// plantFacing is the same, as Python source.
-func plantFacing(facing int32) string {
-	return fmt.Sprintf("mem.poke_i32(%d + 0x2C, %d)\n", liveLife-0x738, facing)
 }
 
 /*
@@ -1344,17 +1134,6 @@ func plantFrameCountsInto(mem *execMem) {
 		}
 		mem.PokeI32(npcFrameCountAt+layout.ArrDataOff+uint32(i)*4, n) //nolint:gosec // an index
 	}
-}
-
-// pyPlantFrameCounts is the same, as Python source.
-func pyPlantFrameCounts() string {
-	return fmt.Sprintf(`
-mem.poke_bytes(%d + N.MAIN_NPC_FRAME_COUNT_OFF, struct.pack("<I", %d))
-mem.poke_i32(%d + I.ARR_LEN_OFF, %d)
-for _i in range(%d):
-    mem.poke_i32(%d + I.ARR_DATA_OFF + _i * 4, %s.get(_i, 1))
-`, staticAt, npcFrameCountAt, npcFrameCountAt, npcFrameCountN, npcFrameCountN,
-		npcFrameCountAt, pyFrameImage())
 }
 
 // pyFrameImage is the counts as a Python dict.

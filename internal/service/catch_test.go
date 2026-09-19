@@ -127,20 +127,6 @@ func TestStoppingForgetsTheCastGate(t *testing.T) {
 	require.Empty(t, got["events"], "the gate survived being stopped")
 }
 
-// The projectile the editor writes to is the one the item fires.
-func TestProjectileOfMatchesThePython(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+pyPlantTemplate()+`
-print(json.dumps(svc.projectile_of(757)))`, &want)
-
-	mem := plant()
-	plantTemplateInto(mem)
-	got, err := service.New(mem, -1).ProjectileOf(757)
-	require.NoError(t, err)
-	require.Equal(t, want["item"], asJSON(t, got["item"]))
-	require.Equal(t, want["shoot"], asJSON(t, got["shoot"]), "a different projectile")
-}
-
 // An item with no template is said to have none, rather than reported as firing
 // nothing.
 func TestAnItemWithNoTemplateIsRefused(t *testing.T) {

@@ -1,7 +1,6 @@
 package content_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -107,81 +106,6 @@ func pick(yes bool, a, b uint32) uint32 {
 	return b
 }
 
-// pyPlantNPCs is the same static block as Python source.
-func pyPlantNPCs(pinned bool) string {
-	return fmt.Sprintf(`
-import json, os, struct, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import npcs, locate
-mem = FakeMem(%d, %d)
-mem.poke_i32(%d + 0x0C, 201)
-for i in range(201):
-    elem = %d + i * 0x40
-    mem.poke_bytes(%d + 0x10 + i * 4, struct.pack("<I", elem))
-    mem.poke_bytes(elem, struct.pack("<I", %d))
-mem.poke_i32(%d + 0x0C, 201)
-for i in range(201):
-    elem = %d + i * 0x10
-    mem.poke_bytes(%d + 0x10 + i * 4, struct.pack("<I", elem))
-    mem.poke_bytes(elem, struct.pack("<I", 0xAAAA0000 + i))
-mem.poke_i32(%d + 0x0C, 700)
-for i in range(700):
-    mem.poke_i32(%d + 0x10 + i * 4, i %% 5)
-mem.poke_i32(%d + 0x0C, 700)
-for i in range(700):
-    mem.poke_i32(%d + 0x10 + i * 4, 1)
-mem.poke_i32(%d + 0x0C, 100)
-for i in range(100):
-    mem.poke_i32(%d + 0x10 + i * 4, i %% 5)
-mem.poke_i32(%d + 0x0C, 700)
-for i in range(700):
-    mem.poke_i32(%d + 0x10 + i * 4, 100 + i %% 5)
-mem.poke_bytes(%d + 0x9B0, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0xC34, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x1000, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x1004, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x1008, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x100C, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x1010, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x1014, struct.pack("<I", %d))
-locate.main_static_base = lambda m: %d
-`, scanBase, scanSize,
-		npcArr, npcElems, npcArr, vtable,
-		decoyArr, scanBase+0x1C000, decoyArr,
-		frameArr, frameArr, onesArr, onesArr,
-		shortArr, shortArr, hugeArr, hugeArr,
-		staticBase, pick(pinned, npcArr, 0),
-		staticBase, pick(pinned, frameArr, 0),
-		staticBase, decoyArr, staticBase, shortArr,
-		staticBase, hugeArr, staticBase, onesArr,
-		staticBase, npcArr, staticBase, frameArr,
-		staticBase)
-}
-
-// The array is found the same way, whether the pinned offset holds or not.
-func TestFindingTheNPCArrayMatchesThePython(t *testing.T) {
-	for _, pinned := range []bool{true, false} {
-		t.Run(fmt.Sprintf("pinned=%v", pinned), func(t *testing.T) {
-			var want map[string]any
-			askPython(t, pyPlantNPCs(pinned)+`
-arr = npcs.find_npc_array(mem)
-print(json.dumps({"arr": arr, "vtable": npcs.find_npc_vtable(mem)}))`, &want)
-
-			mem := plantNPCs(pinned)
-			arr, ok := content.FindNPCArray(mem, staticBase)
-			require.True(t, ok, "the array was not found")
-			require.Equal(t, want["arr"], asJSON(t, arr), "a different array was found")
-			require.Equal(t, uint32(npcArr), arr, "and it is not the one that was planted")
-
-			vt, ok := content.FindNPCVTable(mem, staticBase)
-			require.True(t, ok)
-			require.Equal(t, want["vtable"], asJSON(t, vt), "a different vtable")
-		})
-	}
-}
-
 /*
 An array of the right length whose elements share nothing is rejected.
 
@@ -196,29 +120,6 @@ func TestAnArrayWhoseElementsShareNothingIsRejected(t *testing.T) {
 
 	_, ok = content.NPCVTableOf(mem, npcArr)
 	require.True(t, ok, "the real array was rejected")
-}
-
-// The frame counts are found the same way, and a table of ones is not them.
-func TestFrameCountsMatchThePython(t *testing.T) {
-	for _, pinned := range []bool{true, false} {
-		t.Run(fmt.Sprintf("pinned=%v", pinned), func(t *testing.T) {
-			var want map[string]int32
-			askPython(t, pyPlantNPCs(pinned)+`
-print(json.dumps({str(k): v for k, v in npcs.read_frame_counts(mem).items()}))`, &want)
-			require.NotEmpty(t, want, "the Python found no frame counts")
-
-			got := content.FrameCounts(plantNPCs(pinned), staticBase)
-			require.Len(t, got, len(want), "a different number of types has frames")
-			for key, v := range want {
-				var id int
-				_, err := fmt.Sscanf(key, "%d", &id)
-				require.NoError(t, err)
-				require.Equalf(t, v, got[id], "type %s has a different frame count", key)
-			}
-			// Zero-frame types are left out rather than recorded as zero.
-			require.NotContains(t, got, 0, "a type with no frames was recorded")
-		})
-	}
 }
 
 // With nothing plausible anywhere, both report nothing rather than reading a

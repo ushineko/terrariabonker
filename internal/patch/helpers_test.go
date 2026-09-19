@@ -1,12 +1,10 @@
 package patch_test
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -37,21 +35,6 @@ failing.
 */
 var realHome = os.Getenv("HOME")
 
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a fixed script
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "HOME="+realHome)
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
-
 func asJSON(t *testing.T, v any) any {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -80,32 +63,6 @@ func pyBuild(build string) string {
 		return "None"
 	}
 	return fmt.Sprintf("%q", build)
-}
-
-// pyBool is a bool as Python spells it.
-func pyBool(v bool) string {
-	if v {
-		return "True"
-	}
-	return "False"
-}
-
-// pyPairs is a list of address pairs as a Python literal.
-func pyPairs(pairs [][2]uint32) string {
-	parts := make([]string, len(pairs))
-	for i, p := range pairs {
-		parts[i] = fmt.Sprintf("(%d, %d)", p[0], p[1])
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
-}
-
-// pyInts is a list of addresses as a Python literal.
-func pyInts(v []uint32) string {
-	parts := make([]string, len(v))
-	for i, n := range v {
-		parts[i] = fmt.Sprintf("%d", n)
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // bytes is n copies of one byte, for planting a run of padding.

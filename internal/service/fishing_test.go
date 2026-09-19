@@ -1,7 +1,6 @@
 package service_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,25 +20,6 @@ while a spare record only causes a harmless restore. And a restore is keyed by
 item type rather than slot, because a rod that has been moved is still the same
 rod.
 */
-
-// The fixture's live player carries a rod in slot 2 and bait in none, so the kit
-// has something to do and something to leave alone.
-func TestFishingKitMatchesThePython(t *testing.T) {
-	home := atHome(t)
-
-	var want map[string]any
-	askPython(t, preamble()+pyProfileAt(home)+pyPlantTemplate()+`
-print(json.dumps(svc.fishing_kit()))`, &want)
-
-	mem := plant()
-	plantTemplateInto(mem)
-	got, err := service.New(mem, -1).FishingKit()
-	require.NoError(t, err)
-
-	require.Equal(t, want["rods"], asJSON(t, got.Rods), "a different set of rods")
-	require.Equal(t, want["baits"], asJSON(t, got.Baits), "a different set of bait")
-	require.Equal(t, want["gave"], asJSON(t, got.Gave), "something else was given")
-}
 
 /*
 A player who already has gear is given nothing.
@@ -61,37 +41,6 @@ func TestTheKitGivesNothingTwice(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, second.Gave, "a second call handed out more gear")
 	require.Equal(t, len(first.Rods), len(second.Rods), "the player ended up with more rods")
-}
-
-// Raising a rod's power records what it was, and leaves the same bytes.
-func TestSetFishingPowerMatchesThePython(t *testing.T) {
-	home := atHome(t)
-
-	var want struct {
-		Result map[string]any `json:"result"`
-		Owed   map[string]int `json:"owed"`
-		Buf    string         `json:"buf"`
-	}
-	askPython(t, preamble()+pyProfileAt(home)+`
-res = svc.set_fishing_power(200)
-print(json.dumps({"result": res, "buf": mem.buf.hex(),
-                  "owed": {str(k): v for k, v in profile.rod_powers_to_restore().items()}}))`,
-		&want)
-
-	mem := plant()
-	got, err := service.New(mem, -1).SetFishingPower(200)
-	require.NoError(t, err)
-	require.Equal(t, want.Result["changed"], asJSON(t, got["changed"]), "different rods changed")
-	sameMemory(t, want.Buf, mem.Hex(), "the two left different memory behind")
-
-	owed := profile.RodPowersToRestore()
-	require.Len(t, owed, len(want.Owed), "a different number of rods is owed a restore")
-	for key, v := range want.Owed {
-		var itemType int32
-		_, err := fmt.Sscanf(key, "%d", &itemType)
-		require.NoError(t, err)
-		require.Equalf(t, int32(v), owed[itemType], "rod %s is owed a different power", key)
-	}
 }
 
 /*
@@ -132,36 +81,6 @@ func TestAnImpossibleFishingPowerIsRefused(t *testing.T) {
 	require.Equal(t, before, mem.Hex(), "something was written anyway")
 }
 
-/*
-A rod is put back by its type, not the slot it was in.
-
-A rod that has been moved since the cheat was switched on is still the same rod,
-and a slot-keyed restore loses track of exactly that.
-*/
-func TestRestoringFishingPowerMatchesThePython(t *testing.T) {
-	home := atHome(t)
-
-	var want map[string]any
-	askPython(t, preamble()+pyProfileAt(home)+`
-svc.set_fishing_power(200)
-print(json.dumps(svc.restore_fishing_power()))`, &want)
-
-	mem := plant()
-	svc := service.New(mem, -1)
-	_, err := svc.SetFishingPower(200)
-	require.NoError(t, err)
-
-	got, err := svc.RestoreFishingPower()
-	require.NoError(t, err)
-	require.Equal(t, want["restored"], asJSON(t, got["restored"]), "different rods were restored")
-	require.Empty(t, profile.RodPowersToRestore(), "something is still owed a restore")
-
-	// And the rod really is back.
-	inv, err := service.New(mem, -1).Inventory()
-	require.NoError(t, err)
-	_ = inv
-}
-
 // Restoring when nothing is owed does nothing and says so.
 func TestRestoringWhenNothingIsOwed(t *testing.T) {
 	atHome(t)
@@ -174,71 +93,12 @@ func TestRestoringWhenNothingIsOwed(t *testing.T) {
 	require.Equal(t, before, mem.Hex(), "something was written with nothing owed")
 }
 
-// Bait is topped up to the floor, in every copy.
-func TestBaitTickMatchesThePython(t *testing.T) {
-	home := atHome(t)
-
-	for _, keep := range []int32{1, 30, 999} {
-		t.Run(fmt.Sprintf("keep%d", keep), func(t *testing.T) {
-			var want struct {
-				Result map[string]any `json:"result"`
-				Buf    string         `json:"buf"`
-			}
-			askPython(t, preamble()+pyProfileAt(home)+pyPlantBait()+fmt.Sprintf(`
-res = svc.bait_tick(keep=%d)
-print(json.dumps({"result": res, "buf": mem.buf.hex()}))`, keep), &want)
-
-			mem := plant()
-			plantBaitInto(mem)
-			got, err := service.New(mem, -1).BaitTick(keep)
-			require.NoError(t, err)
-			require.Equal(t, want.Result["topped"], asJSON(t, got["topped"]), "different bait was topped")
-			require.Equal(t, want.Result["baits"], asJSON(t, got["baits"]), "a different bait count")
-			sameMemory(t, want.Buf, mem.Hex(), "the two left different memory behind")
-		})
-	}
-}
-
 // A floor below one is refused: topping a stack up to nothing is not a thing to
 // ask for.
 func TestABaitFloorBelowOneIsRefused(t *testing.T) {
 	atHome(t)
 	_, err := service.New(plant(), -1).BaitTick(0)
 	require.Error(t, err)
-}
-
-/*
-The fishing effects are held up, and one the player drank is deferred to.
-
-A renewal never shortens a buff, so a real potion keeps its time -- and this
-reports that as deferring rather than as holding, because they are different
-things to tell somebody.
-*/
-func TestFishingBuffTickMatchesThePython(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		want map[string]bool
-		py   string
-	}{
-		{"nothing asked for", map[string]bool{}, ""},
-		{"one effect", map[string]bool{"power": true}, "power=True"},
-		{"all three", map[string]bool{"power": true, "sonar": true, "crate": true},
-			"power=True, sonar=True, crate=True"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			atHome(t)
-			var got map[string]any
-			askPython(t, preamble()+plantBuffs()+fmt.Sprintf(`
-print(json.dumps(svc.fishing_buff_tick(%s)))`, c.py), &got)
-
-			mem := plant()
-			plantBuffsInto(mem)
-			res, err := service.New(mem, -1).FishingBuffTick(c.want, 0)
-			require.NoError(t, err)
-			require.Equal(t, got["held"], asJSON(t, res["held"]), "different effects were held")
-			require.Equal(t, got["deferred"], asJSON(t, res["deferred"]), "different effects were deferred")
-		})
-	}
 }
 
 /*

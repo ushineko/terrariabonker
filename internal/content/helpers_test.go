@@ -1,7 +1,6 @@
 package content_test
 
 import (
-	"encoding/json"
 	"sort"
 
 	"github.com/ushineko/terrariabonker/internal/content"
@@ -16,17 +15,6 @@ func sortedFields(fields map[string]int32) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// pyJSON is a Go value as a Python literal, via JSON, which the two agree on
-// except for the three words spelled differently.
-func pyJSON(v any) string {
-	b, _ := json.Marshal(v)
-	s := string(b)
-	for from, to := range map[string]string{"true": "True", "false": "False", "null": "None"} {
-		s = replaceWord(s, from, to)
-	}
-	return s
 }
 
 // replaceWord swaps whole words only, so a value containing one is left alone.

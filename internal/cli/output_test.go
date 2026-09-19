@@ -1,13 +1,9 @@
 package cli_test
 
 import (
-	"context"
 	"encoding/json"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -257,67 +253,6 @@ func (s statusReader) BuildKey() string {
 }
 
 var _ = game.ItemNames // the catalogs above read the bundled tables
-
-/*
-The catalogs are the same catalogs, entry for entry.
-
-The window reads these to build its controls and its recipe book, so a table
-that lost a field or renamed one is a panel with a blank column. Compared as
-values rather than as text: both write JSON objects and only one of them sorts
-the keys.
-*/
-func TestTheCatalogsMatchThePython(t *testing.T) {
-	for _, tc := range []struct {
-		argv   []string
-		python string
-	}{
-		{[]string{"names"}, `
-from terrariabonker import names as nm
-print(json.dumps({str(i): n for i, n in nm.all_names().items()}))`},
-		{[]string{"prefixes"}, `
-from terrariabonker import prefixes as px
-print(json.dumps([{"id": p, "name": px.name(p), "quality": px.quality(p)}
-                  for p in px.all_ids()]))`},
-		{[]string{"recipes"}, `
-from terrariabonker import recipes as rec
-print(json.dumps(rec.load()))`},
-		{[]string{"patch", "catalog", "--json"}, `
-from terrariabonker.cli import cmd_patch
-cmd_patch(type("A", (), {"action": "catalog"})())`},
-	} {
-		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
-			var want any
-			askPython(t, tc.python, &want)
-
-			var stdout, stderr strings.Builder
-			app := cli.NewApp(cli.Options{Elevate: func() error { return nil }})
-			require.Equalf(t, cli.ExitOK,
-				app.Execute(t.Context(), tc.argv, &stdout, &stderr),
-				"failed: %s", stderr.String())
-
-			var got any
-			require.NoError(t, json.Unmarshal([]byte(stdout.String()), &got))
-			require.Equal(t, want, got, "the two hand over different tables")
-		})
-	}
-}
-
-// askPython runs a script against the package this is replacing.
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", //nolint:gosec // a fixed script
-		"import json, os, sys\nsys.path.insert(0, os.getcwd())\n"+script)
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "HOME="+realHome)
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
 
 /*
 A status says which world is loaded.

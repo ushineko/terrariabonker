@@ -52,59 +52,6 @@ p._sites, p._enabled, p._inj, p._values, p._arena = {}, set(), {}, {}, None
 `, realHome, home)
 }
 
-// A record Go wrote is a record the Python reads, field for field.
-func TestThePythonReadsAStateGoWrote(t *testing.T) {
-	home := atHome(t)
-
-	written := patch.State{
-		PID:     4242,
-		Sites:   map[string][]uint32{"trydrop": {0x10000100, 0x10000200}},
-		Enabled: []string{"loot", "reach"},
-		Inj: map[string]patch.Installed{
-			"loot": {Sites: []patch.Site{{Inject: 0x10000100, Cave: 0x20000040}}, StubLen: 57},
-		},
-		Values: map[string]float64{"reach": 75},
-		Arena:  0x68000000,
-	}
-	require.NoError(t, written.Save())
-
-	var got map[string]any
-	askPython(t, pyState(home)+`
-p._load_state()
-print(json.dumps({"sites": p._sites, "enabled": sorted(p._enabled), "inj": p._inj,
-                  "values": p._values, "arena": p._arena}))`, &got)
-
-	require.Equal(t, asJSON(t, written.Sites), got["sites"], "the sites did not survive")
-	require.Equal(t, asJSON(t, written.Enabled), got["enabled"], "the enabled set did not survive")
-	require.Equal(t, asJSON(t, written.Inj), got["inj"], "the installed stubs did not survive")
-	require.Equal(t, asJSON(t, written.Values), got["values"], "the values did not survive")
-	require.Equal(t, asJSON(t, written.Arena), got["arena"], "the arena did not survive")
-}
-
-// And a record the Python wrote is one Go reads.
-func TestGoReadsAStateThePythonWrote(t *testing.T) {
-	home := atHome(t)
-
-	var ok bool
-	askPython(t, pyState(home)+`
-p._sites = {"trydrop": [268435712, 268435968]}
-p._enabled = {"loot", "reach"}
-p._inj = {"loot": {"sites": [{"inject": 268435712, "cave": 536870976}], "stub_len": 57}}
-p._values = {"reach": 75.0}
-p._arena = 1744830464
-p._save_state()
-print(json.dumps(True))`, &ok)
-	require.True(t, ok)
-
-	got := patch.LoadState(4242)
-	require.Equal(t, map[string][]uint32{"trydrop": {0x10000100, 0x10000200}}, got.Sites)
-	require.Equal(t, []string{"loot", "reach"}, got.Enabled)
-	require.Equal(t, 57, got.Inj["loot"].StubLen)
-	require.Equal(t, []patch.Site{{Inject: 0x10000100, Cave: 0x20000040}}, got.Inj["loot"].Sites)
-	require.InDelta(t, 75.0, got.Values["reach"], 0)
-	require.Equal(t, uint32(0x68000000), got.Arena)
-}
-
 /*
 A record naming another process is not used.
 

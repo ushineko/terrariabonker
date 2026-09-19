@@ -51,25 +51,6 @@ func catalogFixture(t *testing.T) (*execMem, *service.Service) {
 	return mem, service.New(mem, -1)
 }
 
-// pyCatalogFixture is the same, as Python source.
-func pyCatalogFixture(home string) string {
-	return preamble() + pyPlantTemplate() + plantWorld("Nakama's World") +
-		pyPlantNPCs() + pyCacheAt(home)
-}
-
-// Both build the same catalog, entry for entry.
-func TestTheCompendiumMatchesThePython(t *testing.T) {
-	home := atHome(t)
-	var want map[string]any
-	askPython(t, pyCatalogFixture(home)+`
-print(json.dumps(svc.compendium()))`, &want)
-
-	_, svc := catalogFixture(t)
-	got, err := svc.Compendium(false)
-	require.NoError(t, err)
-	require.Equal(t, want, asJSON(t, got), "the two built different catalogs")
-}
-
 /*
 The entries the game had a template for carry its stats, and the rest say so.
 

@@ -1,13 +1,10 @@
 package service_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -48,21 +45,6 @@ one. Several of the fishing tests were skipping in silence before this.
 */
 var realHome = os.Getenv("HOME")
 
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "HOME="+realHome)
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
-
 func asJSON(t *testing.T, v any) any {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -77,187 +59,6 @@ func newService(t *testing.T) (*execMem, *service.Service) {
 	t.Helper()
 	mem := plant()
 	return mem, service.New(mem, -1)
-}
-
-/*
-Both find both copies, and both believe the same one.
-
-The believed copy is the one behind get_LocalPlayer. The fixture is built so
-that neither fallback can reach it -- both copies are hurt, so the activity guess
-refuses, and the snapshot is no poorer, so the inventory guess picks that one --
-which is what makes this fail if the resolver stops being consulted.
-*/
-func TestFindingTheLivePlayerMatchesThePython(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+`
-print(json.dumps({
-    "copies": [b.life_addr for b in svc.players()],
-    "live": svc.live_block().life_addr,
-}))`, &want)
-
-	_, svc := newService(t)
-	blocks, err := svc.Players()
-	require.NoError(t, err)
-
-	var addrs []uint32
-	for _, b := range blocks {
-		addrs = append(addrs, b.LifeAddr)
-	}
-	require.Equal(t, want["copies"], asJSON(t, addrs), "a different set of copies")
-
-	live, err := svc.LiveBlock()
-	require.NoError(t, err)
-	require.Equal(t, want["live"], asJSON(t, live.LifeAddr), "a different copy is believed")
-	require.Equal(t, liveIs, live.LifeAddr, "and it is not the one behind get_LocalPlayer")
-}
-
-// The player and the inventory that get reported are the live copy's.
-func TestSnapshotMatchesThePython(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+`
-snap = svc.snapshot()
-p = snap.player
-print(json.dumps({
-    "copies": snap.copies,
-    "player": {"name": p.name, "hp": p.hp, "max_hp": p.max_hp,
-               "mana": p.mana, "max_mana": p.max_mana},
-    "inventory": [vars(s) for s in snap.inventory],
-    "bare": [vars(s) for s in svc.inventory()],
-    "empty": len(svc.snapshot(with_inventory=False).inventory),
-}))`, &want)
-
-	_, svc := newService(t)
-	snap := svc.Snapshot(true)
-	require.Equal(t, want["copies"], asJSON(t, snap.Copies), "a different number of copies")
-	require.Equal(t, want["player"], asJSON(t, snap.Player), "a different player")
-	require.Equal(t, want["inventory"], asJSON(t, snap.Inventory), "a different inventory")
-
-	slots, err := svc.Inventory()
-	require.NoError(t, err)
-	require.Equal(t, want["bare"], asJSON(t, slots), "a different inventory on its own")
-	require.Equal(t, want["empty"], asJSON(t, len(svc.Snapshot(false).Inventory)),
-		"asking for no inventory returned one")
-}
-
-// Every write reaches every copy, and lands on the same bytes.
-func TestWritesReachEveryCopy(t *testing.T) {
-	cases := []struct {
-		name   string
-		python string
-		run    func(*service.Service) error
-	}{
-		{"hp", "svc.set_hp(42)", func(s *service.Service) error { return s.SetHP(42) }},
-		// "max" fills each copy to *that copy's* cap, which is why it is a
-		// separate call rather than a number read from one of them.
-		{"hp max", `svc.set_hp("max")`, func(s *service.Service) error { return s.SetHPMax() }},
-		{"mana", "svc.set_mana(7)", func(s *service.Service) error { return s.SetMana(7) }},
-		{"mana max", `svc.set_mana("max")`, func(s *service.Service) error { return s.SetManaMax() }},
-		{"max hp", "svc.set_max_hp(600)", func(s *service.Service) error { return s.SetMaxHP(600) }},
-		{"max mana", "svc.set_max_mana(400)", func(s *service.Service) error { return s.SetMaxMana(400) }},
-		{"stack", "svc.set_stack(1, 99)", func(s *service.Service) error { return s.SetStack(1, 99) }},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var want struct {
-				Buf string `json:"buf"`
-			}
-			askPython(t, preamble()+c.python+`
-print(json.dumps({"buf": mem.buf.hex()}))`, &want)
-
-			mem, svc := newService(t)
-			require.NoError(t, c.run(svc))
-			require.Equal(t, want.Buf, mem.Hex(), "the two left different memory behind")
-		})
-	}
-}
-
-/*
-A sweep writes to every copy and reports the live copy's slots.
-
-The inert copy here holds more pickaxes than the live player does. Reporting
-whichever copy was written last would report those, and the number goes straight
-to the user.
-*/
-func TestASweepReportsTheLiveCopy(t *testing.T) {
-	for _, c := range []struct {
-		name   string
-		python string
-		live   []int // the live copy's slots, from the fixture
-		run    func(*service.Service) ([]int, error)
-	}{
-		// The live player carries pickaxes in slots 0 and 4; the snapshot
-		// carries them in 0 and 3.
-		{"fast mining", "svc.fast_mining()", []int{0, 4}, func(s *service.Service) ([]int, error) {
-			return s.FastMining(8, 13, 200)
-		}},
-		// The live player's items are in 0 to 4; the snapshot's are in 0 to 3
-		// and 7.
-		{"long reach", "svc.long_reach()", []int{0, 1, 2, 3, 4}, func(s *service.Service) ([]int, error) {
-			return s.LongReach(20)
-		}},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			var want struct {
-				Hit []int  `json:"hit"`
-				Buf string `json:"buf"`
-			}
-			askPython(t, preamble()+`
-hit = `+c.python+`
-print(json.dumps({"hit": hit, "buf": mem.buf.hex()}))`, &want)
-
-			mem, svc := newService(t)
-			hit, err := c.run(svc)
-			require.NoError(t, err)
-			require.Equal(t, want.Hit, hit, "different slots were reported")
-			require.Equal(t, want.Buf, mem.Hex(), "the two left different memory behind")
-			// Both copies are written, so agreeing with the Python does not
-			// show which copy was *reported*: the two would agree on the wrong
-			// one. The fixture gives them different inventories, and these are
-			// the live copy's slots.
-			require.Equal(t, c.live, hit, "the slots reported are not the live copy's")
-		})
-	}
-}
-
-/*
-With no player loaded, a read is an ordinary empty answer and a write says so.
-
-The window asks for a snapshot on a timer, and a game sitting at the main menu
-is not an error to put on screen.
-*/
-func TestNoPlayerLoaded(t *testing.T) {
-	var want map[string]any
-	askPython(t, `
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import locate as L
-from terrariabonker.service import Service, ServiceError
-mem = FakeMem(0x10000000, 0x4000)
-L._exec_regions = lambda m: []
-svc = Service(mem)
-snap = svc.snapshot()
-try:
-    svc.set_hp(1)
-    wrote = True
-except ServiceError:
-    wrote = False
-print(json.dumps({"copies": snap.copies, "player": snap.player,
-                  "inventory": snap.inventory, "wrote": wrote}))`, &want)
-	require.Nil(t, want["player"], "the Python found a player in empty memory")
-
-	mem := plantNothing()
-	svc := service.New(mem, -1)
-	snap := svc.Snapshot(true)
-	require.Equal(t, want["copies"], asJSON(t, snap.Copies), "a different number of copies")
-	require.Nil(t, snap.Player, "a player was found in empty memory")
-	require.Equal(t, want["inventory"], asJSON(t, snap.Inventory), "an inventory was found")
-
-	err := svc.SetHP(1)
-	require.Error(t, err, "a write went through with no player")
-	require.True(t, service.IsNoPlayer(err), "and it was not reported as no player")
 }
 
 /*

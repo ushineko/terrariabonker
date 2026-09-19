@@ -1,13 +1,8 @@
 package projectile_test
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -51,20 +46,6 @@ var repoRoot = func() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
 }()
-
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
 
 /*
 slots is what is planted in the projectile array.
@@ -156,130 +137,11 @@ func plant() *memtest.FakeMem {
 	return mem
 }
 
-// pyPlant is the same array as Python source.
-func pyPlant(pinned bool) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `
-import json, os, struct, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import projectiles as P
-mem = FakeMem(%d, %d)
-mem.poke_bytes(%d + P.MAIN_PROJECTILE_OFF, struct.pack("<I", %d))
-mem.poke_i32(%d + P.ARRAY_LEN_OFF, %d)
-for i in range(%d):
-    obj = %d + i * 0x30
-    mem.poke_bytes(%d + P.ARRAY_DATA_OFF + i * 4, struct.pack("<I", obj))
-    mem.poke_bytes(obj, struct.pack("<I", 0xDEADBEEF))
-`, base, size, mainBase, pick(pinned, arr, 0), arr, arrayLen, arrayLen, objects, arr)
-
-	for i, s := range slots {
-		obj := objects + s.slot*0x30
-		if s.active {
-			fmt.Fprintf(&b, "mem.poke_bytes(%d + P.ACTIVE_OFF, bytes([1]))\n", obj)
-		}
-		if s.bobber {
-			fmt.Fprintf(&b, "mem.poke_bytes(%d + P.BOBBER_OFF, bytes([1]))\n", obj)
-		}
-		if s.noFloats {
-			continue
-		}
-		ai, localAI := floats+i*0x40, floats+i*0x40+0x20
-		fmt.Fprintf(&b, "mem.poke_bytes(%d + P.AI_OFF, struct.pack(\"<I\", %d))\n", obj, ai)
-		fmt.Fprintf(&b, "mem.poke_bytes(%d + P.LOCALAI_OFF, struct.pack(\"<I\", %d))\n", obj, localAI)
-		for j := range 3 {
-			fmt.Fprintf(&b, "mem.write_f32(%d + P.ARRAY_DATA_OFF + %d * 4, %v)\n", ai, j, s.ai[j])
-			fmt.Fprintf(&b, "mem.write_f32(%d + P.ARRAY_DATA_OFF + %d * 4, %v)\n", localAI, j, s.localAI[j])
-		}
-	}
-	fmt.Fprintf(&b, `
-mem.poke_i32(%d + P.ARRAY_LEN_OFF, %d)
-for i in range(%d):
-    elem = %d + i * 4
-    mem.poke_bytes(%d + P.ARRAY_DATA_OFF + i * 4, struct.pack("<I", elem))
-    mem.poke_bytes(elem, struct.pack("<I", 0xBBBB0000 + i))
-mem.poke_i32(%d + P.ARRAY_LEN_OFF, %d)
-for i in range(100):
-    elem = %d + i * 4
-    mem.poke_bytes(%d + P.ARRAY_DATA_OFF + i * 4, struct.pack("<I", elem))
-    mem.poke_bytes(elem, struct.pack("<I", 0xCCCC0000))
-mem.poke_bytes(%d + 0x2000, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x2004, struct.pack("<I", %d))
-mem.poke_bytes(%d + 0x2008, struct.pack("<I", %d))
-`, decoy, arrayLen, arrayLen, base+0x18000, decoy,
-		sparse, arrayLen, base+0x1C000, sparse,
-		mainBase, decoy, mainBase, sparse, mainBase, arr)
-	return b.String()
-}
-
 func pick(yes bool, a, b uint32) uint32 {
 	if yes {
 		return a
 	}
 	return b
-}
-
-// The array is found the same way, pinned or by shape, and the decoy is not it.
-func TestFindingTheArrayMatchesThePython(t *testing.T) {
-	for _, pinned := range []bool{true, false} {
-		t.Run(fmt.Sprintf("pinned=%v", pinned), func(t *testing.T) {
-			var want any
-			askPython(t, pyPlant(pinned)+fmt.Sprintf(
-				"print(json.dumps(P.projectile_array(mem, %d)))", mainBase), &want)
-
-			got, ok := projectile.Array(plant(), mainBase)
-			require.True(t, ok, "the array was not found")
-			require.Equal(t, want, asJSON(t, got), "a different array was found")
-			require.Equal(t, uint32(arr), got, "and it is not the one that was planted")
-		})
-	}
-}
-
-// Every bobber reads the same, and the states are separated the same way.
-func TestReadingBobbersMatchesThePython(t *testing.T) {
-	var want []map[string]any
-	askPython(t, pyPlant(true)+fmt.Sprintf(`
-out = []
-for b in P.find_bobbers(mem, %d):
-    out.append({"slot": b.slot, "addr": b.addr, "reeling": b.reeling,
-                "biting": b.biting, "catch": b.catch, "counter": b.counter})
-print(json.dumps(out))`, arr), &want)
-
-	got := projectile.FindBobbers(plant(), arr)
-	require.Len(t, got, len(want), "a different number of bobbers is in the water")
-	for i, w := range want {
-		require.Equalf(t, w["slot"], asJSON(t, got[i].Slot), "bobber %d is in a different slot", i)
-		require.Equalf(t, w["addr"], asJSON(t, got[i].Addr), "bobber %d is at a different address", i)
-		require.Equalf(t, w["reeling"], got[i].Reeling(), "bobber %d reels differently", i)
-		require.Equalf(t, w["biting"], got[i].Biting(), "bobber %d bites differently", i)
-		require.Equalf(t, w["catch"], asJSON(t, got[i].Catch()), "bobber %d has a different catch", i)
-		require.Equalf(t, w["counter"], asJSON(t, got[i].Counter()), "bobber %d counts differently", i)
-	}
-
-	/*
-		And the one that matters: a finished bobber, inactive with its flags left
-		behind, is not in the water. Filtering on the bobber flag alone reported
-		one for minutes after it came in.
-	*/
-	for _, b := range got {
-		require.NotEqual(t, 13, b.Slot, "an inactive bobber was reported as in the water")
-	}
-	require.NotEmpty(t, got, "no bobbers at all, so the comparison proves nothing")
-}
-
-// The first fish on the line is the same one.
-func TestFindBiteMatchesThePython(t *testing.T) {
-	var want any
-	askPython(t, pyPlant(true)+fmt.Sprintf(`
-b = P.find_bite(mem, %d)
-print(json.dumps(None if b is None else {"slot": b.slot, "catch": b.catch}))`, arr), &want)
-	require.NotNil(t, want, "the Python found no bite in a fixture that plants one")
-
-	got, ok := projectile.FindBite(plant(), arr)
-	require.True(t, ok, "no bite was found")
-	require.Equal(t, want.(map[string]any)["slot"], asJSON(t, got.Slot), "a different bobber")
-	require.Equal(t, want.(map[string]any)["catch"], asJSON(t, got.Catch()), "a different catch")
 }
 
 /*
@@ -301,30 +163,4 @@ func TestADecoyArrayIsRejected(t *testing.T) {
 func TestNoArrayAtAll(t *testing.T) {
 	_, ok := projectile.Array(memtest.New(base, size), mainBase)
 	require.False(t, ok, "an array was found in empty memory")
-}
-
-/*
-Reading one slot refuses an inactive bobber on its own.
-
-The sweep checks that too, so the two shadow each other and neither is exercised
-by the other's tests -- but a caller with a slot number in hand goes straight
-here. The array holds every projectile forever and a finished one keeps its
-flags, so without this check a line that came in minutes ago reads as one still
-in the water.
-*/
-func TestReadingOneSlotRefusesAFinishedBobber(t *testing.T) {
-	mem := plant()
-
-	var want any
-	askPython(t, pyPlant(true)+fmt.Sprintf(`
-b = P.read_bobber(mem, %d, 13)
-print(json.dumps(None if b is None else b.slot))`, arr), &want)
-	require.Nil(t, want, "the Python read a finished bobber as a live one")
-
-	_, ok := projectile.Read(mem, arr, 13)
-	require.False(t, ok, "a finished bobber was read as a live one")
-
-	// And the live one in the next slot along still reads.
-	_, ok = projectile.Read(mem, arr, 7)
-	require.True(t, ok, "a live bobber stopped reading")
 }

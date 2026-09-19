@@ -1,13 +1,9 @@
 package content_test
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,20 +39,6 @@ var repoRoot = func() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
 }()
-
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
-	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
 
 func asJSON(t *testing.T, v any) any {
 	t.Helper()
@@ -157,50 +139,23 @@ func u32(v uint32) []byte {
 	return []byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)}
 }
 
-// pyPlant is the same objects as Python source, written with the Python's own
-// offsets.
-func pyPlant(objects []item) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `
-import json, os, struct, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import content, inventory, npcs, recipes
-OFF = {}
-for mod in (inventory, npcs, recipes):
-    for k, v in vars(mod).items():
-        if k.isupper() and isinstance(v, int):
-            OFF.setdefault(k, v)
-mem = FakeMem(%d, %d)
-`, base, size)
-	for _, o := range objects {
-		fmt.Fprintf(&b, "mem.poke_bytes(%d, struct.pack(\"<I\", %d))\n", o.at, vtable)
-		for _, name := range sortedFields(o.fields) {
-			fmt.Fprintf(&b, "mem.poke_i32(%d + OFF[%q], %d)\n", o.at, name, o.fields[name])
-		}
-	}
-	return b.String()
-}
+/*
+The templates picked out of the planted heap are the ones the image says they
+are.
 
-// Every item template is picked out the same way, and the same copy wins.
-func TestFindingItemTemplatesMatchesThePython(t *testing.T) {
-	var want map[string]any
-	askPython(t, pyPlant(itemImage)+fmt.Sprintf(`
-got = content.find_item_templates(mem, %d, exclude=(%d,))
-print(json.dumps({str(k): v for k, v in got.items()}))`, vtable, excluded), &want)
-
+The image carries the cases the rule exists for: two copies of one type where
+only one is pristine, a copy the caller excludes because it is the player's own,
+and a run laid out so a wrong clustering would take the wrong one.
+*/
+func TestFindingItemTemplates(t *testing.T) {
 	got := content.FindItemTemplates(plant(itemImage), vtable, map[uint32]bool{excluded: true})
-	require.Len(t, got, len(want), "a different number of templates was found")
 
-	for key, w := range want {
-		var typ int32
-		_, err := fmt.Sscanf(key, "%d", &typ)
-		require.NoError(t, err)
-		stats, known := got[typ]
-		require.Truef(t, known, "item %s is a template there and not here", key)
-		require.Equalf(t, w, asJSON(t, stats), "item %s has different defaults", key)
-	}
+	require.Len(t, got, 5, "a different number of templates was found")
+	require.Contains(t, got, int32(1234))
+	require.Equal(t, int32(10), got[1234].Damage, "the pristine copy did not win")
+	require.Contains(t, got, int32(9))
+	require.Equal(t, int32(0), got[9].Damage,
+		"the player's own edited copy was taken as the template")
 }
 
 /*
@@ -228,100 +183,87 @@ func TestAnExcludedItemDoesNotBecomeATemplate(t *testing.T) {
 	require.Contains(t, all, int32(9))
 }
 
-// The NPC templates cluster the same way, and the duplicate drops without taking
-// its neighbour with it.
-func TestFindingNPCTemplatesMatchesThePython(t *testing.T) {
-	var want map[string]any
-	askPython(t, pyPlant(npcImage)+fmt.Sprintf(`
-got = content.find_npc_templates(mem, %d)
-print(json.dumps({str(k): v for k, v in got.items()}))`, vtable), &want)
+/*
+The NPC templates cluster the same way, and a duplicate drops without taking its
+neighbour with it.
 
+A net id that appears twice in one run is not a template -- the collection holds
+one object per id -- and dropping the whole run over it would lose every NPC
+beside it.
+*/
+func TestFindingNPCTemplates(t *testing.T) {
 	got := content.FindNPCTemplates(plant(npcImage), vtable, nil)
-	require.Len(t, got, len(want), "a different number of templates was found")
-	for key, w := range want {
-		var id int32
-		_, err := fmt.Sscanf(key, "%d", &id)
-		require.NoError(t, err)
-		stats, known := got[id]
-		require.Truef(t, known, "NPC %s is a template there and not here", key)
-		require.Equalf(t, w, asJSON(t, stats), "NPC %s has different defaults", key)
-	}
 
 	require.NotContains(t, got, int32(5), "a net id that appears twice in a run was kept")
 	require.Contains(t, got, int32(6), "a unique neighbour was thrown away with the duplicate")
 	require.Equal(t, int32(11), got[6].Life,
 		"a live NPC's difficulty-scaled life was taken for its template")
+
+	require.Contains(t, got, int32(-2), "a variant's negative net id was not kept")
+	require.Equal(t, int32(1), got[-2].Type, "the variant does not name its own type")
+	require.Equal(t, int32(25), got[-2].Life)
 }
 
-// Every item is filed under the same one-word kind.
-func TestItemKindMatchesThePython(t *testing.T) {
-	cases := []map[string]any{
-		{"accessory": true, "damage": 50},                 // an accessory that hits
-		{"head_slot": 98},                                 // armour
-		{"head_slot": -1, "body_slot": -1, "leg_slot": 0}, // vanity is still worn
-		{"pick": 35, "damage": 4},                         // a pickaxe that hits
-		{"damage": 12, "melee": true},
-		{"damage": 20, "magic": true},
-		{"damage": 15, "ranged": true},
-		{"damage": 30, "summon": true, "buff_type": 40}, // a staff, not a potion
-		{"heal_life": 100},
-		{"buff_type": 11},   // a buff potion heals nothing
-		{"defense": 4},      // armour with no slot
-		{"create_tile": 0},  // a block
-		{"create_tile": -1}, // and a material
-		{},
-	}
-	var want []string
-	askPython(t, fmt.Sprintf(`
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import content
-BASE = {"accessory": False, "melee": False, "ranged": False, "magic": False,
-        "summon": False, "head_slot": -1, "body_slot": -1, "leg_slot": -1,
-        "create_tile": -1, "damage": 0, "defense": 0, "pick": 0,
-        "heal_life": 0, "heal_mana": 0, "buff_type": 0}
-print(json.dumps([content.item_kind({**BASE, **c}) for c in %s]))`, pyJSON(cases)), &want)
+/*
+Every item is filed under one word, most specific first.
 
-	for i, c := range cases {
-		require.Equalf(t, want[i], content.ItemKind(statsFrom(c)),
-			"case %d is filed differently", i)
-	}
-}
-
-// And every NPC.
-func TestNPCKindMatchesThePython(t *testing.T) {
-	cases := []map[string]any{
-		{"boss": true, "damage": 50},
-		{"town": true, "damage": 10},
-		{"boss": true, "town": true}, // boss wins
-		{"damage": 0},                // a critter is one that cannot hurt you
-		{"damage": 15},
-	}
-	var want []string
-	askPython(t, fmt.Sprintf(`
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import content
-BASE = {"boss": False, "town": False, "damage": 0}
-print(json.dumps([content.npc_kind({**BASE, **c}) for c in %s]))`, pyJSON(cases)), &want)
-
-	for i, c := range cases {
-		require.Equalf(t, want[i], content.NPCKind(npcStatsFrom(c)),
-			"case %d is filed differently", i)
+An accessory that also deals damage is still an accessory, and a pickaxe that
+deals damage is still a tool -- the order of the rules is the rule.
+*/
+func TestItemKind(t *testing.T) {
+	for _, c := range []struct {
+		fields map[string]any
+		want   string
+	}{
+		{map[string]any{"accessory": true, "damage": 50}, "Accessory"},
+		{map[string]any{"head_slot": 98}, "Armor"},
+		// Vanity is still worn, so a slot with no defense is still armour.
+		{map[string]any{"head_slot": -1, "body_slot": -1, "leg_slot": 0}, "Armor"},
+		{map[string]any{"pick": 35, "damage": 4}, "Tool"},
+		{map[string]any{"damage": 12, "melee": true}, "Weapon"},
+		{map[string]any{"damage": 20, "magic": true}, "Magic"},
+		{map[string]any{"damage": 15, "ranged": true}, "Ranged"},
+		// A staff grants a buff and is not a potion.
+		{map[string]any{"damage": 30, "summon": true, "buff_type": 40}, "Summon"},
+		{map[string]any{"heal_life": 100}, "Potion"},
+		// A buff potion heals nothing and is still a potion.
+		{map[string]any{"buff_type": 11}, "Potion"},
+		{map[string]any{"defense": 4}, "Armor"},
+		{map[string]any{"create_tile": 0}, "Block"},
+		{map[string]any{"create_tile": -1}, "Material"},
+		{map[string]any{}, "Material"},
+	} {
+		require.Equalf(t, c.want, content.ItemKind(statsFrom(c.fields)),
+			"%v is filed differently", c.fields)
 	}
 }
 
-// A wiki link is built the same way, including for a name with awkward spacing.
-func TestWikiURLMatchesThePython(t *testing.T) {
-	names := []string{"Copper Pickaxe", "Meowmere", "Shield of Cthulhu", "  spaced  out  "}
-	var want []string
-	askPython(t, fmt.Sprintf(`
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker import content
-print(json.dumps([content.wiki_url(n) for n in %s]))`, pyJSON(names)), &want)
+// And every NPC, with the same most-specific-first rule.
+func TestNPCKind(t *testing.T) {
+	for _, c := range []struct {
+		fields map[string]any
+		want   string
+	}{
+		{map[string]any{"boss": true, "damage": 50}, "Boss"},
+		{map[string]any{"town": true, "damage": 10}, "Town NPC"},
+		{map[string]any{"boss": true, "town": true}, "Boss"},
+		// A critter is one that cannot hurt you.
+		{map[string]any{"damage": 0}, "Critter"},
+		{map[string]any{"damage": 15}, "Monster"},
+	} {
+		require.Equalf(t, c.want, content.NPCKind(npcStatsFrom(c.fields)),
+			"%v is filed differently", c.fields)
+	}
+}
 
-	for i, n := range names {
-		require.Equalf(t, want[i], content.WikiURL(n), "%q links elsewhere", n)
+// A wiki link, including for a name with awkward spacing.
+func TestWikiURL(t *testing.T) {
+	for name, want := range map[string]string{
+		"Copper Pickaxe":    "https://terraria.wiki.gg/wiki/Copper_Pickaxe",
+		"Meowmere":          "https://terraria.wiki.gg/wiki/Meowmere",
+		"Shield of Cthulhu": "https://terraria.wiki.gg/wiki/Shield_of_Cthulhu",
+		"  spaced  out  ":   "https://terraria.wiki.gg/wiki/spaced_out",
+	} {
+		require.Equalf(t, want, content.WikiURL(name), "%q links elsewhere", name)
 	}
 }

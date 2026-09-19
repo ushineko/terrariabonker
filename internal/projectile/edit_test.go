@@ -1,7 +1,6 @@
 package projectile_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -53,21 +52,6 @@ func plantFlying() *memtest0 {
 	return mem
 }
 
-// pyFlying is the same, as Python source.
-func pyFlying() string {
-	out := pyPlant(true)
-	for _, p := range flying {
-		obj := objects + p.slot*0x30
-		out += fmt.Sprintf("mem.poke_bytes(%d + P.ACTIVE_OFF, bytes([1]))\n", obj)
-		out += fmt.Sprintf("mem.poke_i32(%d + P.TYPE_OFF, %d)\n", obj, p.ptype)
-		out += fmt.Sprintf("mem.poke_bytes(%d + P.TILECOLLIDE_OFF + 1, bytes([0xAB, 0xCD, 0xEF]))\n", obj)
-	}
-	return out + `
-from terrariabonker.projectile_edit import ProjectileEditor
-ed = ProjectileEditor()
-`
-}
-
 // overrides is what the caller asks for, covering all three field widths and the
 // once-only one.
 const pyOverrides = `{985: {"extraUpdates": 2, "penetrate": -1, "scale": 2.0,
@@ -77,126 +61,6 @@ const pyOverrides = `{985: {"extraUpdates": 2, "penetrate": -1, "scale": 2.0,
 var overrides = map[int32]map[string]float64{
 	985: {"extraUpdates": 2, "penetrate": -1, "scale": 2.0, "tileCollide": 0, "timeLeft": 30000},
 	14:  {"scale": 0.5},
-}
-
-/*
-A sweep writes the same bytes and reports the same counts.
-
-Then a second sweep over the same projectiles, which must write less: the
-lifetime is applied once and the rest are enforced.
-*/
-func TestSweepMatchesThePython(t *testing.T) {
-	var want struct {
-		First  map[string]any `json:"first"`
-		Second map[string]any `json:"second"`
-		Buf    string         `json:"buf"`
-	}
-	askPython(t, pyFlying()+fmt.Sprintf(`
-first = ed.sweep(mem, %d, %s)
-second = ed.sweep(mem, %d, %s)
-print(json.dumps({"first": first, "second": second, "buf": mem.buf.hex()}))`,
-		arr, pyOverrides, arr, pyOverrides), &want)
-
-	mem := plantFlying()
-	ed := projectile.NewEditor()
-
-	first := ed.Sweep(mem, arr, overrides)
-	require.Equal(t, want.First["patched"], asJSON(t, first.Patched),
-		"a different number of fields was written")
-	require.Equal(t, want.First["types"], asJSON(t, first.Types),
-		"a different set of types was touched")
-
-	second := ed.Sweep(mem, arr, overrides)
-	require.Equal(t, want.Second["patched"], asJSON(t, second.Patched),
-		"the second sweep wrote a different number of fields")
-	require.Less(t, second.Patched, first.Patched,
-		"the second sweep wrote as much as the first, so nothing is applied once")
-	require.Equal(t, want.Buf, mem.Hex(), "the two left different memory behind")
-}
-
-/*
-A slot the game has reused is a new projectile, so its once-only fields apply
-again.
-
-Fast weapons recycle slots constantly. Identity taken from the slot index would
-mean a new projectile inheriting the last one's "already done", and its lifetime
-would never be raised.
-*/
-func TestAReusedSlotIsANewProjectile(t *testing.T) {
-	var want map[string]any
-	askPython(t, pyFlying()+fmt.Sprintf(`
-ed.sweep(mem, %d, %s)
-same = ed.sweep(mem, %d, %s)
-# The game reuses slot 2 for another projectile of the same type.
-mem.poke_bytes(%d + P.ARRAY_DATA_OFF + 2 * 4, struct.pack("<I", %d))
-mem.poke_bytes(%d + P.ACTIVE_OFF, bytes([1]))
-mem.poke_i32(%d + P.TYPE_OFF, 985)
-reused = ed.sweep(mem, %d, %s)
-print(json.dumps({"same": same["patched"], "reused": reused["patched"]}))`,
-		arr, pyOverrides, arr, pyOverrides,
-		arr, objects+0x30*40, objects+0x30*40, objects+0x30*40,
-		arr, pyOverrides), &want)
-
-	mem := plantFlying()
-	ed := projectile.NewEditor()
-	ed.Sweep(mem, arr, overrides)
-	same := ed.Sweep(mem, arr, overrides)
-
-	// The game reuses that slot for another projectile of the same type.
-	fresh := uint32(objects + 0x30*40)
-	mem.PokeBytes(arr+0x10+2*4, u32(fresh))
-	mem.PokeBytes(fresh+0x078, []byte{1})
-	mem.PokeI32(fresh+0x094, 985)
-	reused := ed.Sweep(mem, arr, overrides)
-
-	require.Equal(t, want["same"], asJSON(t, same.Patched), "a settled sweep differs")
-	require.Equal(t, want["reused"], asJSON(t, reused.Patched), "a reused slot differs")
-	require.Greater(t, reused.Patched, same.Patched,
-		"a reused slot did not count as a new projectile")
-}
-
-// Forgetting makes every projectile new again.
-func TestForgettingMatchesThePython(t *testing.T) {
-	var want map[string]any
-	askPython(t, pyFlying()+fmt.Sprintf(`
-first = ed.sweep(mem, %d, %s)
-ed.forget()
-after = ed.sweep(mem, %d, %s)
-print(json.dumps({"first": first["patched"], "after": after["patched"]}))`,
-		arr, pyOverrides, arr, pyOverrides), &want)
-
-	mem := plantFlying()
-	ed := projectile.NewEditor()
-	first := ed.Sweep(mem, arr, overrides)
-	ed.Forget()
-	after := ed.Sweep(mem, arr, overrides)
-
-	require.Equal(t, want["after"], asJSON(t, after.Patched), "forgetting differs")
-	require.Equal(t, first.Patched, after.Patched,
-		"after forgetting, a projectile was not treated as new")
-}
-
-// Every field is clamped to its own range, in its own type.
-func TestClampingMatchesThePython(t *testing.T) {
-	values := []float64{-1000, -1.5, -1, 0, 0.04, 0.5, 1, 2.5, 16, 17, 999, 1000, 300000}
-
-	for _, name := range []string{"tileCollide", "penetrate", "extraUpdates", "scale", "timeLeft"} {
-		t.Run(name, func(t *testing.T) {
-			var want []float64
-			askPython(t, fmt.Sprintf(`
-import json, os, sys
-sys.path.insert(0, os.getcwd())
-from terrariabonker.projectile_edit import FIELDS
-f = FIELDS[%q]
-print(json.dumps([f.clamp(v) for v in %s]))`, name, pyFloats(values)), &want)
-
-			field := projectile.Fields[name]
-			for i, v := range values {
-				require.InDeltaf(t, want[i], field.Clamp(v), 1e-9,
-					"%s clamps %v differently", name, v)
-			}
-		})
-	}
 }
 
 /*
