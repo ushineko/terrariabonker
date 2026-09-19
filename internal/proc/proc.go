@@ -42,6 +42,9 @@ type Region struct {
 	// Executable says the CPU may run what is here. An arena this program had
 	// the game allocate for it is the rare mapping that is both.
 	Executable bool
+	// Readable says the mapping can be read at all. A few cannot be, and asking
+	// one of those what kind of image it holds reads nothing.
+	Readable bool
 }
 
 // Size is how many bytes the region covers.
@@ -109,6 +112,7 @@ func parseRegion(line, want string, keepDevices bool) (Region, bool) {
 	}
 	writable := strings.Contains(parts[1], "w")
 	executable := strings.Contains(parts[1], "x")
+	readable := strings.HasPrefix(parts[1], "r")
 	if !keepDevices && len(parts) > 5 && strings.HasPrefix(parts[5], "/dev/") {
 		return Region{}, false
 	}
@@ -137,7 +141,7 @@ func parseRegion(line, want string, keepDevices bool) (Region, bool) {
 		return Region{}, false
 	}
 	return Region{Start: uint32(start), End: uint32(end),
-		Writable: writable, Executable: executable}, true
+		Writable: writable, Executable: executable, Readable: readable}, true
 }
 
 // Mem is read and write access to one process, by pid.

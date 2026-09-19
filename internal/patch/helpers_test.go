@@ -161,3 +161,30 @@ var localPlayerTail = []byte{
 	0x39, 0x48, 0x0C, 0x0F, 0x86, 0x07, 0x00, 0x00, 0x00,
 	0x8D, 0x44, 0x88, 0x10, 0x8B, 0x00, 0xC3,
 }
+
+/*
+sameMemory compares two whole memory images and, when they differ, says where.
+
+Printing the difference between two images this size is useless -- hundreds of
+kilobytes of hex, which the test runner will not even display. The address of the
+first byte that differs and a few bytes either side is what a person actually
+needs: it names the site, the slot or the field that went wrong.
+*/
+func sameMemory(t *testing.T, want, got, msg string) {
+	t.Helper()
+	if want == got {
+		return
+	}
+	require.Equalf(t, len(want), len(got), "%s: the images are different sizes", msg)
+
+	// Two hex characters per byte, so the byte is the character index halved.
+	at := 0
+	for at < len(want) && want[at] == got[at] {
+		at++
+	}
+	addr := 0x10000000 + at/2
+	lo := max(0, at/2-8)
+	hi := min(len(want)/2, at/2+16)
+	require.Failf(t, msg, "first difference at %#x\n  want % s\n  got  % s",
+		addr, want[lo*2:hi*2], got[lo*2:hi*2])
+}

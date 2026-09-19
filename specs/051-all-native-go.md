@@ -357,7 +357,45 @@ build the differential habit this port depends on.
    against a running process. That comparison is read-only and is the next thing to do
    when it is up.
 
-   Still to come: enable and disable -- everything that actually writes to the game.
+   **Enable and disable are done**, which finishes the patcher. All fifteen patches are
+   applied and removed identically: a whole game is planted, both implementations toggle
+   the same cheat over their own copy of it, and the *entire buffer* is compared -- which
+   catches a jump written to the wrong address as surely as a wrong instruction, and
+   catches a stub put in the wrong slot at all. Then it is turned off, and the code has to
+   be back exactly as it was.
+
+   The fixture is where the work was. Four separate blind spots turned up, each found by
+   breaking the code and watching nothing fail:
+
+   * The planted game filled every anchor's wildcards with a filler byte -- but an anchor
+     *deliberately* wildcards the bytes its own cheat overwrites, so that it still resolves
+     once applied. Filling them alone leaves a game whose patch sites hold nothing
+     recognisable, and the guard that refuses to write over unexpected bytes correctly
+     refused all fifteen. The original instructions have to be planted on top.
+   * One anchor was planted a little past the end of the executable mapping, so it was
+     never found -- which is right, and looks exactly like a method the game has not
+     compiled yet.
+   * The arena was full of filler rather than zeroed. A real one arrives zeroed, and the
+     guard that refuses to overwrite a live stub accepts a slot only when it is zeroed or
+     scrubbed.
+   * There was one player copy and one match per anchor, so "write to every copy" -- the
+     rule this whole layer is built on -- was never exercised. The fixture now carries a
+     second player and a twin for each *way* a patch writes.
+
+   Sixteen mutations checked against the write path, including both jump distances, the
+   two write guards, reverting an edit, and every "every copy" loop.
+
+   **Checked against a clean running game, read-only**: all seventeen anchors resolved to
+   the same addresses in both, all fifteen statuses agreed, all four live-built stubs were
+   byte-identical, and `kernel32!VirtualAlloc` resolved to the same address. Go took 7.1 s
+   to the Python's 18.4 s.
+
+   That run also explained the one anchor that matched nothing in the earlier session:
+   `grabitems` keeps a literal patch site, by documented exception, so it stops resolving
+   once `pickup` is applied -- which it was. On a clean game it resolves.
+
+   **Not yet done against a live game**: applying a patch. That is the maintainer's call to
+   make and to verify.
 8. **`xnb` and `sprites`.** Decoding the game's containers and building the PNG cache.
    Pillow leaves with them; Go's `image/png` writes the cache. Differential test: decode
    the same `Item_<id>.xnb` in both and compare the PNG bytes, or the pixels.
