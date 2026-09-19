@@ -3,6 +3,7 @@ package patch
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -36,6 +37,16 @@ type Patcher struct {
 	state State
 	arena uint32
 }
+
+/*
+ErrNotAPatch is what a name no table declares comes back as.
+
+Distinguished from every other failure because the two mean opposite things to a
+caller putting a saved configuration back: a patch that will not apply right now
+is worth retrying, while a name this version of the program has never heard of
+is not going to start existing.
+*/
+var ErrNotAPatch = errors.New("not a patch")
 
 // NewPatcher is a patcher over a running game.
 func NewPatcher(mem BuilderMem, pid int) *Patcher {
@@ -115,7 +126,7 @@ func (p *Patcher) Enable(name string, value *float64) error {
 		}
 		cheat, ok := Cheats[name]
 		if !ok {
-			return fmt.Errorf("%q is not a patch", name)
+			return fmt.Errorf("%q is %w", name, ErrNotAPatch)
 		}
 		res := p.Scanner.Resolve(cheat.Anchor, "")
 		if !res.Available {
@@ -162,7 +173,7 @@ func (p *Patcher) Disable(name string) error {
 		}
 		cheat, ok := Cheats[name]
 		if !ok {
-			return fmt.Errorf("%q is not a patch", name)
+			return fmt.Errorf("%q is %w", name, ErrNotAPatch)
 		}
 		res := p.Scanner.Resolve(cheat.Anchor, "")
 		if !res.Available {
@@ -495,8 +506,28 @@ fresh one. It needs the game to be *running*: the bootstrap hangs on a per-frame
 path, and Terraria pauses in single-player whenever its window loses focus, so a
 paused game runs no frames and nothing happens.
 */
-func (p *Patcher) Arena() (uint32, error) {
-	if p.arena != 0 && ArenaOK(p.Mem, p.arena) {
+func (p *Patcher) Arena() (uint32, error) { return p.ArenaWithin(20 * time.Second) }
+
+/*
+ArenaReady reports whether the arena is already there, without allocating one.
+
+Asked by the caller that allocates opportunistically: allocating needs the game
+to be running frames, so it is worth knowing there is nothing to do before
+looking at whether it is.
+*/
+func (p *Patcher) ArenaReady() bool {
+	return p.arena != 0 && ArenaOK(p.Mem, p.arena)
+}
+
+/*
+ArenaWithin is Arena with a bound on how long the springboard may wait.
+
+The default is generous because a person who just asked for a cheat will wait.
+The opportunistic caller will not: it runs on a poll, and a game that is paused
+now will be polled again in a moment.
+*/
+func (p *Patcher) ArenaWithin(wait time.Duration) (uint32, error) {
+	if p.ArenaReady() {
 		return p.arena, nil
 	}
 	if found, ok := FindArena(p.Mem); ok {
@@ -508,7 +539,7 @@ func (p *Patcher) Arena() (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := p.bootstrapArena(base, 20*time.Second); err != nil {
+	if err := p.bootstrapArena(base, wait); err != nil {
 		return 0, err
 	}
 	region, ok := Mapped(p.Mem, base)

@@ -615,6 +615,13 @@ written over its injection point, which is what an applied cheat looks like.
 */
 func enabledPatcher(t *testing.T, mem *execMem) *patch.Patcher {
 	t.Helper()
+	plantExtractorInto(mem)
+	return patchFor(t, mem)
+}
+
+// plantExtractorInto is the memory half of that, for a caller that has already
+// chosen where the records go.
+func plantExtractorInto(mem *execMem) {
 	inj := patch.Injections["ore_extract"]
 	anchor := patch.Anchors[inj.Anchor].Pattern
 
@@ -627,7 +634,6 @@ func enabledPatcher(t *testing.T, mem *execMem) *patch.Patcher {
 	}
 	mem.PokeBytes(anchorAt, body)
 	mem.PokeBytes(uint32(int64(anchorAt)+int64(inj.InjectOff)), []byte{0xE9, 0, 0, 0, 0})
-	return patchFor(t, mem)
 }
 
 /*
