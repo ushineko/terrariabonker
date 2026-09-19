@@ -1,0 +1,1037 @@
+=================== Terraria.Item::TryGetPrefixStatMultipliersForItem ===================
+IL_0000: ldarg.2
+IL_0001: ldc.r4 1
+IL_0006: stind.r4
+IL_0007: ldarg.3
+IL_0008: ldc.r4 1
+IL_000D: stind.r4
+IL_000E: ldarg.s 4
+IL_0010: ldc.r4 1
+IL_0015: stind.r4
+IL_0016: ldarg.s 5
+IL_0018: ldc.r4 1
+IL_001D: stind.r4
+IL_001E: ldarg.s 6
+IL_0020: ldc.r4 1
+IL_0025: stind.r4
+IL_0026: ldarg.s 7
+IL_0028: ldc.r4 1
+IL_002D: stind.r4
+IL_002E: ldarg.s 8
+IL_0030: ldc.i4.0
+IL_0031: stind.i4
+IL_0032: ldarg.s 9
+IL_0034: ldc.i4.0
+IL_0035: stind.i4
+IL_0036: ldarg.s 10
+IL_0038: ldc.i4.0
+IL_0039: stind.i4
+IL_003A: ldarg.1
+IL_003B: ldc.i4.1
+IL_003C: bne.un.s IL_004B
+IL_003E: ldarg.s 5
+IL_0040: ldc.r4 1.12
+IL_0045: stind.r4
+IL_0046: br IL_07A5
+IL_004B: ldarg.1
+IL_004C: ldc.i4.2
+IL_004D: bne.un.s IL_005C
+IL_004F: ldarg.s 5
+IL_0051: ldc.r4 1.18
+IL_0056: stind.r4
+IL_0057: br IL_07A5
+IL_005C: ldarg.1
+IL_005D: ldc.i4.3
+IL_005E: bne.un.s IL_0078
+IL_0060: ldarg.2
+IL_0061: ldc.r4 1.05
+IL_0066: stind.r4
+IL_0067: ldarg.s 8
+IL_0069: ldc.i4.2
+IL_006A: stind.i4
+IL_006B: ldarg.s 5
+IL_006D: ldc.r4 1.05
+IL_0072: stind.r4
+IL_0073: br IL_07A5
+IL_0078: ldarg.1
+IL_0079: ldc.i4.4
+IL_007A: bne.un.s IL_0097
+IL_007C: ldarg.2
+IL_007D: ldc.r4 1.1
+IL_0082: stind.r4
+IL_0083: ldarg.s 5
+IL_0085: ldc.r4 1.1
+IL_008A: stind.r4
+IL_008B: ldarg.3
+IL_008C: ldc.r4 1.1
+IL_0091: stind.r4
+IL_0092: br IL_07A5
+IL_0097: ldarg.1
+IL_0098: ldc.i4.5
+IL_0099: bne.un.s IL_00A7
+IL_009B: ldarg.2
+IL_009C: ldc.r4 1.15
+IL_00A1: stind.r4
+IL_00A2: br IL_07A5
+IL_00A7: ldarg.1
+IL_00A8: ldc.i4.6
+IL_00A9: bne.un.s IL_00B7
+IL_00AB: ldarg.2
+IL_00AC: ldc.r4 1.1
+IL_00B1: stind.r4
+IL_00B2: br IL_07A5
+IL_00B7: ldarg.1
+IL_00B8: ldc.i4.s 81
+IL_00BA: bne.un.s IL_00E3
+IL_00BC: ldarg.3
+IL_00BD: ldc.r4 1.15
+IL_00C2: stind.r4
+IL_00C3: ldarg.2
+IL_00C4: ldc.r4 1.15
+IL_00C9: stind.r4
+IL_00CA: ldarg.s 8
+IL_00CC: ldc.i4.5
+IL_00CD: stind.i4
+IL_00CE: ldarg.s 4
+IL_00D0: ldc.r4 0.9
+IL_00D5: stind.r4
+IL_00D6: ldarg.s 5
+IL_00D8: ldc.r4 1.1
+IL_00DD: stind.r4
+IL_00DE: br IL_07A5
+IL_00E3: ldarg.1
+IL_00E4: ldc.i4.7
+IL_00E5: bne.un.s IL_00F4
+IL_00E7: ldarg.s 5
+IL_00E9: ldc.r4 0.82
+IL_00EE: stind.r4
+IL_00EF: br IL_07A5
+IL_00F4: ldarg.1
+IL_00F5: ldc.i4.8
+IL_00F6: bne.un.s IL_0113
+IL_00F8: ldarg.3
+IL_00F9: ldc.r4 0.85
+IL_00FE: stind.r4
+IL_00FF: ldarg.2
+IL_0100: ldc.r4 0.85
+IL_0105: stind.r4
+IL_0106: ldarg.s 5
+IL_0108: ldc.r4 0.87
+IL_010D: stind.r4
+IL_010E: br IL_07A5
+IL_0113: ldarg.1
+IL_0114: ldc.i4.s 9
+IL_0116: bne.un.s IL_0125
+IL_0118: ldarg.s 5
+IL_011A: ldc.r4 0.9
+IL_011F: stind.r4
+IL_0120: br IL_07A5
+IL_0125: ldarg.1
+IL_0126: ldc.i4.s 10
+IL_0128: bne.un.s IL_0136
+IL_012A: ldarg.2
+IL_012B: ldc.r4 0.85
+IL_0130: stind.r4
+IL_0131: br IL_07A5
+IL_0136: ldarg.1
+IL_0137: ldc.i4.s 11
+IL_0139: bne.un.s IL_0157
+IL_013B: ldarg.s 4
+IL_013D: ldc.r4 1.1
+IL_0142: stind.r4
+IL_0143: ldarg.3
+IL_0144: ldc.r4 0.9
+IL_0149: stind.r4
+IL_014A: ldarg.s 5
+IL_014C: ldc.r4 0.9
+IL_0151: stind.r4
+IL_0152: br IL_07A5
+IL_0157: ldarg.1
+IL_0158: ldc.i4.s 12
+IL_015A: bne.un.s IL_017F
+IL_015C: ldarg.3
+IL_015D: ldc.r4 1.1
+IL_0162: stind.r4
+IL_0163: ldarg.2
+IL_0164: ldc.r4 1.05
+IL_0169: stind.r4
+IL_016A: ldarg.s 5
+IL_016C: ldc.r4 1.1
+IL_0171: stind.r4
+IL_0172: ldarg.s 4
+IL_0174: ldc.r4 1.15
+IL_0179: stind.r4
+IL_017A: br IL_07A5
+IL_017F: ldarg.1
+IL_0180: ldc.i4.s 13
+IL_0182: bne.un.s IL_019F
+IL_0184: ldarg.3
+IL_0185: ldc.r4 0.8
+IL_018A: stind.r4
+IL_018B: ldarg.2
+IL_018C: ldc.r4 0.9
+IL_0191: stind.r4
+IL_0192: ldarg.s 5
+IL_0194: ldc.r4 1.1
+IL_0199: stind.r4
+IL_019A: br IL_07A5
+IL_019F: ldarg.1
+IL_01A0: ldc.i4.s 14
+IL_01A2: bne.un.s IL_01B8
+IL_01A4: ldarg.3
+IL_01A5: ldc.r4 1.15
+IL_01AA: stind.r4
+IL_01AB: ldarg.s 4
+IL_01AD: ldc.r4 1.1
+IL_01B2: stind.r4
+IL_01B3: br IL_07A5
+IL_01B8: ldarg.1
+IL_01B9: ldc.i4.s 15
+IL_01BB: bne.un.s IL_01D1
+IL_01BD: ldarg.3
+IL_01BE: ldc.r4 0.9
+IL_01C3: stind.r4
+IL_01C4: ldarg.s 4
+IL_01C6: ldc.r4 0.85
+IL_01CB: stind.r4
+IL_01CC: br IL_07A5
+IL_01D1: ldarg.1
+IL_01D2: ldc.i4.s 16
+IL_01D4: bne.un.s IL_01E6
+IL_01D6: ldarg.2
+IL_01D7: ldc.r4 1.1
+IL_01DC: stind.r4
+IL_01DD: ldarg.s 8
+IL_01DF: ldc.i4.3
+IL_01E0: stind.i4
+IL_01E1: br IL_07A5
+IL_01E6: ldarg.1
+IL_01E7: ldc.i4.s 17
+IL_01E9: bne.un.s IL_0200
+IL_01EB: ldarg.s 4
+IL_01ED: ldc.r4 0.85
+IL_01F2: stind.r4
+IL_01F3: ldarg.s 6
+IL_01F5: ldc.r4 1.1
+IL_01FA: stind.r4
+IL_01FB: br IL_07A5
+IL_0200: ldarg.1
+IL_0201: ldc.i4.s 18
+IL_0203: bne.un.s IL_021A
+IL_0205: ldarg.s 4
+IL_0207: ldc.r4 0.9
+IL_020C: stind.r4
+IL_020D: ldarg.s 6
+IL_020F: ldc.r4 1.15
+IL_0214: stind.r4
+IL_0215: br IL_07A5
+IL_021A: ldarg.1
+IL_021B: ldc.i4.s 19
+IL_021D: bne.un.s IL_0233
+IL_021F: ldarg.3
+IL_0220: ldc.r4 1.15
+IL_0225: stind.r4
+IL_0226: ldarg.s 6
+IL_0228: ldc.r4 1.05
+IL_022D: stind.r4
+IL_022E: br IL_07A5
+IL_0233: ldarg.1
+IL_0234: ldc.i4.s 20
+IL_0236: bne.un.s IL_025F
+IL_0238: ldarg.3
+IL_0239: ldc.r4 1.05
+IL_023E: stind.r4
+IL_023F: ldarg.s 6
+IL_0241: ldc.r4 1.05
+IL_0246: stind.r4
+IL_0247: ldarg.2
+IL_0248: ldc.r4 1.1
+IL_024D: stind.r4
+IL_024E: ldarg.s 4
+IL_0250: ldc.r4 0.95
+IL_0255: stind.r4
+IL_0256: ldarg.s 8
+IL_0258: ldc.i4.2
+IL_0259: stind.i4
+IL_025A: br IL_07A5
+IL_025F: ldarg.1
+IL_0260: ldc.i4.s 21
+IL_0262: bne.un.s IL_0277
+IL_0264: ldarg.3
+IL_0265: ldc.r4 1.15
+IL_026A: stind.r4
+IL_026B: ldarg.2
+IL_026C: ldc.r4 1.1
+IL_0271: stind.r4
+IL_0272: br IL_07A5
+IL_0277: ldarg.1
+IL_0278: ldc.i4.s 82
+IL_027A: bne.un.s IL_02A3
+IL_027C: ldarg.3
+IL_027D: ldc.r4 1.15
+IL_0282: stind.r4
+IL_0283: ldarg.2
+IL_0284: ldc.r4 1.15
+IL_0289: stind.r4
+IL_028A: ldarg.s 8
+IL_028C: ldc.i4.5
+IL_028D: stind.i4
+IL_028E: ldarg.s 4
+IL_0290: ldc.r4 0.9
+IL_0295: stind.r4
+IL_0296: ldarg.s 6
+IL_0298: ldc.r4 1.1
+IL_029D: stind.r4
+IL_029E: br IL_07A5
+IL_02A3: ldarg.1
+IL_02A4: ldc.i4.s 22
+IL_02A6: bne.un.s IL_02C3
+IL_02A8: ldarg.3
+IL_02A9: ldc.r4 0.9
+IL_02AE: stind.r4
+IL_02AF: ldarg.s 6
+IL_02B1: ldc.r4 0.9
+IL_02B6: stind.r4
+IL_02B7: ldarg.2
+IL_02B8: ldc.r4 0.85
+IL_02BD: stind.r4
+IL_02BE: br IL_07A5
+IL_02C3: ldarg.1
+IL_02C4: ldc.i4.s 23
+IL_02C6: bne.un.s IL_02DD
+IL_02C8: ldarg.s 4
+IL_02CA: ldc.r4 1.15
+IL_02CF: stind.r4
+IL_02D0: ldarg.s 6
+IL_02D2: ldc.r4 0.9
+IL_02D7: stind.r4
+IL_02D8: br IL_07A5
+IL_02DD: ldarg.1
+IL_02DE: ldc.i4.s 24
+IL_02E0: bne.un.s IL_02F6
+IL_02E2: ldarg.s 4
+IL_02E4: ldc.r4 1.1
+IL_02E9: stind.r4
+IL_02EA: ldarg.3
+IL_02EB: ldc.r4 0.8
+IL_02F0: stind.r4
+IL_02F1: br IL_07A5
+IL_02F6: ldarg.1
+IL_02F7: ldc.i4.s 25
+IL_02F9: bne.un.s IL_0313
+IL_02FB: ldarg.s 4
+IL_02FD: ldc.r4 1.1
+IL_0302: stind.r4
+IL_0303: ldarg.2
+IL_0304: ldc.r4 1.15
+IL_0309: stind.r4
+IL_030A: ldarg.s 8
+IL_030C: ldc.i4.1
+IL_030D: stind.i4
+IL_030E: br IL_07A5
+IL_0313: ldarg.1
+IL_0314: ldc.i4.s 58
+IL_0316: bne.un.s IL_032C
+IL_0318: ldarg.s 4
+IL_031A: ldc.r4 0.85
+IL_031F: stind.r4
+IL_0320: ldarg.2
+IL_0321: ldc.r4 0.85
+IL_0326: stind.r4
+IL_0327: br IL_07A5
+IL_032C: ldarg.1
+IL_032D: ldc.i4.s 26
+IL_032F: bne.un.s IL_0345
+IL_0331: ldarg.s 7
+IL_0333: ldc.r4 0.85
+IL_0338: stind.r4
+IL_0339: ldarg.2
+IL_033A: ldc.r4 1.1
+IL_033F: stind.r4
+IL_0340: br IL_07A5
+IL_0345: ldarg.1
+IL_0346: ldc.i4.s 27
+IL_0348: bne.un.s IL_0357
+IL_034A: ldarg.s 7
+IL_034C: ldc.r4 0.85
+IL_0351: stind.r4
+IL_0352: br IL_07A5
+IL_0357: ldarg.1
+IL_0358: ldc.i4.s 28
+IL_035A: bne.un.s IL_0377
+IL_035C: ldarg.s 7
+IL_035E: ldc.r4 0.85
+IL_0363: stind.r4
+IL_0364: ldarg.2
+IL_0365: ldc.r4 1.15
+IL_036A: stind.r4
+IL_036B: ldarg.3
+IL_036C: ldc.r4 1.05
+IL_0371: stind.r4
+IL_0372: br IL_07A5
+IL_0377: ldarg.1
+IL_0378: ldc.i4.s 83
+IL_037A: bne.un.s IL_03A3
+IL_037C: ldarg.3
+IL_037D: ldc.r4 1.15
+IL_0382: stind.r4
+IL_0383: ldarg.2
+IL_0384: ldc.r4 1.15
+IL_0389: stind.r4
+IL_038A: ldarg.s 8
+IL_038C: ldc.i4.5
+IL_038D: stind.i4
+IL_038E: ldarg.s 4
+IL_0390: ldc.r4 0.9
+IL_0395: stind.r4
+IL_0396: ldarg.s 7
+IL_0398: ldc.r4 0.9
+IL_039D: stind.r4
+IL_039E: br IL_07A5
+IL_03A3: ldarg.1
+IL_03A4: ldc.i4.s 29
+IL_03A6: bne.un.s IL_03B5
+IL_03A8: ldarg.s 7
+IL_03AA: ldc.r4 1.1
+IL_03AF: stind.r4
+IL_03B0: br IL_07A5
+IL_03B5: ldarg.1
+IL_03B6: ldc.i4.s 30
+IL_03B8: bne.un.s IL_03CE
+IL_03BA: ldarg.s 7
+IL_03BC: ldc.r4 1.2
+IL_03C1: stind.r4
+IL_03C2: ldarg.2
+IL_03C3: ldc.r4 0.9
+IL_03C8: stind.r4
+IL_03C9: br IL_07A5
+IL_03CE: ldarg.1
+IL_03CF: ldc.i4.s 31
+IL_03D1: bne.un.s IL_03E6
+IL_03D3: ldarg.3
+IL_03D4: ldc.r4 0.9
+IL_03D9: stind.r4
+IL_03DA: ldarg.2
+IL_03DB: ldc.r4 0.9
+IL_03E0: stind.r4
+IL_03E1: br IL_07A5
+IL_03E6: ldarg.1
+IL_03E7: ldc.i4.s 32
+IL_03E9: bne.un.s IL_03FF
+IL_03EB: ldarg.s 7
+IL_03ED: ldc.r4 1.15
+IL_03F2: stind.r4
+IL_03F3: ldarg.2
+IL_03F4: ldc.r4 1.1
+IL_03F9: stind.r4
+IL_03FA: br IL_07A5
+IL_03FF: ldarg.1
+IL_0400: ldc.i4.s 33
+IL_0402: bne.un.s IL_0420
+IL_0404: ldarg.s 7
+IL_0406: ldc.r4 1.1
+IL_040B: stind.r4
+IL_040C: ldarg.3
+IL_040D: ldc.r4 1.1
+IL_0412: stind.r4
+IL_0413: ldarg.s 4
+IL_0415: ldc.r4 0.9
+IL_041A: stind.r4
+IL_041B: br IL_07A5
+IL_0420: ldarg.1
+IL_0421: ldc.i4.s 34
+IL_0423: bne.un.s IL_0448
+IL_0425: ldarg.s 7
+IL_0427: ldc.r4 0.9
+IL_042C: stind.r4
+IL_042D: ldarg.3
+IL_042E: ldc.r4 1.1
+IL_0433: stind.r4
+IL_0434: ldarg.s 4
+IL_0436: ldc.r4 1.1
+IL_043B: stind.r4
+IL_043C: ldarg.2
+IL_043D: ldc.r4 1.1
+IL_0442: stind.r4
+IL_0443: br IL_07A5
+IL_0448: ldarg.1
+IL_0449: ldc.i4.s 35
+IL_044B: bne.un.s IL_0468
+IL_044D: ldarg.s 7
+IL_044F: ldc.r4 1.2
+IL_0454: stind.r4
+IL_0455: ldarg.2
+IL_0456: ldc.r4 1.15
+IL_045B: stind.r4
+IL_045C: ldarg.3
+IL_045D: ldc.r4 1.15
+IL_0462: stind.r4
+IL_0463: br IL_07A5
+IL_0468: ldarg.1
+IL_0469: ldc.i4.s 52
+IL_046B: bne.un.s IL_0489
+IL_046D: ldarg.s 7
+IL_046F: ldc.r4 0.9
+IL_0474: stind.r4
+IL_0475: ldarg.2
+IL_0476: ldc.r4 0.9
+IL_047B: stind.r4
+IL_047C: ldarg.s 4
+IL_047E: ldc.r4 0.9
+IL_0483: stind.r4
+IL_0484: br IL_07A5
+IL_0489: ldarg.1
+IL_048A: ldc.i4.s 85
+IL_048C: bne.un.s IL_04AA
+IL_048E: ldarg.2
+IL_048F: ldc.r4 1.15
+IL_0494: stind.r4
+IL_0495: ldarg.3
+IL_0496: ldc.r4 1.15
+IL_049B: stind.r4
+IL_049C: ldarg.s 10
+IL_049E: ldc.i4.s 10
+IL_04A0: stind.i4
+IL_04A1: ldarg.s 9
+IL_04A3: ldc.i4.3
+IL_04A4: stind.i4
+IL_04A5: br IL_07A5
+IL_04AA: ldarg.1
+IL_04AB: ldc.i4.s 86
+IL_04AD: bne.un.s IL_04CA
+IL_04AF: ldarg.2
+IL_04B0: ldc.r4 1.1
+IL_04B5: stind.r4
+IL_04B6: ldarg.3
+IL_04B7: ldc.r4 1.05
+IL_04BC: stind.r4
+IL_04BD: ldarg.s 10
+IL_04BF: ldc.i4.5
+IL_04C0: stind.i4
+IL_04C1: ldarg.s 9
+IL_04C3: ldc.i4.3
+IL_04C4: stind.i4
+IL_04C5: br IL_07A5
+IL_04CA: ldarg.1
+IL_04CB: ldc.i4.s 87
+IL_04CD: bne.un.s IL_04DF
+IL_04CF: ldarg.2
+IL_04D0: ldc.r4 1.15
+IL_04D5: stind.r4
+IL_04D6: ldarg.s 10
+IL_04D8: ldc.i4.8
+IL_04D9: stind.i4
+IL_04DA: br IL_07A5
+IL_04DF: ldarg.1
+IL_04E0: ldc.i4.s 88
+IL_04E2: bne.un.s IL_04F4
+IL_04E4: ldarg.2
+IL_04E5: ldc.r4 1.1
+IL_04EA: stind.r4
+IL_04EB: ldarg.s 9
+IL_04ED: ldc.i4.3
+IL_04EE: stind.i4
+IL_04EF: br IL_07A5
+IL_04F4: ldarg.1
+IL_04F5: ldc.i4.s 89
+IL_04F7: bne.un.s IL_0509
+IL_04F9: ldarg.2
+IL_04FA: ldc.r4 0.95
+IL_04FF: stind.r4
+IL_0500: ldarg.s 9
+IL_0502: ldc.i4.3
+IL_0503: stind.i4
+IL_0504: br IL_07A5
+IL_0509: ldarg.1
+IL_050A: ldc.i4.s 90
+IL_050C: bne.un.s IL_0521
+IL_050E: ldarg.2
+IL_050F: ldc.r4 1.1
+IL_0514: stind.r4
+IL_0515: ldarg.3
+IL_0516: ldc.r4 0.9
+IL_051B: stind.r4
+IL_051C: br IL_07A5
+IL_0521: ldarg.1
+IL_0522: ldc.i4.s 91
+IL_0524: bne.un.s IL_0537
+IL_0526: ldarg.2
+IL_0527: ldc.r4 0.95
+IL_052C: stind.r4
+IL_052D: ldarg.s 10
+IL_052F: ldc.i4.s 10
+IL_0531: stind.i4
+IL_0532: br IL_07A5
+IL_0537: ldarg.1
+IL_0538: ldc.i4.s 92
+IL_053A: bne.un.s IL_0548
+IL_053C: ldarg.2
+IL_053D: ldc.r4 0.7
+IL_0542: stind.r4
+IL_0543: br IL_07A5
+IL_0548: ldarg.1
+IL_0549: ldc.i4.s 93
+IL_054B: bne.un.s IL_0559
+IL_054D: ldarg.3
+IL_054E: ldc.r4 0.75
+IL_0553: stind.r4
+IL_0554: br IL_07A5
+IL_0559: ldarg.1
+IL_055A: ldc.i4.s 94
+IL_055C: bne.un.s IL_0571
+IL_055E: ldarg.2
+IL_055F: ldc.r4 0.85
+IL_0564: stind.r4
+IL_0565: ldarg.3
+IL_0566: ldc.r4 0.9
+IL_056B: stind.r4
+IL_056C: br IL_07A5
+IL_0571: ldarg.1
+IL_0572: ldc.i4.s 95
+IL_0574: bne.un.s IL_0580
+IL_0576: ldarg.s 10
+IL_0578: ldc.i4.s 25
+IL_057A: stind.i4
+IL_057B: br IL_07A5
+IL_0580: ldarg.1
+IL_0581: ldc.i4.s 96
+IL_0583: bne.un.s IL_058E
+IL_0585: ldarg.s 9
+IL_0587: ldc.i4.5
+IL_0588: stind.i4
+IL_0589: br IL_07A5
+IL_058E: ldarg.1
+IL_058F: ldc.i4.s 97
+IL_0591: bne.un.s IL_059F
+IL_0593: ldarg.3
+IL_0594: ldc.r4 1.25
+IL_0599: stind.r4
+IL_059A: br IL_07A5
+IL_059F: ldarg.1
+IL_05A0: ldc.i4.s 84
+IL_05A2: bne.un.s IL_05BB
+IL_05A4: ldarg.3
+IL_05A5: ldc.r4 1.17
+IL_05AA: stind.r4
+IL_05AB: ldarg.2
+IL_05AC: ldc.r4 1.17
+IL_05B1: stind.r4
+IL_05B2: ldarg.s 8
+IL_05B4: ldc.i4.8
+IL_05B5: stind.i4
+IL_05B6: br IL_07A5
+IL_05BB: ldarg.1
+IL_05BC: ldc.i4.s 36
+IL_05BE: bne.un.s IL_05C9
+IL_05C0: ldarg.s 8
+IL_05C2: ldc.i4.3
+IL_05C3: stind.i4
+IL_05C4: br IL_07A5
+IL_05C9: ldarg.1
+IL_05CA: ldc.i4.s 37
+IL_05CC: bne.un.s IL_05E5
+IL_05CE: ldarg.2
+IL_05CF: ldc.r4 1.1
+IL_05D4: stind.r4
+IL_05D5: ldarg.s 8
+IL_05D7: ldc.i4.3
+IL_05D8: stind.i4
+IL_05D9: ldarg.3
+IL_05DA: ldc.r4 1.1
+IL_05DF: stind.r4
+IL_05E0: br IL_07A5
+IL_05E5: ldarg.1
+IL_05E6: ldc.i4.s 38
+IL_05E8: bne.un.s IL_05F6
+IL_05EA: ldarg.3
+IL_05EB: ldc.r4 1.15
+IL_05F0: stind.r4
+IL_05F1: br IL_07A5
+IL_05F6: ldarg.1
+IL_05F7: ldc.i4.s 53
+IL_05F9: bne.un.s IL_0607
+IL_05FB: ldarg.2
+IL_05FC: ldc.r4 1.1
+IL_0601: stind.r4
+IL_0602: br IL_07A5
+IL_0607: ldarg.1
+IL_0608: ldc.i4.s 54
+IL_060A: bne.un.s IL_0618
+IL_060C: ldarg.3
+IL_060D: ldc.r4 1.15
+IL_0612: stind.r4
+IL_0613: br IL_07A5
+IL_0618: ldarg.1
+IL_0619: ldc.i4.s 55
+IL_061B: bne.un.s IL_0630
+IL_061D: ldarg.3
+IL_061E: ldc.r4 1.15
+IL_0623: stind.r4
+IL_0624: ldarg.2
+IL_0625: ldc.r4 1.05
+IL_062A: stind.r4
+IL_062B: br IL_07A5
+IL_0630: ldarg.1
+IL_0631: ldc.i4.s 59
+IL_0633: bne.un.s IL_064C
+IL_0635: ldarg.3
+IL_0636: ldc.r4 1.15
+IL_063B: stind.r4
+IL_063C: ldarg.2
+IL_063D: ldc.r4 1.15
+IL_0642: stind.r4
+IL_0643: ldarg.s 8
+IL_0645: ldc.i4.5
+IL_0646: stind.i4
+IL_0647: br IL_07A5
+IL_064C: ldarg.1
+IL_064D: ldc.i4.s 60
+IL_064F: bne.un.s IL_0661
+IL_0651: ldarg.2
+IL_0652: ldc.r4 1.15
+IL_0657: stind.r4
+IL_0658: ldarg.s 8
+IL_065A: ldc.i4.5
+IL_065B: stind.i4
+IL_065C: br IL_07A5
+IL_0661: ldarg.1
+IL_0662: ldc.i4.s 61
+IL_0664: bne.un.s IL_066F
+IL_0666: ldarg.s 8
+IL_0668: ldc.i4.5
+IL_0669: stind.i4
+IL_066A: br IL_07A5
+IL_066F: ldarg.1
+IL_0670: ldc.i4.s 39
+IL_0672: bne.un.s IL_0687
+IL_0674: ldarg.2
+IL_0675: ldc.r4 0.7
+IL_067A: stind.r4
+IL_067B: ldarg.3
+IL_067C: ldc.r4 0.8
+IL_0681: stind.r4
+IL_0682: br IL_07A5
+IL_0687: ldarg.1
+IL_0688: ldc.i4.s 40
+IL_068A: bne.un.s IL_0698
+IL_068C: ldarg.2
+IL_068D: ldc.r4 0.85
+IL_0692: stind.r4
+IL_0693: br IL_07A5
+IL_0698: ldarg.1
+IL_0699: ldc.i4.s 56
+IL_069B: bne.un.s IL_06A9
+IL_069D: ldarg.3
+IL_069E: ldc.r4 0.8
+IL_06A3: stind.r4
+IL_06A4: br IL_07A5
+IL_06A9: ldarg.1
+IL_06AA: ldc.i4.s 41
+IL_06AC: bne.un.s IL_06C1
+IL_06AE: ldarg.3
+IL_06AF: ldc.r4 0.85
+IL_06B4: stind.r4
+IL_06B5: ldarg.2
+IL_06B6: ldc.r4 0.9
+IL_06BB: stind.r4
+IL_06BC: br IL_07A5
+IL_06C1: ldarg.1
+IL_06C2: ldc.i4.s 57
+IL_06C4: bne.un.s IL_06D9
+IL_06C6: ldarg.3
+IL_06C7: ldc.r4 0.9
+IL_06CC: stind.r4
+IL_06CD: ldarg.2
+IL_06CE: ldc.r4 1.18
+IL_06D3: stind.r4
+IL_06D4: br IL_07A5
+IL_06D9: ldarg.1
+IL_06DA: ldc.i4.s 42
+IL_06DC: bne.un.s IL_06EB
+IL_06DE: ldarg.s 4
+IL_06E0: ldc.r4 0.9
+IL_06E5: stind.r4
+IL_06E6: br IL_07A5
+IL_06EB: ldarg.1
+IL_06EC: ldc.i4.s 43
+IL_06EE: bne.un.s IL_0704
+IL_06F0: ldarg.2
+IL_06F1: ldc.r4 1.1
+IL_06F6: stind.r4
+IL_06F7: ldarg.s 4
+IL_06F9: ldc.r4 0.9
+IL_06FE: stind.r4
+IL_06FF: br IL_07A5
+IL_0704: ldarg.1
+IL_0705: ldc.i4.s 44
+IL_0707: bne.un.s IL_071A
+IL_0709: ldarg.s 4
+IL_070B: ldc.r4 0.9
+IL_0710: stind.r4
+IL_0711: ldarg.s 8
+IL_0713: ldc.i4.3
+IL_0714: stind.i4
+IL_0715: br IL_07A5
+IL_071A: ldarg.1
+IL_071B: ldc.i4.s 45
+IL_071D: bne.un.s IL_0729
+IL_071F: ldarg.s 4
+IL_0721: ldc.r4 0.95
+IL_0726: stind.r4
+IL_0727: br.s IL_07A5
+IL_0729: ldarg.1
+IL_072A: ldc.i4.s 46
+IL_072C: bne.un.s IL_0743
+IL_072E: ldarg.s 8
+IL_0730: ldc.i4.3
+IL_0731: stind.i4
+IL_0732: ldarg.s 4
+IL_0734: ldc.r4 0.94
+IL_0739: stind.r4
+IL_073A: ldarg.2
+IL_073B: ldc.r4 1.07
+IL_0740: stind.r4
+IL_0741: br.s IL_07A5
+IL_0743: ldarg.1
+IL_0744: ldc.i4.s 47
+IL_0746: bne.un.s IL_0752
+IL_0748: ldarg.s 4
+IL_074A: ldc.r4 1.15
+IL_074F: stind.r4
+IL_0750: br.s IL_07A5
+IL_0752: ldarg.1
+IL_0753: ldc.i4.s 48
+IL_0755: bne.un.s IL_0761
+IL_0757: ldarg.s 4
+IL_0759: ldc.r4 1.2
+IL_075E: stind.r4
+IL_075F: br.s IL_07A5
+IL_0761: ldarg.1
+IL_0762: ldc.i4.s 49
+IL_0764: bne.un.s IL_0770
+IL_0766: ldarg.s 4
+IL_0768: ldc.r4 1.08
+IL_076D: stind.r4
+IL_076E: br.s IL_07A5
+IL_0770: ldarg.1
+IL_0771: ldc.i4.s 50
+IL_0773: bne.un.s IL_0786
+IL_0775: ldarg.2
+IL_0776: ldc.r4 0.8
+IL_077B: stind.r4
+IL_077C: ldarg.s 4
+IL_077E: ldc.r4 1.15
+IL_0783: stind.r4
+IL_0784: br.s IL_07A5
+IL_0786: ldarg.1
+IL_0787: ldc.i4.s 51
+IL_0789: bne.un.s IL_07A5
+IL_078B: ldarg.3
+IL_078C: ldc.r4 0.9
+IL_0791: stind.r4
+IL_0792: ldarg.s 4
+IL_0794: ldc.r4 0.9
+IL_0799: stind.r4
+IL_079A: ldarg.2
+IL_079B: ldc.r4 1.05
+IL_07A0: stind.r4
+IL_07A1: ldarg.s 8
+IL_07A3: ldc.i4.2
+IL_07A4: stind.i4
+IL_07A5: ldarg.s 11
+IL_07A7: ldc.r4 1
+IL_07AC: ldarg.2
+IL_07AD: ldind.r4
+IL_07AE: mul
+IL_07AF: ldc.r4 2
+IL_07B4: ldarg.s 4
+IL_07B6: ldind.r4
+IL_07B7: sub
+IL_07B8: mul
+IL_07B9: ldc.r4 2
+IL_07BE: ldarg.s 7
+IL_07C0: ldind.r4
+IL_07C1: sub
+IL_07C2: mul
+IL_07C3: ldarg.s 5
+IL_07C5: ldind.r4
+IL_07C6: mul
+IL_07C7: ldarg.3
+IL_07C8: ldind.r4
+IL_07C9: mul
+IL_07CA: ldarg.s 6
+IL_07CC: ldind.r4
+IL_07CD: mul
+IL_07CE: ldc.r4 1
+IL_07D3: ldarg.s 8
+IL_07D5: ldind.i4
+IL_07D6: conv.r4
+IL_07D7: ldc.r4 0.02
+IL_07DC: mul
+IL_07DD: add
+IL_07DE: mul
+IL_07DF: ldc.r4 1
+IL_07E4: ldarg.s 10
+IL_07E6: ldind.i4
+IL_07E7: conv.r4
+IL_07E8: ldc.r4 0.015
+IL_07ED: mul
+IL_07EE: add
+IL_07EF: mul
+IL_07F0: ldc.r4 1
+IL_07F5: ldarg.s 9
+IL_07F7: ldind.i4
+IL_07F8: conv.r4
+IL_07F9: ldc.r4 0.03
+IL_07FE: mul
+IL_07FF: add
+IL_0800: mul
+IL_0801: stind.r4
+IL_0802: ldarg.1
+IL_0803: ldc.i4.s 62
+IL_0805: beq.s IL_0816
+IL_0807: ldarg.1
+IL_0808: ldc.i4.s 69
+IL_080A: beq.s IL_0816
+IL_080C: ldarg.1
+IL_080D: ldc.i4.s 73
+IL_080F: beq.s IL_0816
+IL_0811: ldarg.1
+IL_0812: ldc.i4.s 77
+IL_0814: bne.un.s IL_0822
+IL_0816: ldarg.s 11
+IL_0818: ldarg.s 11
+IL_081A: ldind.r4
+IL_081B: ldc.r4 1.05
+IL_0820: mul
+IL_0821: stind.r4
+IL_0822: ldarg.1
+IL_0823: ldc.i4.s 63
+IL_0825: beq.s IL_083B
+IL_0827: ldarg.1
+IL_0828: ldc.i4.s 70
+IL_082A: beq.s IL_083B
+IL_082C: ldarg.1
+IL_082D: ldc.i4.s 74
+IL_082F: beq.s IL_083B
+IL_0831: ldarg.1
+IL_0832: ldc.i4.s 78
+IL_0834: beq.s IL_083B
+IL_0836: ldarg.1
+IL_0837: ldc.i4.s 67
+IL_0839: bne.un.s IL_0847
+IL_083B: ldarg.s 11
+IL_083D: ldarg.s 11
+IL_083F: ldind.r4
+IL_0840: ldc.r4 1.1
+IL_0845: mul
+IL_0846: stind.r4
+IL_0847: ldarg.1
+IL_0848: ldc.i4.s 64
+IL_084A: beq.s IL_0860
+IL_084C: ldarg.1
+IL_084D: ldc.i4.s 71
+IL_084F: beq.s IL_0860
+IL_0851: ldarg.1
+IL_0852: ldc.i4.s 75
+IL_0854: beq.s IL_0860
+IL_0856: ldarg.1
+IL_0857: ldc.i4.s 79
+IL_0859: beq.s IL_0860
+IL_085B: ldarg.1
+IL_085C: ldc.i4.s 66
+IL_085E: bne.un.s IL_086C
+IL_0860: ldarg.s 11
+IL_0862: ldarg.s 11
+IL_0864: ldind.r4
+IL_0865: ldc.r4 1.15
+IL_086A: mul
+IL_086B: stind.r4
+IL_086C: ldarg.1
+IL_086D: ldc.i4.s 65
+IL_086F: beq.s IL_0885
+IL_0871: ldarg.1
+IL_0872: ldc.i4.s 72
+IL_0874: beq.s IL_0885
+IL_0876: ldarg.1
+IL_0877: ldc.i4.s 76
+IL_0879: beq.s IL_0885
+IL_087B: ldarg.1
+IL_087C: ldc.i4.s 80
+IL_087E: beq.s IL_0885
+IL_0880: ldarg.1
+IL_0881: ldc.i4.s 68
+IL_0883: bne.un.s IL_0891
+IL_0885: ldarg.s 11
+IL_0887: ldarg.s 11
+IL_0889: ldind.r4
+IL_088A: ldc.r4 1.2
+IL_088F: mul
+IL_0890: stind.r4
+IL_0891: ldarg.2
+IL_0892: ldind.r4
+IL_0893: ldc.r4 1
+IL_0898: beq.s IL_08B5
+IL_089A: ldarg.0
+IL_089B: ldfld Terraria.Item::damage
+IL_08A0: conv.r4
+IL_08A1: ldarg.2
+IL_08A2: ldind.r4
+IL_08A3: mul
+IL_08A4: conv.r8
+IL_08A5: call System.Math::Round
+IL_08AA: ldarg.0
+IL_08AB: ldfld Terraria.Item::damage
+IL_08B0: conv.r8
+IL_08B1: bne.un.s IL_08B5
+IL_08B3: ldc.i4.0
+IL_08B4: ret
+IL_08B5: ldarg.s 4
+IL_08B7: ldind.r4
+IL_08B8: ldc.r4 1
+IL_08BD: beq.s IL_08DB
+IL_08BF: ldarg.0
+IL_08C0: ldfld Terraria.Item::useAnimation
+IL_08C5: conv.r4
+IL_08C6: ldarg.s 4
+IL_08C8: ldind.r4
+IL_08C9: mul
+IL_08CA: conv.r8
+IL_08CB: call System.Math::Round
+IL_08D0: ldarg.0
+IL_08D1: ldfld Terraria.Item::useAnimation
+IL_08D6: conv.r8
+IL_08D7: bne.un.s IL_08DB
+IL_08D9: ldc.i4.0
+IL_08DA: ret
+IL_08DB: ldarg.s 7
+IL_08DD: ldind.r4
+IL_08DE: ldc.r4 1
+IL_08E3: beq.s IL_0901
+IL_08E5: ldarg.0
+IL_08E6: ldfld Terraria.Item::mana
+IL_08EB: conv.r4
+IL_08EC: ldarg.s 7
+IL_08EE: ldind.r4
+IL_08EF: mul
+IL_08F0: conv.r8
+IL_08F1: call System.Math::Round
+IL_08F6: ldarg.0
+IL_08F7: ldfld Terraria.Item::mana
+IL_08FC: conv.r8
+IL_08FD: bne.un.s IL_0901
+IL_08FF: ldc.i4.0
+IL_0900: ret
+IL_0901: ldarg.3
+IL_0902: ldind.r4
+IL_0903: ldc.r4 1
+IL_0908: beq.s IL_0919
+IL_090A: ldarg.0
+IL_090B: ldfld Terraria.Item::knockBack
+IL_0910: ldc.r4 0
+IL_0915: bne.un.s IL_0919
+IL_0917: ldc.i4.0
+IL_0918: ret
+IL_0919: ldc.i4.1
+IL_091A: ret
+

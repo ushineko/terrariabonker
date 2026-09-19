@@ -407,6 +407,7 @@ terrariabonker/
 ├── cmd/terrariabonker/         the command line (runs as root)
 ├── cmd/terrariabonker-gui/     the control panel (unprivileged; shells out)
 ├── cmd/monofields/             dumps a mono class's field offsets
+├── cmd/prefixstats/            regenerates the modifier table from the game's IL
 ├── internal/
 │   ├── proc/                   process memory access and privilege elevation
 │   ├── locate/                 finds the player in memory
