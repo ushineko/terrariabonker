@@ -3,6 +3,7 @@ package service_test
 import (
 	"encoding/binary"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1130,15 +1131,19 @@ The addresses matter. A template is picked out of the heap by being inactive and
 carrying the right netID, and the *last* match in address order is the one taken,
 so the decoys are placed one either side of the shelf:
 
-  - below it, a Blue Slime object that is inactive and is not a template -- a
-    despawned NPC that left its netID behind, which is a thing the live game was
-    observed doing. Its stats are the scaled ones. Taking the first match instead
-    of the last hands this out.
+  - below it, a despawned Blue Slime that left its netID behind, which is a thing
+    the live game was observed doing. Its object is a Main.npc slot like any
+    other -- the slots are allocated separately and their addresses are in no
+    order -- and it is inactive, so taking the first match instead of the last
+    hands this out.
   - above it, the live Blue Slime standing in the world, in slot zero, active and
     scaled. Dropping the inactive test hands *this* out, and it is above the shelf
     precisely so that dropping the test is not covered for by the ordering.
 
-Both read as a Blue Slime and neither is one, which is the whole difficulty.
+Both read as a Blue Slime and neither is one, which is the whole difficulty. The
+catalog scan is spared both because it excludes every object Main.npc points at,
+which these two are; the spawn's own search excludes nothing, because it is
+looking for one netID rather than building a table.
 */
 const (
 	npcVTable     = 0xFEEDFACE
@@ -1163,7 +1168,17 @@ type npcTemplate struct {
 	defense int32
 	width   int32
 	height  int32
+	color   [4]byte
 }
+
+/*
+npcSlimeTint is the colour the game paints a Blue Slime's sheet with.
+
+Its sheet is neutral grey and this is what makes it blue, which is why the icon
+extractor needs the field at all -- and why a tint belongs to the netID rather
+than to the type.
+*/
+var npcSlimeTint = [4]byte{0, 80, 255, 100}
 
 /*
 npcShelf is the templates the fixture offers.
@@ -1173,8 +1188,10 @@ the coloured slimes share a type and differ only by the netID, so a scan keyed o
 type would hand out the wrong one and read as correct.
 */
 var npcShelf = []npcTemplate{
-	{netID: 1, npcType: 1, life: 25, damage: 7, defense: 2, width: 24, height: 18},
-	{netID: -3, npcType: 1, life: 45, damage: 9, defense: 4, width: 24, height: 18},
+	{netID: 1, npcType: 1, life: 25, damage: 7, defense: 2, width: 24, height: 18,
+		color: npcSlimeTint},
+	{netID: -3, npcType: 1, life: 45, damage: 9, defense: 4, width: 24, height: 18,
+		color: [4]byte{102, 204, 106, 255}},
 	{netID: 4, npcType: 4, life: 2800, damage: 15, defense: 12, width: 100, height: 110},
 }
 
@@ -1183,8 +1200,11 @@ var npcShelf = []npcTemplate{
 var npcTakenSlots = []int{0, 1, 2}
 
 // liveSlimeSlot is the slot holding the Blue Slime that is in the world, rather
-// than the one on the shelf.
-const liveSlimeSlot = 0
+// than the one on the shelf; npcDespawnedSlot is the one that used to hold one.
+const (
+	liveSlimeSlot    = 0
+	npcDespawnedSlot = 5
+)
 
 // plantNPCsInto writes Main.npc, its slots and the template shelf.
 func plantNPCsInto(mem *execMem) {
@@ -1203,10 +1223,11 @@ func plantNPCsInto(mem *execMem) {
 		obj := uint32(npcObjectsAt + slot*npcStride) //nolint:gosec // a planted address
 		mem.PokeBytes(obj+layout.NPCActive, []byte{1})
 	}
-	// The Blue Slime in the world, and the one that used to be.
+	// The Blue Slime in the world, and the slot that used to hold one.
 	slime := uint32(npcObjectsAt + liveSlimeSlot*npcStride) //nolint:gosec // a planted address
 	mem.PokeI32(slime+layout.NPCNetID, 1)
 	mem.PokeI32(slime+layout.NPCLifeMax, npcScaledLife)
+	mem.PokeBytes(npcArrAt+layout.ArrDataOff+npcDespawnedSlot*4, u32(npcDecoyAt))
 	mem.PokeBytes(npcDecoyAt, u32(npcVTable))
 	mem.PokeI32(npcDecoyAt+layout.NPCNetID, 1)
 	mem.PokeI32(npcDecoyAt+layout.NPCLifeMax, npcScaledLife)
@@ -1221,6 +1242,7 @@ func plantNPCsInto(mem *execMem) {
 		mem.PokeI32(obj+layout.NPCDefense, tpl.defense)
 		mem.PokeI32(obj+layout.NPCWidth, tpl.width)
 		mem.PokeI32(obj+layout.NPCHeight, tpl.height)
+		mem.PokeBytes(obj+layout.NPCColor, tpl.color[:])
 		mem.PokeBytes(obj+layout.NPCActive, []byte{0})
 	}
 }
@@ -1242,6 +1264,7 @@ for _slot in %s:
     u8(%d + _slot * %d + N.NPC_ACTIVE, 1)
 mem.poke_i32(%d + N.NPC_NET_ID, 1)
 mem.poke_i32(%d + N.NPC_LIFE_MAX, %d)
+mem.poke_bytes(%d + I.ARR_DATA_OFF + %d * 4, struct.pack("<I", %d))
 mem.poke_bytes(%d, struct.pack("<I", %d))
 mem.poke_i32(%d + N.NPC_NET_ID, 1)
 mem.poke_i32(%d + N.NPC_LIFE_MAX, %d)
@@ -1250,6 +1273,7 @@ u8(%d + N.NPC_ACTIVE, 0)
 		npcArrAt, npcVTable, pyInts(npcTakenSlots), npcObjectsAt, npcStride,
 		npcObjectsAt+liveSlimeSlot*npcStride,
 		npcObjectsAt+liveSlimeSlot*npcStride, npcScaledLife,
+		npcArrAt, npcDespawnedSlot, npcDecoyAt,
 		npcDecoyAt, npcVTable, npcDecoyAt, npcDecoyAt, npcScaledLife, npcDecoyAt)
 	for i, tpl := range npcShelf {
 		obj := npcTemplateAt + i*npcStride
@@ -1262,9 +1286,10 @@ mem.poke_i32(%d + N.NPC_DAMAGE, %d)
 mem.poke_i32(%d + N.NPC_DEFENSE, %d)
 mem.poke_i32(%d + N.NPC_WIDTH, %d)
 mem.poke_i32(%d + N.NPC_HEIGHT, %d)
+mem.poke_bytes(%d + N.NPC_COLOR, bytes(%s))
 u8(%d + N.NPC_ACTIVE, 0)
 `, obj, npcVTable, obj, tpl.netID, obj, tpl.npcType, obj, tpl.life, obj, tpl.damage,
-			obj, tpl.defense, obj, tpl.width, obj, tpl.height, obj)
+			obj, tpl.defense, obj, tpl.width, obj, tpl.height, obj, pyBytes(tpl.color), obj)
 	}
 	return b.String()
 }
@@ -1287,4 +1312,64 @@ func plantFacingInto(mem *execMem, facing int32) {
 // plantFacing is the same, as Python source.
 func plantFacing(facing int32) string {
 	return fmt.Sprintf("mem.poke_i32(%d + 0x2C, %d)\n", liveLife-0x738, facing)
+}
+
+/*
+Main.npcFrameCount, which says how many frames each type's sheet holds.
+
+Nothing else gives this exactly: the sheets are vertical strips of equal frames,
+so an extractor left to guess from the shape gets the wide NPCs wrong.
+*/
+const (
+	npcFrameCountAt = base + 0xD0000
+	npcFrameCountN  = 1000
+)
+
+// npcFrameImage is the counts worth planting: the rest read as one frame.
+var npcFrameImage = map[int]int32{1: 2, 4: 15, 245: 4}
+
+func plantFrameCountsInto(mem *execMem) {
+	mem.PokeBytes(staticAt+uint32(layout.MainNPCFrameCountOff), u32(npcFrameCountAt)) //nolint:gosec // a field offset
+	mem.PokeI32(npcFrameCountAt+layout.ArrLenOff, npcFrameCountN)
+	for i := range npcFrameCountN {
+		n := int32(1)
+		if got, special := npcFrameImage[i]; special {
+			n = got
+		}
+		mem.PokeI32(npcFrameCountAt+layout.ArrDataOff+uint32(i)*4, n) //nolint:gosec // an index
+	}
+}
+
+// pyPlantFrameCounts is the same, as Python source.
+func pyPlantFrameCounts() string {
+	return fmt.Sprintf(`
+mem.poke_bytes(%d + N.MAIN_NPC_FRAME_COUNT_OFF, struct.pack("<I", %d))
+mem.poke_i32(%d + I.ARR_LEN_OFF, %d)
+for _i in range(%d):
+    mem.poke_i32(%d + I.ARR_DATA_OFF + _i * 4, %s.get(_i, 1))
+`, staticAt, npcFrameCountAt, npcFrameCountAt, npcFrameCountN, npcFrameCountN,
+		npcFrameCountAt, pyFrameImage())
+}
+
+// pyFrameImage is the counts as a Python dict.
+func pyFrameImage() string {
+	keys := make([]int, 0, len(npcFrameImage))
+	for k := range npcFrameImage {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%d: %d", k, npcFrameImage[k])
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// pyBytes is four bytes as a Python list.
+func pyBytes(v [4]byte) string {
+	parts := make([]string, len(v))
+	for i, b := range v {
+		parts[i] = fmt.Sprint(b)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }

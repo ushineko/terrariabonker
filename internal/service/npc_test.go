@@ -191,8 +191,13 @@ func TestSpawningAnNPCWithNoTemplate(t *testing.T) {
 // And a world already at its NPC limit is refused too.
 func TestSpawningWithNoFreeSlot(t *testing.T) {
 	mem, svc := spawnFixture(t)
+	// Through the array rather than by arithmetic: the slots' objects are
+	// allocated separately and one of them is deliberately not where the others
+	// are.
 	for i := range layout.MaxNPCs {
-		mem.PokeBytes(spawnedObject(i)+layout.NPCActive, []byte{1})
+		obj, ok := mem.ReadU32(npcArrAt + layout.ArrDataOff + uint32(i)*4) //nolint:gosec // a slot index
+		require.True(t, ok)
+		mem.PokeBytes(obj+layout.NPCActive, []byte{1})
 	}
 	before := mem.Hex()
 

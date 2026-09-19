@@ -43,6 +43,16 @@ func plantTemplateInto(mem *execMem) {
 	mem.PokeI32(templateAt+uint32(layoutItemRare), 8)
 	mem.WriteF32(templateAt+uint32(layoutItemKnockback), 6.5)
 	mem.WriteF32(templateAt+uint32(layoutItemScale), 1.0)
+	/*
+		And the three equipment slots, which a template holds as -1.
+
+		Zero is a real slot -- the first helmet -- so a template left zeroed
+		reads as armour whatever else is on it, and the catalog files every
+		weapon in the game under "Armor".
+	*/
+	for _, field := range []string{"ITEM_HEAD_SLOT", "ITEM_BODY_SLOT", "ITEM_LEG_SLOT"} {
+		mem.PokeI32(templateAt+uint32(layout.Offsets[field]), -1) //nolint:gosec // an offset
+	}
 
 	/*
 		And templates for what the fishing kit hands out.
@@ -80,6 +90,9 @@ mem.poke_i32(%d + I.ITEM_USE_ANIM, 24)
 mem.poke_i32(%d + I.ITEM_RARE, 8)
 mem.write_f32(%d + I.ITEM_KNOCKBACK, 6.5)
 mem.write_f32(%d + I.ITEM_SCALE, 1.0)
+mem.poke_i32(%d + I.ITEM_HEAD_SLOT, -1)
+mem.poke_i32(%d + I.ITEM_BODY_SLOT, -1)
+mem.poke_i32(%d + I.ITEM_LEG_SLOT, -1)
 mem.poke_bytes(%d, struct.pack("<I", %d))
 mem.poke_i32(%d + I.ITEM_TYPE, %d)
 mem.poke_bytes(%d + I.ITEM_FISHING_POLE, bytes([50]))
@@ -88,6 +101,7 @@ mem.poke_i32(%d + I.ITEM_TYPE, %d)
 mem.poke_bytes(%d + I.ITEM_BAIT, bytes([35]))
 `, templateAt, itemVTable, templateAt, templateType, templateAt, templateAt,
 		templateAt, templateAt, templateAt, templateAt,
+		templateAt, templateAt, templateAt,
 		kitRodAt, itemVTable, kitRodAt, service.KitRod, kitRodAt,
 		kitBaitAt, itemVTable, kitBaitAt, service.KitBait, kitBaitAt)
 }
