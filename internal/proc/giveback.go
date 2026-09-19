@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
@@ -34,7 +35,7 @@ var (
 	lookupID = func(uid string) (string, error) {
 		u, err := user.LookupId(uid)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("look up uid %s: %w", uid, err)
 		}
 		return u.HomeDir, nil
 	}
@@ -68,8 +69,8 @@ func GiveBackToUser(path string) {
 		return
 	}
 	home = realPath(home)
-	real := realPath(path)
-	if real != home && !strings.HasPrefix(real, home+string(os.PathSeparator)) {
+	target := realPath(path)
+	if target != home && !strings.HasPrefix(target, home+string(os.PathSeparator)) {
 		return
 	}
 	_ = chown(path, uid, gid)
@@ -125,12 +126,16 @@ func Elevate() error {
 	}
 	self, err := os.Executable()
 	if err != nil {
-		return err
+		return fmt.Errorf("find this executable: %w", err)
 	}
 	sudo, err := exec.LookPath("sudo")
 	if err != nil {
-		return err
+		return fmt.Errorf("find sudo: %w", err)
 	}
 	args := append([]string{"sudo", "-E", self}, os.Args[1:]...)
-	return syscall.Exec(sudo, args, os.Environ())
+	//nolint:gosec // sudo is resolved through PATH and re-runs this same binary
+	if err := syscall.Exec(sudo, args, os.Environ()); err != nil {
+		return fmt.Errorf("re-run under sudo: %w", err)
+	}
+	return nil
 }

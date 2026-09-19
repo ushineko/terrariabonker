@@ -101,6 +101,17 @@ A projectile's fields.
 All verified against the mono runtime's own field metadata, widths included --
 which matter here: the flags are one byte each and packed against their
 neighbours.
+
+ProjectileWet is named rather than dropped because it is where `active` was
+wrongly read for several releases.
+
+The two are indistinguishable while fishing: a bobber floats in water and is
+therefore always wet, so every test and every hour of play agreed with the wrong
+offset. Projectiles in *flight* are dry, which is why no probe ever saw one.
+Confirmed against the runtime's field metadata and live -- twelve active
+projectiles in the array, every one of them dry.
+
+Keeping the name is what stops the offset being reused for something else.
 */
 const (
 	ProjectileWet          = 0x03C // Entity.wet
@@ -117,21 +128,10 @@ const (
 	ProjectileExtraUpdates = 0x104
 )
 
-/*
-ProjectileWet is named rather than dropped because it is where `active` was
-wrongly read for several releases.
-
-The two are indistinguishable while fishing: a bobber floats in water and is
-therefore always wet, so every test and every hour of play agreed with the wrong
-offset. Projectiles in *flight* are dry, which is why no probe ever saw one.
-Confirmed against the runtime's field metadata and live -- twelve active
-projectiles in the array, every one of them dry.
-
-Keeping the name is what stops the offset being reused for something else.
-*/
+// ProjectileArrayLen is how many projectiles the game keeps.
 const ProjectileArrayLen = 1001
 
-// projectileOffsets is those under the Python's names for them.
+// projectileOffsets is those under the names the field dump reports.
 var projectileOffsets = map[string]int64{
 	"WET_OFF":          ProjectileWet,
 	"AI_OFF":           ProjectileAI,

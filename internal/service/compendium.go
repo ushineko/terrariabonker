@@ -284,7 +284,7 @@ func writeCache[T any](path string, found map[int32]T) {
 		return
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return
 	}
 	tmp := path + ".tmp"

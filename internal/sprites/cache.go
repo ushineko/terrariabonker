@@ -156,7 +156,7 @@ func loadPaths() map[string]string {
 // written is one that is learned again next time.
 func savePath(key, value string) {
 	path := PathsFile()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return
 	}
 	all := loadPaths()

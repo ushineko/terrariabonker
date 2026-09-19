@@ -137,7 +137,7 @@ func (b *bitReader) readU32Raw() uint32 {
 	var out [4]byte
 	for i := range out {
 		if b.bitsLeft >= 8 {
-			out[i] = byte(b.peek(8))
+			out[i] = byte(b.peek(8)) //nolint:gosec // eight bits, by construction
 			b.remove(8)
 			continue
 		}
@@ -330,7 +330,7 @@ seventeen, which is why this reads into the array it is also reading from.
 */
 func (d *Decoder) readLengths(br *bitReader, lengths []byte, first, last int) error {
 	for i := range pretreeNumElements {
-		d.pretreeLen[i] = byte(br.read(4))
+		d.pretreeLen[i] = byte(br.read(4)) //nolint:gosec // four bits, by construction
 	}
 	if !makeDecodeTable(pretreeMaxSymbols, pretreeTableBits, d.pretreeLen, d.pretreeTable) {
 		return errf("the pretree table could not be built")
@@ -341,8 +341,8 @@ func (d *Decoder) readLengths(br *bitReader, lengths []byte, first, last int) er
 		if err != nil {
 			return err
 		}
-		switch {
-		case z == 17:
+		switch z {
+		case 17:
 			run := int(br.read(4)) + 4
 			for range run {
 				if i >= last {
@@ -351,7 +351,7 @@ func (d *Decoder) readLengths(br *bitReader, lengths []byte, first, last int) er
 				lengths[i] = 0
 				i++
 			}
-		case z == 18:
+		case 18:
 			run := int(br.read(5)) + 20
 			for range run {
 				if i >= last {
@@ -360,7 +360,7 @@ func (d *Decoder) readLengths(br *bitReader, lengths []byte, first, last int) er
 				lengths[i] = 0
 				i++
 			}
-		case z == 19:
+		case 19:
 			run := int(br.read(1)) + 4
 			next, err := d.readHuffsym(br, d.pretreeTable, pretreeTableBits,
 				pretreeMaxSymbols, d.pretreeLen)
@@ -412,7 +412,7 @@ func (d *Decoder) Decompress(in []byte, outLen int) ([]byte, error) {
 			switch d.blockType {
 			case blockAligned:
 				for i := range alignedNumElements {
-					d.alignedLen[i] = byte(br.read(3))
+					d.alignedLen[i] = byte(br.read(3)) //nolint:gosec // three bits, by construction
 				}
 				if !makeDecodeTable(alignedMaxSymbols, alignedTableBits,
 					d.alignedLen, d.alignedTable) {

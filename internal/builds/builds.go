@@ -126,7 +126,7 @@ build nobody decided about does not rewrite the file.
 */
 func update(change func(map[string]Decision) bool) error {
 	path := Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("make the config directory: %w", err)
 	}
 	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // a lock beside the file
@@ -157,5 +157,8 @@ func update(change func(map[string]Decision) bool) error {
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil { //nolint:gosec // the user's own settings
 		return fmt.Errorf("write the builds: %w", err)
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("put the builds in place: %w", err)
+	}
+	return nil
 }

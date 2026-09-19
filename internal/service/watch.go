@@ -46,7 +46,7 @@ func (s *Service) WatchCatch(ctx context.Context, p *patch.Patcher, recast bool,
 	out := CatchRound{}
 	for rounds <= 0 || out.Rounds < rounds {
 		if ctx.Err() != nil {
-			return out, nil
+			return out, nil //nolint:nilerr // a cancelled context is not a failure: report what was done
 		}
 		out.Rounds++
 		got, err := s.CatchTick(p, recast, budget)
@@ -86,7 +86,7 @@ func (s *Service) WatchBait(ctx context.Context, keep int32, interval time.Durat
 	out := BaitRound{}
 	for rounds <= 0 || out.Rounds < rounds {
 		if ctx.Err() != nil {
-			return out, nil
+			return out, nil //nolint:nilerr // a cancelled context is not a failure: report what was done
 		}
 		out.Rounds++
 		got, err := s.BaitTick(keep)
@@ -118,7 +118,7 @@ func (s *Service) WatchSelling(ctx context.Context, interval time.Duration, roun
 	out := SellRound{}
 	for rounds <= 0 || out.Rounds < rounds {
 		if ctx.Err() != nil {
-			return out, nil
+			return out, nil //nolint:nilerr // a cancelled context is not a failure: report what was done
 		}
 		out.Rounds++
 		got, err := s.SellTick(false)
@@ -161,7 +161,7 @@ func (s *Service) WatchFishingBuffs(ctx context.Context, want map[string]bool, t
 	out := BuffRound{}
 	for rounds <= 0 || out.Rounds < rounds {
 		if ctx.Err() != nil {
-			return out, nil
+			return out, nil //nolint:nilerr // a cancelled context is not a failure: report what was done
 		}
 		out.Rounds++
 		got, err := s.FishingBuffTick(want, ticks)
@@ -197,7 +197,7 @@ func (s *Service) WatchPotions(ctx context.Context, minStack, ticks int32,
 	out := PotionRound{}
 	for rounds <= 0 || out.Rounds < rounds {
 		if ctx.Err() != nil {
-			return out, nil
+			return out, nil //nolint:nilerr // a cancelled context is not a failure: report what was done
 		}
 		out.Rounds++
 		got, err := s.PotionTick(minStack, want)

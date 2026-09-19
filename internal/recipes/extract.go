@@ -68,7 +68,7 @@ const MaxIngredients = 40
 const LocalizedTextValue = layout.LocalizedTextValue
 
 // ErrNoRecipes is what an extraction reports when the array is not there.
-var ErrNoRecipes = errors.New("Main.recipe array not found or implausible")
+var ErrNoRecipes = errors.New("cannot find the Main.recipe array, or it is implausible")
 
 /*
 Extract walks Main.recipe[] and is the whole book.
@@ -287,7 +287,7 @@ func Save(book game.Recipes, path string) error {
 	if err != nil {
 		return fmt.Errorf("encode the recipe book: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("make the data directory: %w", err)
 	}
 	if err := os.WriteFile(path, raw, 0o644); err != nil { //nolint:gosec // a file in the repository

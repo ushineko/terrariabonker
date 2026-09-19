@@ -122,7 +122,7 @@ twice.
 */
 func (s State) Save() error {
 	path := StatePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("make the state directory: %w", err)
 	}
 	sort.Strings(s.Enabled)
@@ -152,7 +152,7 @@ it off again.
 */
 func WithLock(pid int, do func(*State) error) error {
 	path := StatePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("make the state directory: %w", err)
 	}
 	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // a lock file beside the state

@@ -37,14 +37,15 @@ const (
 	CastSettle = 450 * time.Millisecond
 
 	/*
-		Grace past a tick's own budget for the two waits inside a reel: long
-		enough for the stub to consume the arm flag, and for the pull to register
-		a frame later.
+		ArmGrace and BiteGrace are grace past a tick's own budget for the two
+		waits inside a reel: long enough for the stub to consume the arm flag,
+		and for the pull to register a frame later.
 
 		Named rather than added inline, so the deadlines in a round are findable
 		in one place and a test can shorten them.
 	*/
-	ArmGrace  = 200 * time.Millisecond
+	ArmGrace = 200 * time.Millisecond
+	// BiteGrace is the same grace, for the wait on a bite.
 	BiteGrace = 500 * time.Millisecond
 )
 

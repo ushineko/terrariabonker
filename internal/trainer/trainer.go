@@ -128,7 +128,7 @@ func (f *Freezer) Run(ctx context.Context, seconds time.Duration, onStart func(i
 	stale := 0
 	for seconds <= 0 || time.Now().Before(deadline) {
 		if ctx.Err() != nil {
-			return nil
+			return nil //nolint:nilerr // a cancelled context is not a failure: report what was done
 		}
 		if f.Tick() {
 			stale = 0

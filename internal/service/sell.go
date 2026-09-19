@@ -224,21 +224,21 @@ func (s *Service) normalizeCoins(c *selling.Container) {
 	}
 }
 
-// Sold is one stack that was taken, and Skipped one that was left.
-type (
-	Sold struct {
-		Slot   int    `json:"slot"`
-		Type   int32  `json:"type"`
-		Name   string `json:"name"`
-		Stack  int32  `json:"stack"`
-		Copper int32  `json:"copper"`
-	}
-	Skipped struct {
-		Slot int    `json:"slot"`
-		Type int32  `json:"type"`
-		Why  string `json:"why"`
-	}
-)
+// Sold is one stack that was taken.
+type Sold struct {
+	Slot   int    `json:"slot"`
+	Type   int32  `json:"type"`
+	Name   string `json:"name"`
+	Stack  int32  `json:"stack"`
+	Copper int32  `json:"copper"`
+}
+
+// Skipped is one stack that was left.
+type Skipped struct {
+	Slot int    `json:"slot"`
+	Type int32  `json:"type"`
+	Why  string `json:"why"`
+}
 
 /*
 SellTick sells every whitelisted, unfavorited stack once. One round.

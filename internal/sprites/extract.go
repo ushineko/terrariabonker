@@ -93,7 +93,7 @@ func Extract(o Options) (Result, error) {
 	sort.Slice(npcTypes, func(i, j int) bool { return npcTypes[i] < npcTypes[j] })
 
 	dir := CacheDir(v)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return Result{}, fmt.Errorf("make the icon cache: %w", err)
 	}
 	refresh := o.Force || !IsCached(v)
@@ -311,19 +311,26 @@ func exists(path string) bool {
 func save(path string, img image.Image) error {
 	f, err := os.Create(path) //nolint:gosec // a path in this package's own cache
 	if err != nil {
-		return err
+		return fmt.Errorf("create %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
-	return png.Encode(f, img)
+	if err := png.Encode(f, img); err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	return nil
 }
 
 func loadPNG(path string) (image.Image, error) {
 	f, err := os.Open(path) //nolint:gosec // a path in this package's own cache
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
-	return png.Decode(f)
+	img, err := png.Decode(f)
+	if err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return img, nil
 }
 
 // writeDone leaves the marker that says what this cache holds. Best effort: a

@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ushineko/terrariabonker/internal/game"
 	"github.com/ushineko/terrariabonker/internal/service"
 	"github.com/ushineko/terrariabonker/internal/tiles"
 )
@@ -298,13 +297,4 @@ func ctxOf(cmd *cobra.Command) context.Context {
 		return ctx
 	}
 	return context.Background()
-}
-
-// itemName is a label for an item id, for the messages that name one.
-func itemName(id int32) string {
-	names, err := game.ItemNames()
-	if err != nil {
-		return strconv.Itoa(int(id))
-	}
-	return names.Label(int(id))
 }

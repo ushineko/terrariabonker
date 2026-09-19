@@ -13,6 +13,7 @@ package sprites
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -67,16 +68,19 @@ func SaveNPCDrawData(frames map[int32]int32, tints map[int32]NPCTint) error {
 	}
 	blob, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return fmt.Errorf("encode the draw data: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return fmt.Errorf("make the cache directory: %w", err)
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, blob, 0o644); err != nil { //nolint:gosec // read by an unprivileged extractor
-		return err
+		return fmt.Errorf("write the draw data: %w", err)
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("put the draw data in place: %w", err)
+	}
+	return nil
 }
 
 // LoadNPCDrawData reads them back, or gives empty maps when there is no file.

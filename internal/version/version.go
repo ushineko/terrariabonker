@@ -137,7 +137,7 @@ func mappedExe(mem Mem, pid int) (string, bool) {
 }
 
 /*
-VersionFromExe is the version literal compiled into the executable, when there is
+FromExe is the version literal compiled into the executable, when there is
 exactly one.
 
 This is the authority. The game's version is a string constant in its own
@@ -145,7 +145,7 @@ assembly; everything else in the process that looks like a version belongs to
 somebody else -- a runtime path, or stale data left by a previous build, which is
 what a frequency vote kept choosing.
 */
-func VersionFromExe(path string) string {
+func FromExe(path string) string {
 	stamp, err := stampOf(path)
 	if err != nil {
 		return ""
@@ -212,7 +212,7 @@ version in leftover data against a single copy of the real one.
 */
 func Detect(mem Mem, pid int) string {
 	if path, current := mappedExe(mem, pid); current {
-		if v := VersionFromExe(path); v != "" {
+		if v := FromExe(path); v != "" {
 			return v
 		}
 	}
@@ -348,7 +348,7 @@ func triple(v string) [3]int {
 		if err != nil {
 			return [3]int{-1, -1, -1}
 		}
-		out[i] = n
+		out[i] = n //nolint:gosec // the loop breaks at i >= 3
 	}
 	return out
 }

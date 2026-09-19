@@ -274,7 +274,7 @@ func TestReadingTheVersionFromAnExecutable(t *testing.T) {
 			}
 			require.NoError(t, os.WriteFile(path, body, 0o600))
 
-			got := version.VersionFromExe(path)
+			got := version.FromExe(path)
 			if c.want == "" {
 				require.Empty(t, got, "a version was read where there is none")
 				return

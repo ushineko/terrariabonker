@@ -24,7 +24,7 @@ to be invalidated by.
 func stampOf(path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("stat %s: %w", path, err)
 	}
 	inode, _ := inodeOf(info)
 	return fmt.Sprintf("%d:%d:%d", inode, info.ModTime().UnixNano(), info.Size()), nil

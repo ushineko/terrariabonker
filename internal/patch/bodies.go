@@ -257,7 +257,7 @@ func OreExtractBody(b *Builder, overwrite []byte) ([]byte, error) {
 	playerArr, okArr := readWord(b.Mem, anchor-0xA)
 	myPlayer, okMy := readWord(b.Mem, anchor-4)
 	if !okArr || !okMy || playerArr == 0 || myPlayer == 0 {
-		return nil, fmt.Errorf("Main.player / Main.myPlayer are not readable")
+		return nil, fmt.Errorf("cannot read Main.player / Main.myPlayer")
 	}
 	queue := b.Arena + OreQueueOff
 
@@ -283,8 +283,9 @@ func OreExtractBody(b *Builder, overwrite []byte) ([]byte, error) {
 		return nil, fmt.Errorf("the extractor loop grew to %d bytes -- too far to "+
 			"jump back in one byte", len(body))
 	}
-	loop := append(body, 0x75, byte(256-(len(body)+2))) //nolint:gosec // checked above
-	tail := append(loop, 0x8B, 0xE3)                    // restore esp, either convention
+	body = append(body, 0x75, byte(256-(len(body)+2))) //nolint:gosec // checked above
+	body = append(body, 0x8B, 0xE3)                    // restore esp, either convention
+	tail := body
 
 	setup := []byte{0x83, 0xFF, OreMaxBatch} // cmp the count against the cap
 	setup = append(setup, 0x76, 0x05)

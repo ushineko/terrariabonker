@@ -133,7 +133,7 @@ func plant() *memtest.FakeMem {
 			continue
 		}
 		// Laid out contiguously down each column, as the pool does.
-		at := uint32(objects + uint32(idx)*record) //nolint:gosec // a planted address
+		at := objects + uint32(idx)*record //nolint:gosec // a planted address
 		mem.PokeBytes(entries+uint32(idx)*4, u32(at))
 		mem.PokeBytes(at+0x08, u16(c.id))
 		var header uint16

@@ -87,7 +87,7 @@ func (a *App) Serve(ctx context.Context, in io.Reader, w io.Writer) error {
 	lines.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
 	for lines.Scan() {
 		if ctx.Err() != nil {
-			return nil
+			return nil //nolint:nilerr // a cancelled context is not a failure: report what was done
 		}
 		line := bytes.TrimSpace(lines.Bytes())
 		if len(line) == 0 {
@@ -126,7 +126,10 @@ func (a *App) Serve(ctx context.Context, in io.Reader, w io.Writer) error {
 		ok, out := a.once(ctx, req.Argv)
 		a.answer(w, req.ID, ok, out)
 	}
-	return lines.Err()
+	if err := lines.Err(); err != nil {
+		return fmt.Errorf("read the request stream: %w", err)
+	}
+	return nil
 }
 
 /*

@@ -139,9 +139,9 @@ func TestTheSweepsFindWhatWasPlanted(t *testing.T) {
 }
 
 // potions is the favorited potions as slot and buff pairs.
-func potions(inv *inventory.Inventory, min int32) [][2]int32 {
+func potions(inv *inventory.Inventory, least int32) [][2]int32 {
 	out := [][2]int32{}
-	for _, p := range inv.FavoritedPotions(min) {
+	for _, p := range inv.FavoritedPotions(least) {
 		out = append(out, [2]int32{int32(p.Slot), p.Buff}) //nolint:gosec // a slot index
 	}
 	return out

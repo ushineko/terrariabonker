@@ -463,7 +463,7 @@ const (
 // there.
 func plantTile(mem *execMem, x, y int32, id uint16, active bool) {
 	idx := worldHeight*x + y
-	at := uint32(tileObjectsAt + uint32(idx)*tileRecord)              //nolint:gosec // a planted address
+	at := tileObjectsAt + uint32(idx)*tileRecord                      //nolint:gosec // a planted address
 	mem.PokeBytes(tileBufAt+layout.ArrDataOff+uint32(idx)*4, u32(at)) //nolint:gosec // an index
 	mem.PokeBytes(at+0x08, []byte{byte(id), byte(id >> 8)})
 	var header uint16
@@ -637,7 +637,7 @@ func (m *miningMem) Read(addr uint32, size int) []byte {
 // readTile is one planted tile's id.
 func readTile(mem *execMem, x, y int32) (uint16, bool) {
 	idx := worldHeight*x + y
-	at := uint32(tileObjectsAt + uint32(idx)*tileRecord) //nolint:gosec // a planted address
+	at := tileObjectsAt + uint32(idx)*tileRecord //nolint:gosec // a planted address
 	raw := mem.Read(at+0x08, 2)
 	if len(raw) < 2 {
 		return 0, false
@@ -916,7 +916,7 @@ func plantBankInto(mem *execMem) {
 	mem.PokeBytes(bankChestAt+layout.ChestItemOff, u32(bankArrAt))
 	mem.PokeI32(bankArrAt+layout.ArrLenOff, layout.BankSlots)
 	for i := range layout.BankSlots {
-		at := uint32(bankItemsAt + uint32(i)*0x200) //nolint:gosec // a slot index
+		at := bankItemsAt + uint32(i)*0x200 //nolint:gosec // a slot index
 		mem.PokeBytes(bankArrAt+layout.ArrDataOff+uint32(i)*4, u32(at))
 		mem.PokeBytes(at, u32(itemVTable))
 	}
@@ -933,7 +933,7 @@ func fillEverySlot(mem *execMem) {
 		if i == sellableSlot {
 			continue
 		}
-		at := uint32(liveItems + uint32(i)*itemStride) //nolint:gosec // a slot index
+		at := liveItems + uint32(i)*itemStride //nolint:gosec // a slot index
 		mem.PokeBytes(liveArr+layout.ArrDataOff+uint32(i)*4, u32(at))
 		mem.PokeBytes(at, u32(itemVTable))
 		mem.PokeI32(at+uint32(layout.ItemType), 3507) //nolint:gosec // a field offset
@@ -955,7 +955,7 @@ func (c *readCounter) Read(addr uint32, size int) []byte {
 
 // plantBankCoins puts a stack of one denomination in a bank slot.
 func plantBankCoins(mem *execMem, slot int, coin, stack int32) {
-	at := uint32(bankItemsAt + uint32(slot)*0x200)  //nolint:gosec // a slot index
+	at := bankItemsAt + uint32(slot)*0x200          //nolint:gosec // a slot index
 	mem.PokeI32(at+uint32(layout.ItemType), coin)   //nolint:gosec // a field offset
 	mem.PokeI32(at+uint32(layout.ItemStack), stack) //nolint:gosec // a field offset
 }

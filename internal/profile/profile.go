@@ -164,7 +164,7 @@ func migrate(p Profile) Profile {
 // Save writes the profile atomically, so a reader never sees half of one.
 func (p Profile) Save() error {
 	path := Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("make the profile directory: %w", err)
 	}
 	raw, err := json.Marshal(p.filled())
@@ -175,7 +175,10 @@ func (p Profile) Save() error {
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil { //nolint:gosec // the user's own settings
 		return fmt.Errorf("write the profile: %w", err)
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("put the profile in place: %w", err)
+	}
+	return nil
 }
 
 /*
@@ -188,7 +191,7 @@ first.
 */
 func Update(change func(*Profile) error) error {
 	path := Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("make the profile directory: %w", err)
 	}
 	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // a lock beside the profile

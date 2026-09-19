@@ -95,12 +95,12 @@ func (p *Player) SetMaxMana(value int32) bool {
 // HealFull sets life to the cap in effect, and reports false when the cap could
 // not be read rather than writing a number it guessed.
 func (p *Player) HealFull() bool {
-	max, ok := p.StatLifeMax()
-	return ok && p.SetLife(max)
+	limit, ok := p.StatLifeMax()
+	return ok && p.SetLife(limit)
 }
 
 // ManaFull sets mana to the cap in effect.
 func (p *Player) ManaFull() bool {
-	max, ok := p.StatManaMax()
-	return ok && p.SetMana(max)
+	limit, ok := p.StatManaMax()
+	return ok && p.SetMana(limit)
 }

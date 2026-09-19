@@ -2,6 +2,7 @@ package xnb
 
 import (
 	"encoding/binary"
+	"fmt"
 	"image"
 	"os"
 )
@@ -104,7 +105,7 @@ wrong picture in the cache that nobody notices until they look at that item.
 func ReadTexture(path string) (*image.NRGBA, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // a path the caller chose
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	content, err := Decompress(raw)
 	if err != nil {

@@ -35,7 +35,7 @@ var (
 )
 
 const (
-	CoinMaxStack = 100 // a hundred of a coin becomes one of the next tier up
+	CoinMaxStack = 100 //nolint:revive // documented by the comment on the line // a hundred of a coin becomes one of the next tier up
 	SellDivisor  = 5
 
 	// PiggyBankItem is placeable anywhere, so carrying one makes the bank

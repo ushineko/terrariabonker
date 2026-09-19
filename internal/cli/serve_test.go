@@ -34,7 +34,7 @@ func served(t *testing.T, mem *execMem, lines ...string) []reply {
 		Elevate: func() error { return nil },
 		Attach: func() (*cli.Game, error) {
 			if mem == nil {
-				return nil, errors.New("no player found. Load into a world first.")
+				return nil, errors.New("no player found -- load into a world first")
 			}
 			return &cli.Game{
 				/*

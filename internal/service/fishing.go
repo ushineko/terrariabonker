@@ -39,18 +39,18 @@ type Given struct {
 	Stack int32 `json:"stack,omitempty"`
 }
 
-// RodRow and BaitRow are what the player carries.
-type (
-	RodRow struct {
-		Slot  int  `json:"slot"`
-		Power byte `json:"power"`
-	}
-	BaitRow struct {
-		Slot  int   `json:"slot"`
-		Power byte  `json:"power"`
-		Stack int32 `json:"stack"`
-	}
-)
+// RodRow is a rod the player carries.
+type RodRow struct {
+	Slot  int  `json:"slot"`
+	Power byte `json:"power"`
+}
+
+// BaitRow is bait the player carries.
+type BaitRow struct {
+	Slot  int   `json:"slot"`
+	Power byte  `json:"power"`
+	Stack int32 `json:"stack"`
+}
 
 /*
 FishingKit gives a rod and bait to a player who has neither, and does nothing

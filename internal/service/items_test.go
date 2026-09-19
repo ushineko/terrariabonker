@@ -99,8 +99,8 @@ func TestASlotThatChangedIsRefused(t *testing.T) {
 	sameMemory(t, before, mem.Hex(), "something was written anyway")
 
 	// Told what is really there, it goes ahead.
-	real := int32(188)
-	require.NoError(t, svc.SetItem(1, 9, service.ItemEdit{ExpectType: &real}),
+	planted := int32(188)
+	require.NoError(t, svc.SetItem(1, 9, service.ItemEdit{ExpectType: &planted}),
 		"a correct expectation was refused")
 	require.NotEqual(t, before, mem.Hex(), "nothing was written")
 }

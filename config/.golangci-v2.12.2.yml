@@ -18,8 +18,8 @@ linters:
     - wrapcheck
   settings:
     gosec:
-      # G304 (file inclusion via variable) is inherent to a library whose font
-      # scanner, diagram loader and file pickers read user-nominated paths; it
+      # G304 (file inclusion via variable) is inherent to a tool whose sprite
+      # extractor, profile store and content loader read user-nominated paths; it
       # is excluded rather than suppressed at every call site.
       excludes:
         - G304
@@ -29,7 +29,7 @@ linters:
       # store: ...". wrapcheck stays on for genuinely external errors, which is
       # where the missing context actually hurts.
       ignore-package-globs:
-        - github.com/ushineko/fynedesygn/*
+        - github.com/ushineko/terrariabonker/*
       ignore-sigs:
         - .Errorf(
         - errors.New(
@@ -43,6 +43,11 @@ linters:
         linters:
           - gosec
           - wrapcheck
+          # A fixture's Read and Write are reached through an interface, so
+          # `unused` calls them dead -- and deleting one silently stops a
+          # planted game mining, which is a passing test that proves nothing.
+          # It happened.
+          - unused
 
 formatters:
   enable:

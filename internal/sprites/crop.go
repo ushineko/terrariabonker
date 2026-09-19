@@ -53,7 +53,7 @@ func Deanimate(img image.Image) image.Image {
 	for k, b := range blocks {
 		// Each block has to sit inside its own frame slot, or this is not a
 		// strip of equal frames and cropping it would cut a sprite in half.
-		if !(k*frame <= b[0] && b[1] < (k+1)*frame) {
+		if k*frame > b[0] || b[1] >= (k+1)*frame {
 			return img
 		}
 	}

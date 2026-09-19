@@ -139,7 +139,7 @@ func New(mem Mem, staticBase uint32) (*TileMap, error) {
 		bounds, _ = mem.ReadU32(buf + boundsOff)
 	}
 	if bounds == 0 {
-		return nil, fmt.Errorf("Main.tile is not readable -- is a world loaded?")
+		return nil, fmt.Errorf("cannot read Main.tile -- is a world loaded?")
 	}
 	tm := &TileMap{Mem: mem, Buf: buf}
 	tm.Stride, _ = mem.ReadI32(bounds + 0x08) // the buffer's height, which is the stride
