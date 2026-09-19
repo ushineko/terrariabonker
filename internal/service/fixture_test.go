@@ -3,6 +3,9 @@ package service_test
 import (
 	"fmt"
 	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/locate"
@@ -63,6 +66,10 @@ const (
 	liveArr    = base + 0x10000
 	liveItems  = base + 0x14000
 	itemStride = 0x400
+
+	// The vtable every item object is behind, planted so the template search has
+	// something to recognise.
+	itemVTable = 0xDEADBEEF
 )
 
 /*
@@ -227,6 +234,13 @@ func plantInventory(mem *memtest.FakeMem, life, arr, items uint32, image []item)
 		}
 		addr := items + uint32(it.slot)*itemStride                        //nolint:gosec // a slot index
 		mem.PokeBytes(arr+layout.ArrDataOff+uint32(it.slot)*4, u32(addr)) //nolint:gosec // a slot index
+		/*
+			Every item object carries the class's vtable, as the game's do. It is
+			what the template search matches on: without it there is nothing to
+			tell an item object from any other four bytes that happen to hold an
+			item type.
+		*/
+		mem.PokeBytes(addr, u32(itemVTable))
 		for _, f := range it.fields {
 			off := uint32(layout.Offsets[f.name]) //nolint:gosec // an offset from the table
 			switch f.kind {
@@ -316,6 +330,7 @@ func pythonInventory(b *strings.Builder, life, arr, items uint32, image []item) 
 		}
 		addr := items + uint32(it.slot)*itemStride //nolint:gosec // a slot index
 		fmt.Fprintf(b, "mem.poke_i32(%d + I.ARR_DATA_OFF + %d * 4, %d)\n", arr, it.slot, addr)
+		fmt.Fprintf(b, "mem.poke_bytes(%d, struct.pack(\"<I\", %d))\n", addr, itemVTable)
 		for _, f := range it.fields {
 			fmt.Fprintf(b, "%s(%d + I.%s, %v)\n", f.kind, addr, f.name, f.value)
 		}
@@ -430,4 +445,46 @@ var layoutArrData = uint32(layout.Offsets["ARR_DATA_OFF"]) //nolint:gosec // a s
 // get_LocalPlayer.
 func plantNothing() *execMem {
 	return &execMem{memtest.New(base, 0x4000)}
+}
+
+// The item offsets the fixture plants with, from the one table that declares
+// them.
+var (
+	layoutItemType      = int(layout.Offsets["ITEM_TYPE"])
+	layoutItemDamage    = int(layout.Offsets["ITEM_DAMAGE"])
+	layoutItemUseTime   = int(layout.Offsets["ITEM_USE_TIME"])
+	layoutItemUseAnim   = int(layout.Offsets["ITEM_USE_ANIM"])
+	layoutItemRare      = int(layout.Offsets["ITEM_RARE"])
+	layoutItemKnockback = int(layout.Offsets["ITEM_KNOCKBACK"])
+	layoutItemScale     = int(layout.Offsets["ITEM_SCALE"])
+)
+
+// itemAddr is where the live player's item for a slot was planted.
+func itemAddr(slot int) uint32 {
+	return liveItems + uint32(slot)*itemStride //nolint:gosec // a slot index
+}
+
+/*
+sameMemory compares two whole memory images and, when they differ, says where.
+
+Printing the difference between two images this size is useless -- hundreds of
+kilobytes of hex, which the test runner will not even display. The address of the
+first byte that differs and a few either side is what a person needs: it names
+the slot, the copy or the field that went wrong.
+*/
+func sameMemory(t *testing.T, want, got, msg string) {
+	t.Helper()
+	if want == got {
+		return
+	}
+	require.Equalf(t, len(want), len(got), "%s: the images are different sizes", msg)
+
+	// Two hex characters per byte, so the byte is the character index halved.
+	at := 0
+	for at < len(want) && want[at] == got[at] {
+		at++
+	}
+	lo, hi := max(0, at/2-8), min(len(want)/2, at/2+16)
+	require.Failf(t, msg, "first difference at %#x\n  want % s\n  got  % s",
+		base+at/2, want[lo*2:hi*2], got[lo*2:hi*2])
 }

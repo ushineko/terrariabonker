@@ -82,6 +82,10 @@ type Service struct {
 	// the statics do not move while the process lives.
 	mainBase uint32
 	haveBase bool
+
+	// Where each item type's pristine template is, found once: the search is a
+	// full region scan and it is the same answer all session.
+	templateAddrs map[int32]uint32
 }
 
 // New is a service over memory that is already open.
@@ -101,6 +105,7 @@ func Connect() (*Service, error) {
 func (s *Service) Invalidate() {
 	s.blocks, s.anchor, s.found, s.build = nil, 0, false, nil
 	s.mainBase, s.haveBase = 0, false
+	s.templateAddrs = nil
 }
 
 /*

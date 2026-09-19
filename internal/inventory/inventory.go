@@ -89,9 +89,9 @@ func (inv *Inventory) ArrayAddr() (uint32, bool) {
 	return ptr, ok && ptr != 0
 }
 
-// itemAddr is the Item object in a slot, or nothing when the array has gone or
+// ItemAddr is the Item object in a slot, or nothing when the array has gone or
 // the slot is genuinely empty of an object.
-func (inv *Inventory) itemAddr(index int) (uint32, bool) {
+func (inv *Inventory) ItemAddr(index int) (uint32, bool) {
 	arr, ok := inv.ArrayAddr()
 	if !ok {
 		return 0, false
@@ -102,7 +102,7 @@ func (inv *Inventory) itemAddr(index int) (uint32, bool) {
 
 // ReadSlot is the item in a slot, or nothing when there is no object there.
 func (inv *Inventory) ReadSlot(index int) (Slot, bool) {
-	addr, ok := inv.itemAddr(index)
+	addr, ok := inv.ItemAddr(index)
 	if !ok {
 		return Slot{}, false
 	}
@@ -333,7 +333,7 @@ func (inv *Inventory) NonemptyCount() int {
 
 // setI32 writes one of an item's integer fields.
 func (inv *Inventory) setI32(index, off int, value int32) bool {
-	addr, ok := inv.itemAddr(index)
+	addr, ok := inv.ItemAddr(index)
 	if !ok {
 		return false
 	}
@@ -342,7 +342,7 @@ func (inv *Inventory) setI32(index, off int, value int32) bool {
 
 // setByte writes one of an item's byte fields.
 func (inv *Inventory) setByte(index, off int, value byte) bool {
-	addr, ok := inv.itemAddr(index)
+	addr, ok := inv.ItemAddr(index)
 	if !ok {
 		return false
 	}
@@ -418,7 +418,7 @@ useAnim is the visual and useTime is the effect, and they are equal on most
 items and not on all, so both are written.
 */
 func (inv *Inventory) SetUseSpeed(index int, useTime, useAnim int32) bool {
-	addr, ok := inv.itemAddr(index)
+	addr, ok := inv.ItemAddr(index)
 	if !ok {
 		return false
 	}
@@ -530,7 +530,7 @@ A bonus with no verified offset is named in the result rather than dropped: a
 modifier that quietly loses its crit bonus is the bug this reporting exists for.
 */
 func (inv *Inventory) ApplyPrefixStats(index int, mults, base map[string]float64) PrefixResult {
-	addr, ok := inv.itemAddr(index)
+	addr, ok := inv.ItemAddr(index)
 	if !ok {
 		return PrefixResult{Written: map[string]float64{}, Skipped: sortedKeys(mults)}
 	}
@@ -583,3 +583,32 @@ func knownStat(stat string) bool {
 	}
 	return false
 }
+
+/*
+PrefixBaseFields is where each field a modifier scales lives, for reading an
+item's base stats out of a pristine template block.
+
+The same list the scaling uses, in the same order, so the two cannot describe
+different sets of fields.
+*/
+var PrefixBaseFields = func() []struct {
+	Key   string
+	Off   int
+	Float bool
+} {
+	var out []struct {
+		Key   string
+		Off   int
+		Float bool
+	}
+	for _, entry := range prefixFields {
+		for _, f := range entry.fields {
+			out = append(out, struct {
+				Key   string
+				Off   int
+				Float bool
+			}{Key: f.key, Off: f.off, Float: f.float})
+		}
+	}
+	return out
+}()
