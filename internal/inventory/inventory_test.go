@@ -1,179 +1,209 @@
 package inventory_test
 
 import (
-	"context"
-	"encoding/json"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/inventory"
+	"github.com/ushineko/terrariabonker/internal/memtest"
 )
 
 /*
-The two inventories read the same items and leave the same bytes behind.
+Reading an inventory, and writing to one.
 
 An item's fields are two hundred and fifty bytes of adjacent integers, and a
 reader that is one field out gets a plausible number from the wrong place --
-useTime read as stack, defense read as headSlot. Nothing here asserts a number
-this produced: the Python is asked over the same planted image, and every write
-is compared as the whole buffer afterwards, so a field written to the wrong
-offset fails as surely as one written with the wrong value.
+useTime read as stack, defense read as headSlot. So the reads are checked
+against what the fixture planted, and every write is checked as the whole
+buffer: a field written to the wrong offset then fails as surely as one written
+with the wrong value.
+
+The buffer is compared by digest rather than by writing a hundred kilobytes of
+hex into this file. A failure says the bytes changed and not which, which is
+what the assertions beside it are for -- and a change to what a write does is
+meant to be a decision rather than a surprise.
+
+Every digest and every expectation here was agreed with the implementation this
+was ported from, while both existed.
 */
 
-const pythonTimeout = time.Minute
+// image is the whole planted buffer, as one short string.
+func image(mem *memtest.FakeMem) string {
+	sum := sha256.Sum256([]byte(mem.Hex()))
+	return hex.EncodeToString(sum[:8])
+}
 
-var repoRoot = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
-}()
+/*
+Every slot reads back as what was planted in it.
 
-func askPython(t *testing.T, script string, into any) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), pythonTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script) //nolint:gosec // a generated fixture
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil && strings.Contains(string(out), "ModuleNotFoundError") {
-		t.Skip("the Python package is not importable here")
+The image is described field by field in the fixture, so this is the round trip:
+each named field written at its own offset, read back through the reader that
+has to find it again.
+*/
+func TestReadingSlotsIsWhatWasPlanted(t *testing.T) {
+	slots := inventory.New(plant(), life).Slots()
+
+	byIndex := map[int]inventory.Slot{}
+	for _, s := range slots {
+		byIndex[s.Index] = s
 	}
-	require.NoErrorf(t, err, "asking the Python: %s", out)
-	require.NoError(t, json.Unmarshal(out, into))
-}
+	require.NotContains(t, byIndex, 12, "a slot with no object was read as one")
+	require.Contains(t, byIndex, 13, "an empty slot is still a slot")
 
-// asJSON is a Go value as the Python would print it, for comparing two shapes
-// without asserting either one's spelling.
-func asJSON(t *testing.T, v any) any {
-	t.Helper()
-	b, err := json.Marshal(v)
-	require.NoError(t, err)
-	var out any
-	require.NoError(t, json.Unmarshal(b, &out))
-	return out
-}
-
-// Every field of every slot is read from the same place.
-func TestReadingSlotsMatchesThePython(t *testing.T) {
-	var want any
-	askPython(t, preamble()+`
-print(json.dumps([{
-    "index": s.index, "item_addr": s.item_addr, "type": s.type, "stack": s.stack,
-    "use_time": s.use_time, "use_anim": s.use_anim, "pick": s.pick,
-    "tile_boost": s.tile_boost, "damage": s.damage, "auto_reuse": s.auto_reuse,
-    "rare": s.rare, "defense": s.defense, "prefix": s.prefix, "flags": s.flags,
-} for s in inv.slots()]))`, &want)
-
-	inv := inventory.New(plant(), life)
-	require.Equal(t, want, asJSON(t, inv.Slots()), "the two read different slots")
-}
-
-// The sweeps over the whole inventory agree: which slots hold what.
-func TestTheSweepsMatchThePython(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+`
-gear = inv.fishing_gear()
-print(json.dumps({
-    "potions": inv.favorited_potions(),
-    "potions_min2": inv.favorited_potions(2),
-    "rods": gear["rods"], "baits": gear["baits"],
-    "selected": inv.selected_slot(), "holding_rod": inv.holding_rod(),
-    "nonempty": inv.nonempty_count(),
-    "pickaxes": inv.find_type(3509), "missing": inv.find_type(999999),
-}))`, &want)
-
-	inv := inventory.New(plant(), life)
-
-	// The Python reports a potion as a pair and a rod as a triple, so the
-	// comparison is against the numbers rather than the shape each side chose.
-	potions := func(min int32) [][]int32 {
-		var out [][]int32
-		for _, p := range inv.FavoritedPotions(min) {
-			out = append(out, []int32{int32(p.Slot), p.Buff})
+	for _, it := range inventoryImage {
+		if it.absent {
+			continue
 		}
-		return out
+		got, read := byIndex[it.slot]
+		require.Truef(t, read, "slot %d was not read", it.slot)
+		require.Equalf(t, itemAddr(it.slot), got.ItemAddr,
+			"slot %d points somewhere else", it.slot)
+		for _, f := range it.fields {
+			want, surfaced := plantedField(got, f.name)
+			if !surfaced {
+				continue // a field a slot does not carry; the sweeps below cover those
+			}
+			require.Equalf(t, f.value, want,
+				"slot %d read %s from the wrong place", it.slot, f.name)
+		}
 	}
-	require.Equal(t, want["potions"], asJSON(t, potions(1)), "different favorited potions")
-	require.Equal(t, want["potions_min2"], asJSON(t, potions(2)), "a stack gate differs")
+}
+
+/*
+plantedField is one field of a read slot, under the name the fixture plants it
+by, and whether the slot carries it at all.
+
+A slot surfaces the numbers the window shows and the damage classes a modifier
+is chosen by. The rest -- the float fields, the buff a potion grants, a rod's
+power -- are read by the sweeps rather than by the slot, and are covered there.
+*/
+func plantedField(s inventory.Slot, name string) (float64, bool) {
+	numbers := map[string]int32{
+		"ITEM_TYPE": s.Type, "ITEM_STACK": s.Stack, "ITEM_PICK": s.Pick,
+		"ITEM_USE_TIME": s.UseTime, "ITEM_USE_ANIM": s.UseAnim,
+		"ITEM_DAMAGE": s.Damage, "ITEM_RARE": s.Rare,
+		"ITEM_AUTOREUSE": s.AutoReuse, "ITEM_TILEBOOST": s.TileBoost,
+		"ITEM_DEFENSE": s.Defense, "ITEM_PREFIX": s.Prefix,
+	}
+	if v, carried := numbers[name]; carried {
+		return float64(v), true
+	}
+	flags := map[string]bool{
+		"ITEM_ACCESSORY": s.Flags.Accessory, "ITEM_MELEE": s.Flags.Melee,
+		"ITEM_MAGIC": s.Flags.Magic, "ITEM_RANGED": s.Flags.Ranged,
+		"ITEM_SUMMON": s.Flags.Summon,
+	}
+	on, carried := flags[name]
+	if !carried {
+		return 0, false
+	}
+	if on {
+		return 1, true
+	}
+	return 0, true
+}
+
+/*
+The sweeps pick out exactly the slots the fixture says they should.
+
+Each one is a rule about what an item is -- a potion is favorited and consumable
+and has a buff, a rod has a fishing power and a type -- and the image carries a
+near miss for every one of them.
+*/
+func TestTheSweepsFindWhatWasPlanted(t *testing.T) {
+	inv := inventory.New(plant(), life)
+
+	// Favorited, consumable, with a buff. The pet in slot 3 is favorited and
+	// not consumable; the potion in slot 2 is consumable and not favorited.
+	require.Equal(t, [][2]int32{{1, 11}, {4, 12}}, potions(inv, 1),
+		"a different set of potions is favorited")
+	// And a stack gate drops slot 4, which holds one.
+	require.Equal(t, [][2]int32{{1, 11}}, potions(inv, 2), "the stack gate differs")
 
 	gear := inv.FishingGear()
-	var rods [][]int32
-	for _, r := range gear.Rods {
-		rods = append(rods, []int32{int32(r.Slot), int32(r.Power)})
-	}
-	var baits [][]int32
-	for _, b := range gear.Baits {
-		baits = append(baits, []int32{int32(b.Slot), int32(b.Power), b.Stack})
-	}
-	require.Equal(t, want["rods"], asJSON(t, rods), "different rods")
-	require.Equal(t, want["baits"], asJSON(t, baits), "different baits")
+	require.Equal(t, []inventory.Rod{{Slot: 5, Power: 25}, {Slot: 7, Power: 40}}, gear.Rods,
+		"a different set of rods; slot 8 has a power and no item")
+	require.Equal(t, []inventory.Bait{{Slot: 6, Power: 15, Stack: 12}}, gear.Baits)
 
 	slot, ok := inv.SelectedSlot()
 	require.True(t, ok, "the held slot did not read")
-	require.Equal(t, want["selected"], asJSON(t, slot), "a different held slot")
-	require.Equal(t, want["holding_rod"], inv.HoldingRod(), "disagree about holding a rod")
-	require.Equal(t, want["nonempty"], asJSON(t, inv.NonemptyCount()), "a different item count")
-	require.Equal(t, want["pickaxes"], asJSON(t, inv.FindType(3509)), "a type was found elsewhere")
-	require.Equal(t, want["missing"], asJSON(t, inv.FindType(999999)), "a type nobody has was found")
+	require.Equal(t, selectedSlot, slot)
+	require.False(t, inv.HoldingRod(), "the held slot is the pickaxe, not the rod")
+
+	require.Equal(t, 10, inv.NonemptyCount(), "a different number of items is carried")
+	require.Equal(t, []int{0}, inv.FindType(3509), "the pickaxe is somewhere else")
+	require.Empty(t, inv.FindType(999999), "a type nobody has was found")
 }
 
-// Every write lands on the same bytes.
-func TestWritingItemsMatchesThePython(t *testing.T) {
-	cases := []struct {
+// potions is the favorited potions as slot and buff pairs.
+func potions(inv *inventory.Inventory, min int32) [][2]int32 {
+	out := [][2]int32{}
+	for _, p := range inv.FavoritedPotions(min) {
+		out = append(out, [2]int32{int32(p.Slot), p.Buff}) //nolint:gosec // a slot index
+	}
+	return out
+}
+
+/*
+Every write lands on the same bytes.
+
+The digest covers the whole buffer, so a field written at the wrong offset fails
+here even though the value it wrote was right -- which is the failure this file
+exists for, because the fields are adjacent and a neighbour takes a plausible
+number without complaint.
+*/
+func TestWritingItems(t *testing.T) {
+	for _, c := range []struct {
 		name   string
-		python string
+		digest string
 		run    func(inv *inventory.Inventory) bool
 	}{
-		{"stack", "inv.set_stack(1, 99)", func(i *inventory.Inventory) bool { return i.SetStack(1, 99) }},
-		{"type", "inv.set_type(13, 3507)", func(i *inventory.Inventory) bool { return i.SetType(13, 3507) }},
-		{"damage", "inv.set_damage(9, 500)", func(i *inventory.Inventory) bool { return i.SetDamage(9, 500) }},
-		{"pick", "inv.set_pick(0, 200)", func(i *inventory.Inventory) bool { return i.SetPick(0, 200) }},
-		{"defense", "inv.set_defense(9, 12)", func(i *inventory.Inventory) bool { return i.SetDefense(9, 12) }},
-		{"tile boost", "inv.set_tile_boost(0, 20)", func(i *inventory.Inventory) bool { return i.SetTileBoost(0, 20) }},
-		{"auto reuse on", "inv.set_auto_reuse(9, True)", func(i *inventory.Inventory) bool { return i.SetAutoReuse(9, true) }},
-		{"auto reuse off", "inv.set_auto_reuse(0, False)", func(i *inventory.Inventory) bool { return i.SetAutoReuse(0, false) }},
-		{"prefix", "inv.set_prefix(9, 81)", func(i *inventory.Inventory) bool { return i.SetPrefix(9, 81) }},
+		{"stack", "154a4c58a990a31c", func(i *inventory.Inventory) bool { return i.SetStack(1, 99) }},
+		{"type", "350cd7b485f3a844", func(i *inventory.Inventory) bool { return i.SetType(13, 3507) }},
+		{"damage", "38f3220c8e2b9bf3", func(i *inventory.Inventory) bool { return i.SetDamage(9, 500) }},
+		{"pick", "396d2f9d89d6b3ad", func(i *inventory.Inventory) bool { return i.SetPick(0, 200) }},
+		{"defense", "18bae4f707e12dec", func(i *inventory.Inventory) bool { return i.SetDefense(9, 12) }},
+		{"tile boost", "afd5cc5fdc7d9be3", func(i *inventory.Inventory) bool { return i.SetTileBoost(0, 20) }},
+		{"auto reuse on", "ea27509b66c3d0e7", func(i *inventory.Inventory) bool { return i.SetAutoReuse(9, true) }},
+		{"auto reuse off", "7f75a2fe509d9b8d", func(i *inventory.Inventory) bool { return i.SetAutoReuse(0, false) }},
+		{"prefix", "10e62d514fe07771", func(i *inventory.Inventory) bool { return i.SetPrefix(9, 81) }},
 		// A prefix over a byte is masked rather than refused, because the game's
 		// own field is a byte and the caller's number came from a list of them.
-		{"prefix wraps", "inv.set_prefix(9, 0x141)", func(i *inventory.Inventory) bool { return i.SetPrefix(9, 0x141) }},
-		{"use speed", "inv.set_use_speed(0, 8, 13)", func(i *inventory.Inventory) bool { return i.SetUseSpeed(0, 8, 13) }},
-		{"fishing power", "inv.set_fishing_power(5, 200)", func(i *inventory.Inventory) bool { return i.SetFishingPower(5, 200) }},
-		{"long reach", "inv.long_reach(20)", func(i *inventory.Inventory) bool { return len(i.LongReach(20)) > 0 }},
-		{"fast mining", "inv.make_fast_mining(8, 13, 200)", func(i *inventory.Inventory) bool { return len(i.MakeFastMining(8, 13, 200)) > 0 }},
-		{"fast mining, power left alone", "inv.make_fast_mining(8, 13, None)", func(i *inventory.Inventory) bool {
+		{"prefix wraps", "227c7c80fa0581e5", func(i *inventory.Inventory) bool { return i.SetPrefix(9, 0x141) }},
+		{"use speed", "8963d9d3e37ba8e1", func(i *inventory.Inventory) bool { return i.SetUseSpeed(0, 8, 13) }},
+		{"fishing power", "db56a74ac3ae60c8", func(i *inventory.Inventory) bool { return i.SetFishingPower(5, 200) }},
+		{"long reach", "68444e041632a664", func(i *inventory.Inventory) bool { return len(i.LongReach(20)) > 0 }},
+		{"fast mining", "e139b346c5421fae", func(i *inventory.Inventory) bool { return len(i.MakeFastMining(8, 13, 200)) > 0 }},
+		{"fast mining, power left alone", "77214a0bd3407e68", func(i *inventory.Inventory) bool {
 			return len(i.MakeFastMining(8, 13, -1)) > 0
 		}},
-	}
-
-	for _, c := range cases {
+	} {
 		t.Run(c.name, func(t *testing.T) {
-			var want struct {
-				Buf string `json:"buf"`
-			}
-			askPython(t, preamble()+c.python+`
-print(json.dumps({"buf": mem.buf.hex()}))`, &want)
-
 			mem := plant()
+			before := image(mem)
 			require.True(t, c.run(inventory.New(mem, life)), "the write was refused")
-			require.Equal(t, want.Buf, mem.Hex(), "the two left different memory behind")
+			require.NotEqual(t, before, image(mem), "the write changed nothing")
+			require.Equal(t, c.digest, image(mem),
+				"different bytes; if that was deliberate, update the digest")
 		})
 	}
 }
 
-// The slots a sweep reports it touched are the same slots.
-func TestTheSweepsReportTheSameSlots(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+`
-print(json.dumps({"reach": inv.long_reach(20), "mining": inv.make_fast_mining()}))`, &want)
+/*
+The slots a sweep reports it touched are the slots it touched.
 
+Reach reaches everything with an item in it; mining reaches only what has pick
+power, which is the two pickaxes and not the sword beside them.
+*/
+func TestTheSweepsReportTheSlotsTheyTouched(t *testing.T) {
 	inv := inventory.New(plant(), life)
-	require.Equal(t, want["reach"], asJSON(t, inv.LongReach(20)), "reach touched different slots")
-	require.Equal(t, want["mining"], asJSON(t, inv.MakeFastMining(8, 13, 200)), "mining touched different slots")
+	require.Equal(t, []int{0, 1, 2, 3, 4, 5, 6, 7, 9, 11}, inv.LongReach(20),
+		"reach touched different slots")
+	require.Equal(t, []int{0, 11}, inv.MakeFastMining(8, 13, 200),
+		"mining touched something that is not a pickaxe")
 }
 
 /*
@@ -183,49 +213,59 @@ This is the one place a rounding rule and a base value can disagree without
 either side looking wrong, and writing an item is permanent, so both the bytes
 and the report are compared.
 */
-func TestApplyingAModifierMatchesThePython(t *testing.T) {
-	const pythonBase = `{"damage": 12, "knockback": 5.5, "useanim": 25, "usetime": 20,
-                          "scale": 1.0, "shootspeed": 0.0, "mana": 0, "crit": 0}`
-	goBase := map[string]float64{
+func TestApplyingAModifier(t *testing.T) {
+	base := map[string]float64{
 		"damage": 12, "knockback": 5.5, "useanim": 25, "usetime": 20,
 		"scale": 1.0, "shootspeed": 0.0, "mana": 0, "crit": 0,
 	}
-
-	cases := []struct {
-		name   string
-		python string
-		mults  map[string]float64
+	for _, c := range []struct {
+		name    string
+		mults   map[string]float64
+		digest  string
+		written map[string]float64
+		skipped []string
 	}{
-		// Legendary: every field it scales, and the .5 that a rounding rule
-		// decides. 12 * 1.15 is 13.8; 25 * 0.9 is 22.5, which round-half-even
-		// puts at 22 and round-half-up would put at 23.
-		{"legendary", `{"damage": 1.15, "knockback": 1.15, "usetime": 0.9, "scale": 1.1}`,
-			map[string]float64{"damage": 1.15, "knockback": 1.15, "usetime": 0.9, "scale": 1.1}},
-		// An additive bonus, which is added to the base and not multiplied.
-		{"sighted", `{"crit": 3}`, map[string]float64{"crit": 3}},
-		// No modifier at all has to put every field back to base, which is what
-		// clearing one does.
-		{"none", `{}`, map[string]float64{}},
-		// A bonus with no verified offset is named rather than dropped.
-		{"unknown bonus", `{"damage": 1.1, "armorpen": 5}`,
-			map[string]float64{"damage": 1.1, "armorpen": 5}},
-	}
-
-	for _, c := range cases {
+		{
+			// Legendary: every field it scales, and the .5 that a rounding rule
+			// decides. 12 * 1.15 is 13.8; 25 * 0.9 is 22.5, which round-half-even
+			// puts at 22 and round-half-up would put at 23.
+			name:   "legendary",
+			mults:  map[string]float64{"damage": 1.15, "knockback": 1.15, "usetime": 0.9, "scale": 1.1},
+			digest: "89256c273bb6635f",
+			written: map[string]float64{
+				"damage": 13.799999999999999, "knockback": 6.324999999999999,
+				"scale": 1.1, "useanim": 22.5, "usetime": 18,
+			},
+			skipped: []string{},
+		},
+		{
+			// An additive bonus, which is added to the base and not multiplied.
+			name: "sighted", mults: map[string]float64{"crit": 3},
+			digest:  "8c7309ea7143faf4",
+			written: map[string]float64{"crit": 3}, skipped: []string{},
+		},
+		{
+			// No modifier at all has to put every field back to base, which is
+			// what clearing one does.
+			name: "none", mults: map[string]float64{}, digest: "b75607d1f8e65675",
+			written: map[string]float64{}, skipped: []string{},
+		},
+		{
+			// A bonus with no verified offset is named rather than dropped.
+			name:    "unknown bonus",
+			mults:   map[string]float64{"damage": 1.1, "armorpen": 5},
+			digest:  "7269663a1387794b",
+			written: map[string]float64{"damage": 13.200000000000001},
+			skipped: []string{"armorpen"},
+		},
+	} {
 		t.Run(c.name, func(t *testing.T) {
-			var want struct {
-				Buf    string         `json:"buf"`
-				Result map[string]any `json:"result"`
-			}
-			askPython(t, preamble()+`
-res = inv.apply_prefix_stats(9, `+c.python+`, `+pythonBase+`)
-print(json.dumps({"buf": mem.buf.hex(), "result": res}))`, &want)
-
 			mem := plant()
-			got := inventory.New(mem, life).ApplyPrefixStats(9, c.mults, goBase)
-			require.Equal(t, want.Buf, mem.Hex(), "the two wrote different item fields")
-			require.Equal(t, want.Result["written"], asJSON(t, got.Written), "a different report of what was written")
-			require.Equal(t, want.Result["skipped"], asJSON(t, got.Skipped), "a different report of what was skipped")
+			got := inventory.New(mem, life).ApplyPrefixStats(9, c.mults, base)
+			require.Equal(t, c.digest, image(mem),
+				"different item fields; if that was deliberate, update the digest")
+			require.Equal(t, c.written, got.Written, "a different report of what was written")
+			require.Equal(t, c.skipped, got.Skipped, "a different report of what was skipped")
 		})
 	}
 }
@@ -238,29 +278,21 @@ at the item's field offsets counted from zero -- which is somewhere in the
 process, and on a bad day is mapped.
 */
 func TestASlotWithNoObjectIsRefused(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+`
-print(json.dumps({
-    "read": inv.read_slot(12),
-    "stack": inv.set_stack(12, 5), "prefix": inv.set_prefix(12, 1),
-    "speed": inv.set_use_speed(12, 8, 8), "power": inv.set_fishing_power(12, 20),
-    "applied": inv.apply_prefix_stats(12, {"damage": 1.1}, {"damage": 12}),
-}))`, &want)
-	require.Nil(t, want["read"], "the Python read a slot with no object")
-
 	mem := plant()
 	inv := inventory.New(mem, life)
-	before := mem.Hex()
+	before := image(mem)
 
 	_, ok := inv.ReadSlot(12)
 	require.False(t, ok, "a slot with no object was read")
-	require.Equal(t, want["stack"], inv.SetStack(12, 5))
-	require.Equal(t, want["prefix"], inv.SetPrefix(12, 1))
-	require.Equal(t, want["speed"], inv.SetUseSpeed(12, 8, 8))
-	require.Equal(t, want["power"], inv.SetFishingPower(12, 20))
-	require.Equal(t, want["applied"].(map[string]any)["skipped"],
-		asJSON(t, inv.ApplyPrefixStats(12, map[string]float64{"damage": 1.1}, map[string]float64{"damage": 12}).Skipped))
-	require.Equal(t, before, mem.Hex(), "something was written to a slot with no object")
+	require.False(t, inv.SetStack(12, 5))
+	require.False(t, inv.SetPrefix(12, 1))
+	require.False(t, inv.SetUseSpeed(12, 8, 8))
+	require.False(t, inv.SetFishingPower(12, 20))
+	require.Equal(t, []string{"damage"},
+		inv.ApplyPrefixStats(12, map[string]float64{"damage": 1.1},
+			map[string]float64{"damage": 12}).Skipped,
+		"a modifier on a slot with no object reported something else")
+	require.Equal(t, before, image(mem), "something was written to a slot with no object")
 }
 
 /*
@@ -270,18 +302,16 @@ Writing it anyway would wrap: a power of 300 becomes 44, and a rod that fishes
 worse than it did is not what "make this rod better" looked like.
 */
 func TestAFishingPowerOutOfRangeIsRefused(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+`
-print(json.dumps({"over": inv.set_fishing_power(5, 300),
-                  "under": inv.set_fishing_power(5, -1),
-                  "edge": inv.set_fishing_power(5, 255), "buf": mem.buf.hex()}))`, &want)
-
 	mem := plant()
 	inv := inventory.New(mem, life)
-	require.Equal(t, want["over"], inv.SetFishingPower(5, 300), "a power over a byte disagrees")
-	require.Equal(t, want["under"], inv.SetFishingPower(5, -1), "a negative power disagrees")
-	require.Equal(t, want["edge"], inv.SetFishingPower(5, 255), "the largest power disagrees")
-	require.Equal(t, want["buf"], mem.Hex(), "the two left different memory behind")
+	before := image(mem)
+
+	require.False(t, inv.SetFishingPower(5, 300), "a power over a byte was written")
+	require.False(t, inv.SetFishingPower(5, -1), "a negative power was written")
+	require.Equal(t, before, image(mem), "a refused power was written anyway")
+
+	require.True(t, inv.SetFishingPower(5, 255), "the largest power was refused")
+	require.NotEqual(t, before, image(mem), "the largest power wrote nothing")
 }
 
 /*
@@ -291,14 +321,6 @@ from zero.
 That is what a collection moving the array looks like from here, and it happens.
 */
 func TestAMissingArrayIsReported(t *testing.T) {
-	var want map[string]any
-	askPython(t, preamble()+`
-mem.poke_i32(`+itoa(life)+` + I.INVENTORY_PTR_OFF, 0)
-print(json.dumps({"addr": inv.array_addr(), "slots": inv.slots(),
-                  "potions": inv.favorited_potions(), "gear": inv.fishing_gear(),
-                  "nonempty": inv.nonempty_count(), "set": inv.set_stack(0, 1)}))`, &want)
-	require.Nil(t, want["addr"], "the Python found an array that is not there")
-
 	mem := plant()
 	mem.PokeI32(uint32(life+layoutInventoryPtrOff), 0)
 	inv := inventory.New(mem, life)
@@ -308,8 +330,8 @@ print(json.dumps({"addr": inv.array_addr(), "slots": inv.slots(),
 	require.Empty(t, inv.Slots(), "slots were read through a null array")
 	require.Empty(t, inv.FavoritedPotions(1), "potions were read through a null array")
 	require.Empty(t, inv.FishingGear().Rods, "rods were read through a null array")
-	require.Equal(t, want["nonempty"], asJSON(t, inv.NonemptyCount()))
-	require.Equal(t, want["set"], inv.SetStack(0, 1), "a write went through a null array")
+	require.Zero(t, inv.NonemptyCount(), "items were counted through a null array")
+	require.False(t, inv.SetStack(0, 1), "a write went through a null array")
 }
 
 /*
@@ -320,28 +342,31 @@ anything else means the read landed somewhere that is not the field -- on the
 wrong player copy, or after the object moved. Taking it at face value makes the
 auto-catch look at an inventory slot nobody is holding.
 */
-func TestTheHeldSlotMatchesThePython(t *testing.T) {
+func TestTheHeldSlot(t *testing.T) {
 	// 5 is the rod, 0 is the pickaxe, and the other two are numbers the game
 	// never writes there.
-	for _, held := range []int32{5, 0, 42, -1} {
-		t.Run(itoa(int(held)), func(t *testing.T) {
-			var want map[string]any
-			askPython(t, preamble()+`
-mem.poke_i32(`+itoa(life)+` + I.SELECTED_ITEM_OFF, `+itoa(int(held))+`)
-print(json.dumps({"slot": inv.selected_slot(), "rod": inv.holding_rod()}))`, &want)
-
+	for _, c := range []struct {
+		held    int32
+		slot    int
+		isSlot  bool
+		holding bool
+	}{
+		{held: 5, slot: 5, isSlot: true, holding: true},
+		{held: 0, slot: 0, isSlot: true},
+		{held: 42},
+		{held: -1},
+	} {
+		t.Run(itoa(int(c.held)), func(t *testing.T) {
 			mem := plant()
-			mem.PokeI32(uint32(life+layoutSelectedItemOff), held)
+			mem.PokeI32(uint32(life+layoutSelectedItemOff), c.held)
 			inv := inventory.New(mem, life)
 
 			slot, ok := inv.SelectedSlot()
-			if want["slot"] == nil {
-				require.Falsef(t, ok, "%d was taken for a hotbar slot", held)
-			} else {
-				require.Truef(t, ok, "%d is a hotbar slot there and not here", held)
-				require.Equal(t, want["slot"], asJSON(t, slot))
+			require.Equalf(t, c.isSlot, ok, "%d was judged differently", c.held)
+			if ok {
+				require.Equal(t, c.slot, slot)
 			}
-			require.Equal(t, want["rod"], inv.HoldingRod(), "disagree about holding a rod")
+			require.Equalf(t, c.holding, inv.HoldingRod(), "%d: holding a rod", c.held)
 		})
 	}
 }

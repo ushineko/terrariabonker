@@ -2,20 +2,18 @@ package inventory_test
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/memtest"
 )
 
 /*
-One inventory, planted into both implementations' fake memory.
+One inventory, planted into a fake.
 
-The image is described once, here, but each side plants it with its own
-constants: a field is named the way the Python names it and the offset is looked
-up in each language's own table. So a fixture cannot paper over an offset that
-one of them has wrong -- the write would land somewhere different on each side
-and the comparison would fail, which is the point.
+Each field is named rather than written at a number: the offset is looked up in
+the one table that declares it, so a fixture cannot quietly agree with a reader
+that has an offset wrong -- both would have to be wrong the same way, and the
+table is compared against itself elsewhere.
 */
 
 const (
@@ -150,46 +148,8 @@ func u32(v uint32) []byte {
 	return []byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)}
 }
 
-/*
-preamble is the same image as Python source, written with the Python's own
-constants.
-
-Generated from the table above so the two images cannot drift apart, but every
-offset in it is looked up by name in the Python's modules rather than copied
-from Go's.
-*/
-func preamble() string {
-	var b strings.Builder
-	b.WriteString(`
-import json, os, struct, sys
-sys.path.insert(0, os.getcwd())
-sys.path.insert(0, os.path.join(os.getcwd(), "tests"))
-from conftest import FakeMem
-from terrariabonker import inventory as I
-from terrariabonker.inventory import Inventory
-mem = FakeMem(` + fmt.Sprintf("%d, %d", base, size) + `)
-def u8(a, v): mem.poke_bytes(a, bytes([v]))
-def f32(a, v): mem.write_f32(a, v)
-def i32(a, v): mem.poke_i32(a, v)
-`)
-	fmt.Fprintf(&b, "mem.poke_i32(%d + I.INVENTORY_PTR_OFF, %d)\n", life, arr)
-	fmt.Fprintf(&b, "mem.poke_i32(%d + I.SELECTED_ITEM_OFF, %d)\n", life, selectedSlot)
-	for _, it := range inventoryImage {
-		if it.absent {
-			continue
-		}
-		addr := itemAddr(it.slot)
-		fmt.Fprintf(&b, "mem.poke_i32(%d + I.ARR_DATA_OFF + %d * 4, %d)\n", arr, it.slot, addr)
-		for _, f := range it.fields {
-			fmt.Fprintf(&b, "%s(%d + I.%s, %v)\n", f.kind, addr, f.name, f.value)
-		}
-	}
-	fmt.Fprintf(&b, "inv = Inventory(mem, %d)\n", life)
-	return b.String()
-}
-
-// layoutInventoryPtrOff and itoa keep the tests above readable; the offset is
-// the one from the table, so it is still the Go side's own number.
+// layoutInventoryPtrOff and itoa keep the tests above readable. The offset comes
+// from the one table that declares it.
 var layoutInventoryPtrOff = int(layout.Offsets["INVENTORY_PTR_OFF"])
 
 func itoa(v int) string { return fmt.Sprintf("%d", v) }
