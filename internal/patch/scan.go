@@ -164,6 +164,16 @@ func (s *Scanner) Resolve(anchorKey, build string) Resolution {
 	return Resolution{Sites: sites, Available: true, Verified: verified}
 }
 
+/*
+Cached is the sites an anchor resolved to earlier in this session, if any.
+
+Asked rather than resolved when the answer would otherwise come from a scan that
+is no longer meaningful: once an injection is applied its jump sits on top of its
+own anchor, so a fresh scan finds nothing and the count the window shows would
+drop to zero for a cheat that is working.
+*/
+func (s *Scanner) Cached(anchorKey string) []uint32 { return s.sites[anchorKey] }
+
 // contains reports whether a list has a string in it.
 func contains(list []string, want string) bool {
 	for _, s := range list {
