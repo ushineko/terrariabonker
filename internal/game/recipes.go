@@ -33,8 +33,14 @@ type Recipe struct {
 	N   int `json:"n"`
 	// Ing is [item, count] pairs.
 	Ing [][]int `json:"ing"`
-	// Tile is the crafting station, or nil for something made by hand.
-	Tile *int `json:"tile"`
+	/*
+		Tile is the crafting station, or nil for something made by hand.
+
+		Omitted rather than written as null, which is how the bundled file
+		spells it: most recipes are made by hand, and a null apiece would be a
+		fifth of the file saying nothing.
+	*/
+	Tile *int `json:"tile,omitempty"`
 }
 
 var (
