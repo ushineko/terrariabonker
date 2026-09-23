@@ -6,7 +6,7 @@ require (
 	fyne.io/fyne/v2 v2.8.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	github.com/ushineko/fynedesygn v0.1.27
+	github.com/ushineko/fynedesygn v0.1.40
 )
 
 require (
