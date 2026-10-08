@@ -14,6 +14,7 @@ method so the offsets can be rebuilt after a game update moves them.
 - [The locator](#the-locator)
 - [Godmode](#godmode)
 - [Re-deriving after an update](#re-deriving-after-an-update)
+- [Windows: .NET Framework instead of wine-mono](#windows-net-framework-instead-of-wine-mono-spec-052)
 
 ## The environment
 
@@ -154,3 +155,29 @@ layout) rather than the first resort.
 The locator fails safe: on a shifted layout it matches nothing rather than
 writing to a wrong address, which is why the version gate is a warning aid rather
 than the primary defence.
+
+## Windows: .NET Framework instead of wine-mono (spec 052)
+
+On native Windows the same `Terraria.exe` (1.4.5.8, build 24893155) runs on .NET
+Framework 4.8.1 (`clr.dll` 4.8.9345.0), not wine-mono, and **no number in this document
+carries over**. Measured 2026-10-08; spec 052 has the tables.
+
+- **Field offsets** come from `cmd/clrfields`, which reads the CLR's own `FieldDesc`
+  list for a class and names each record from the assembly's metadata by RID. The
+  record is 12 bytes: a *self-relative* enclosing-MethodTable offset, the RID (low 17
+  bits) with the static flag at bit 24, then offset (bits 0..26) and element type. A
+  list counts only if its length equals the class's stored-field count. Full dump:
+  `docs/clr-fields-1.4.5.8.txt`.
+- **Shapes**: MethodTable at `+0`, fields from `+4`; strings length `+4`, chars `+8`;
+  arrays (reference-type too) length `+4`, data `+8`.
+- **The player block** is still six contiguous ints, but `statLifeMax` comes before
+  `statLifeMax2`. Name at statLife `-0x3E4`, inventory at `-0x39C`.
+- **Main's reference statics** sit in a block of their own (found from the live player:
+  the `Player[256]` that holds it, the slot that holds that array, minus `0x878`; the same
+  base then reaches `NPC[201]` and `Projectile[1001]`). Primitive statics (`maxTilesX`,
+  `time`, …) are in a different block. Of two blocks with the world's `maxTilesX/Y` pair,
+  the live one is the one whose `Main.time` advances at 60 per second with the game
+  focused. A paused game cannot tell them apart.
+- **Code patches**: none of the mono anchors match the CLR's JIT output, in a world. The
+  CLR's code is there and uses the CLR offsets (`mov dword [reg+0x570], 0` is a
+  `blockRange` clear), and does not keep `this` in `edi` throughout.
