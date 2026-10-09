@@ -146,7 +146,7 @@ func TestTheAnchorTableIsWhatItWas(t *testing.T) {
 		}
 	}
 	require.Equal(t,
-		"4dc41cc7c6e72969b29d9440cdefc4c78326cf8675d181df4b478d2c69fc850d", digest(table),
+		"2874a4bf51869f5a93c9c2c9f3d5c8d7673df0a59e2c42eae3dc3ed453825c47", digest(table),
 		"the anchors have changed; if that was deliberate, update the digest")
 }
 

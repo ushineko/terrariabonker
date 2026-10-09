@@ -86,17 +86,6 @@ var verifiedBuilds = []string{
 	// The build these AOBs were originally derived against.
 	layout.Build1457s24825745,
 	/*
-		2026-08-23, and a key to distrust: this one is a *mix*. The version came
-		from the frequency vote in detect_version, which returns a stale 1.4.5.7
-		even on 1.4.5.8, while the buildid came from Steam's already-updated
-		manifest -- so the key describes a build that never existed. It is kept
-		because the panel really did record verifications under it, and those
-		were confirmed on 1.4.5.7; dropping it would silently un-verify them. The
-		detector that produced it has since been fixed to read the version out of
-		the exe the process maps.
-	*/
-	layout.Build1457s24893155,
-	/*
 		2026-08-23, after the update was actually loaded: every anchor resolved
 		on 1.4.5.8 and the maintainer confirmed all twelve cheats still working
 		in-game. The update did not touch the code any of them patch.
@@ -110,7 +99,7 @@ derived later and so never seen on the original build.
 
 An anchor that says nothing here claims every build in verifiedBuilds, so one
 derived on 1.4.5.8 alone has to be listed even though it is verified on the
-current build -- otherwise it silently claims two 1.4.5.7 builds it has never run
+current build -- otherwise it silently claims the 1.4.5.7 build it has never run
 on. An empty list would mean "resolves, but not confirmed in-game anywhere",
 which the window reports as unproven rather than hiding.
 */
@@ -122,8 +111,8 @@ var verifiedInstead = map[string][]string{
 		equip_benefits edit), the vanity armour in 10 to 12 stayed inert, and the
 		info accessories that already worked there were unchanged.
 	*/
-	"equip_apply":    {layout.Build1457s24893155, layout.Build1458s24893155},
-	"equip_benefits": {layout.Build1457s24893155, layout.Build1458s24893155},
+	"equip_apply":    {layout.Build1458s24893155},
+	"equip_benefits": {layout.Build1458s24893155},
 	/*
 		2026-08-23: confirmed in-game -- accessories carried in the inventory
 		granted their effects without being equipped, their Warding prefixes kept
@@ -131,14 +120,14 @@ var verifiedInstead = map[string][]string{
 		disabling restored the displaced bytes and stopped the effects with the
 		game still running.
 	*/
-	"inventory_scan": {layout.Build1457s24893155, layout.Build1458s24893155},
+	"inventory_scan": {layout.Build1458s24893155},
 	/*
 		2026-08-23: confirmed in-game with reach and tool reach at 75 -- the
 		stutter, which merely holding Shift would trigger because it is the
 		per-frame search and not the placing, is gone, while manual placement
 		reach and tool reach are unchanged.
 	*/
-	"smart_cursor": {layout.Build1457s24893155, layout.Build1458s24893155},
+	"smart_cursor": {layout.Build1458s24893155},
 	/*
 		2026-08-24: confirmed in-game on 1.4.5.8 -- the extractor calls PickTile
 		through this for every tile it takes, and whole veins came out, 45 tiles

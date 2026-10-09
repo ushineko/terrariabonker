@@ -17,8 +17,11 @@ On 2026-10-09 the four anchors and five in-place cheats moved from this package'
 tables into layout's mono entry. Before the move, their patterns, ledgers, patch
 offsets, original and patched bytes, the encoders' output for a spread of values,
 and the player-field offsets were printed in this format and hashed. This
-rebuilds the same text from the entry and requires the same digest: the move
-changed where the numbers live and nothing else.
+rebuilt the same text from the entry and got the same digest (commit 6f5fb2d):
+the move changed where the numbers live and nothing else.
+
+One deliberate change since: the ledgers dropped 1.4.5.7+24893155, a key that
+named no real build (2026-10-09). The digest is of the data after that.
 */
 func TestTheMonoCheatsAreWhatTheyWere(t *testing.T) {
 	e := layout.Mono()
@@ -38,7 +41,7 @@ func TestTheMonoCheatsAreWhatTheyWere(t *testing.T) {
 		s += fmt.Sprintf("|%d|%v|%g|%g\n", e.PlayerValues[c.ValueField], c.ValueF32, c.OnValue, c.OffValue)
 	}
 	sum := sha256.Sum256([]byte(s))
-	if got := hex.EncodeToString(sum[:]); got != "7487bd9315a45406451334a00797cd4f2ba1a867fe6eec83a22087c90f200490" {
+	if got := hex.EncodeToString(sum[:]); got != "b3dadd0168e3bf14cb3613b2066e2c3a7566131415d04bc05c177a97bff29ce0" {
 		t.Fatalf("the mono cheats changed in the move (digest %s):\n%s", got, s)
 	}
 }

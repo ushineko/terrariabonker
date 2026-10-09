@@ -647,9 +647,11 @@ Slice 7 — in-place cheats as entry data; mining and reach on the CLR:
       are the injection set an entry names; encoders are a registry. `layout.Derive`
       makes a variant entry from a base without sharing its maps or lists. Recorded as a
       rule in `AGENTS.md`.
-- [x] Build keys are declared once (`layout.Build1458s24893155` and the two before it)
+- [x] Build keys are declared once (`layout.Build1458s24893155` and 1.4.5.7's `Build1457s24825745`)
       and every table names the constant; a test fails on any key in the version table
-      or an anchor ledger that is not a declared one.
+      or an anchor ledger that is not a declared one. `1.4.5.7+24893155`, a key that
+      named no real build (1.4.5.7's version with 1.4.5.8's build id, from a version
+      detector since fixed), is gone from every ledger; each listed 1.4.5.8 beside it.
 - [x] Live on Windows (2026-10-09): `build-check` resolved mining and reach at one site
       each and reported every other cheat as having no site under netfx-4.8.1. Both
       enabled (pickSpeed 0.2, reach 20); the maintainer confirmed faster mining and

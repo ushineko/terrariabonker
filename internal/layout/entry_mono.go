@@ -59,13 +59,11 @@ var monoEntry = Entry{
 
 /*
 monoVerified is the build ledger the original anchors share: the build they were
-derived against, a mixed key the panel recorded (the version from a stale
-frequency vote, the build id already updated -- kept because verifications were
-made under it), and 1.4.5.8, where every anchor resolved and the maintainer
+derived against, and 1.4.5.8, where every anchor resolved and the maintainer
 confirmed every cheat in play (2026-08-23). The full account was in
 patch/anchors.go's verifiedBuilds, which these four left on 2026-10-09.
 */
-var monoVerified = []string{Build1457s24825745, Build1457s24893155, Build1458s24893155}
+var monoVerified = []string{Build1457s24825745, Build1458s24893155}
 
 /*
 monoAnchors are the patterns mono's in-place cheats resolve through, moved
