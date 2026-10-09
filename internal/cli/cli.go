@@ -308,3 +308,19 @@ func (a *App) gameReadingAll() (*Game, error) {
 	}
 	return got, nil
 }
+
+/*
+gameWriting attaches for one kind of write, and refuses under an entry that does
+not allow it -- the per-feature counterpart of game(true, force), for writes whose
+paths take their numbers from the entry.
+*/
+func (a *App) gameWriting(f layout.Feature, force bool) (*Game, error) {
+	got, err := a.game(false, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := got.Svc.RequireWritable(f, force); err != nil {
+		return nil, err
+	}
+	return got, nil
+}

@@ -85,6 +85,8 @@ const (
 	// get_LocalPlayer's JIT code (locate.FindLocalPlayerAnchor), a mono byte
 	// pattern.
 	ReadLocalPlayer Feature = "local-player"
+	// WritePlayerStats is writing life and mana: current values and caps.
+	WritePlayerStats Feature = "player-stats"
 )
 
 /*
@@ -113,6 +115,10 @@ type PlayerFields struct {
 	// SelectedItemFromLife is the hotbar index the player holds, or 0 when the
 	// entry has no measurement of it (statLife itself is never that field).
 	SelectedItemFromLife int
+	// The other five fields of the life and mana block. The life caps' order
+	// differs by runtime (Shapes.LifeMaxFirst); the mana fields do not.
+	LifeMaxFromLife, LifeMax2FromLife               int
+	ManaFromLife, ManaMaxFromLife, ManaMax2FromLife int
 }
 
 // LocalPlayerBy is how an entry tells which player copy is the live one.
@@ -174,11 +180,14 @@ type Entry struct {
 	Enabled bool
 	// Reads is the features this entry's numbers can read.
 	Reads []Feature
-	// Writes is whether this program may write game memory under the entry.
+	// Writes is whether this program may make every write under the entry.
 	Writes bool
-	Shapes Shapes
-	Player PlayerFields
-	Item   ItemFields
+	// WriteFeatures are the writes allowed when Writes is false: an entry whose
+	// write paths land one feature at a time, as its reads do.
+	WriteFeatures []Feature
+	Shapes        Shapes
+	Player        PlayerFields
+	Item          ItemFields
 	// LocalPlayer is how ReadLocalPlayer is done, and Statics its numbers when it
 	// is ByStatics.
 	LocalPlayer LocalPlayerBy
@@ -219,7 +228,9 @@ var monoEntry = Entry{
 		ArrLenOff: ArrLenOff, ArrDataOff: ArrDataOff,
 		LifeMaxFirst: true,
 	},
-	Player: PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff, SelectedItemFromLife: SelectedItemOff},
+	Player: PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff, SelectedItemFromLife: SelectedItemOff,
+		LifeMaxFromLife: StatLifeMaxOff, LifeMax2FromLife: StatLifeMax2Off,
+		ManaFromLife: StatManaOff, ManaMaxFromLife: StatManaMaxOff, ManaMax2FromLife: StatManaMax2Off},
 	Item: ItemFields{
 		Type: ItemType, Stack: ItemStack, UseTime: ItemUseTime, UseAnim: ItemUseAnim,
 		Pick: ItemPick, TileBoost: ItemTileBoost, Damage: ItemDamage, Rare: ItemRare,
@@ -259,7 +270,9 @@ var clrEntry = Entry{
 		ArrLenOff: 0x04, ArrDataOff: 0x08,
 		LifeMaxFirst: true,
 	},
-	Player: PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C},
+	Player: PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C,
+		LifeMaxFromLife: -0x08, LifeMax2FromLife: -0x04,
+		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C},
 	// Item: CLRFields["Item"], by name (TestTheCLRItemFieldsAreTheTable). No
 	// SelectedItemFromLife: the CLR has no selectedItem field, only a
 	// selectedItemState struct, and which word of it is the index is unmeasured.
@@ -279,10 +292,11 @@ var clrEntry = Entry{
 		PlayerLen: 256, NPCLen: 201, ProjectileLen: 1001,
 		PlayerActive: 0x70E, LifeInPlayer: 0x470,
 	},
-	Enabled:    true,
-	Reads:      []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory},
-	Writes:     false,
-	Provenance: "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
+	Enabled:       true,
+	Reads:         []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory},
+	WriteFeatures: []Feature{WritePlayerStats},
+	Writes:        false,
+	Provenance:    "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }
 
 // Entries is the table, in the order a family's candidates are tried.
@@ -362,3 +376,8 @@ func has[T comparable](list []T, want T) bool {
 // Mono is the wine-mono entry: the numbers every reader used before the table,
 // and still the ones a reader uses when not handed an entry.
 func Mono() Entry { return monoEntry }
+
+// CanWrite reports whether a write of a feature is allowed under the entry.
+func (e Entry) CanWrite(f Feature) bool {
+	return e.Enabled && (e.Writes || has(e.WriteFeatures, f))
+}

@@ -72,6 +72,23 @@ func (s *Service) RequireCompatible(force bool) error {
 	if entry, support, runtime := s.Support(); !entry.Writes {
 		return &Error{Message: noWrites(support, runtime)}
 	}
+	return s.requireBuild(force)
+}
+
+/*
+RequireWritable is RequireCompatible for one kind of write: it passes under an
+entry that allows that write even when the entry may not make every write. The
+CLR entry writes player stats this way while its other write paths do not exist.
+*/
+func (s *Service) RequireWritable(f layout.Feature, force bool) error {
+	if entry, support, runtime := s.Support(); !entry.CanWrite(f) {
+		return &Error{Message: noWrites(support, runtime)}
+	}
+	return s.requireBuild(force)
+}
+
+// requireBuild refuses an outright incompatible build unless forced.
+func (s *Service) requireBuild(force bool) error {
 	level, msg := s.Compatibility()
 	if level == version.Incompatible && !force {
 		return &Error{Message: fmt.Sprintf(

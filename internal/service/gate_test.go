@@ -377,3 +377,100 @@ func TestTheCLRSnapshotIsTheLivePlayer(t *testing.T) {
 	require.NotNil(t, snap.Player)
 	require.EqualValues(t, 333, snap.Player.HP, "the load-time snapshot was reported as the player")
 }
+
+/*
+A write goes to the live character's copies and never to another character's.
+
+The CLR world from memtest has the live player and a load-time snapshot, both
+"terrariabonker", and Main's statics for ground truth. A second character,
+"pooneau", is added the way the selection screen keeps one: a full Player in
+memory, valid, findable, not being played. Before, every write went to every
+copy found -- on the maintainer's Windows game that is seven characters, and a
+raised max HP there is a change to someone else's save.
+*/
+func TestAWriteReachesOnlyTheLiveCharacter(t *testing.T) {
+	w := memtest.PlantCLRWorld(0x10000000)
+	other := w.Base + 0x7000
+	w.Mem.PlantCLRString(w.Base+0x80, "pooneau")
+	w.Mem.PlantCLRPlayer(other+memtest.CLRLifeInPlayer, []int32{400, 400, 300, 200, 200, 200}, w.Base+0x80)
+	svc := service.New(&execMem{w.Mem}, -1).WithRuntime("netfx-4.8.9345.0")
+
+	require.NoError(t, svc.SetHP(123))
+	life := func(obj uint32) int32 {
+		v, _ := w.Mem.ReadI32(obj + memtest.CLRLifeInPlayer)
+		return v
+	}
+	require.EqualValues(t, 123, life(w.Live), "the live player was not written")
+	require.EqualValues(t, 123, life(w.Snap), "the live character's snapshot was not written")
+	require.EqualValues(t, 300, life(other), "another character was written")
+}
+
+/*
+Without ground truth, several characters in memory is a refusal, and nothing is
+written. Which one is being played would be a guess, and a wrong guess writes
+someone else's save.
+*/
+func TestSeveralCharactersWithoutGroundTruthAreRefused(t *testing.T) {
+	const base = 0x10000000
+	mem := &execMem{memtest.New(base, 0x8000)}
+	mem.PlantCLRString(base+0x40, "terrariabonker")
+	mem.PlantCLRString(base+0x80, "pooneau")
+	mem.PlantCLRPlayer(base+0x1000, []int32{400, 400, 300, 200, 200, 200}, base+0x40)
+	mem.PlantCLRPlayer(base+0x4000, []int32{400, 400, 300, 200, 200, 200}, base+0x80)
+	before := mem.Hex()
+
+	err := service.New(mem, -1).WithRuntime("netfx-4.8.9345.0").SetHP(123)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "2 characters")
+	require.Equal(t, before, mem.Hex(), "something was written")
+}
+
+// Without ground truth, copies that all share one name are all written, as
+// before: they are one character's live copy and snapshots.
+func TestOneCharactersCopiesWithoutGroundTruthAreAllWritten(t *testing.T) {
+	const base = 0x10000000
+	mem := &execMem{memtest.New(base, 0x8000)}
+	mem.PlantCLRString(base+0x40, "terrariabonker")
+	mem.PlantCLRPlayer(base+0x1000, []int32{400, 400, 300, 200, 200, 200}, base+0x40)
+	mem.PlantCLRPlayer(base+0x4000, []int32{400, 400, 300, 200, 200, 200}, base+0x40)
+
+	require.NoError(t, service.New(mem, -1).WithRuntime("netfx-4.8.9345.0").SetHP(123))
+	for _, at := range []uint32{base + 0x1000, base + 0x4000} {
+		v, _ := mem.ReadI32(at)
+		require.EqualValues(t, 123, v)
+	}
+}
+
+/*
+An item write follows the same rule as a stat write: the live character's
+copies, never another character's.
+
+Each copy gets its own inventory, all holding the same item in slot 0. A stack
+edit must change the live player's and the live character's snapshot's, and
+leave pooneau's alone.
+*/
+func TestAnItemWriteReachesOnlyTheLiveCharacter(t *testing.T) {
+	w := memtest.PlantCLRWorld(0x10000000)
+	other := w.Base + 0x7000
+	w.Mem.PlantCLRString(w.Base+0x80, "pooneau")
+	w.Mem.PlantCLRPlayer(other+memtest.CLRLifeInPlayer, []int32{400, 400, 300, 200, 200, 200}, w.Base+0x80)
+	big := memtest.New(w.Base, 0x40000)
+	copy(big.Buf, w.Mem.Buf)
+	w.Mem = big
+	slot0 := []memtest.CLRItem{{Slot: 0, Type: 2, Stack: 10}}
+	for i, obj := range []uint32{w.Live, w.Snap, other} {
+		arr := w.Base + 0x20000 + uint32(i)*0x6000
+		w.Mem.PlantCLRInventory(obj+memtest.CLRLifeInPlayer, arr, arr+0x400, slot0)
+	}
+	svc := service.New(&execMem{w.Mem}, -1).WithRuntime("netfx-4.8.9345.0")
+
+	require.NoError(t, svc.SetStack(0, 99))
+	stack := func(i int) int32 {
+		arr := w.Base + 0x20000 + uint32(i)*0x6000
+		v, _ := w.Mem.ReadI32(arr + 0x400 + memtest.CLRItemStack)
+		return v
+	}
+	require.EqualValues(t, 99, stack(0), "the live player's item was not written")
+	require.EqualValues(t, 99, stack(1), "the live character's snapshot was not written")
+	require.EqualValues(t, 10, stack(2), "another character's item was written")
+}

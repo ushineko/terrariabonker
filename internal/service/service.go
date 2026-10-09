@@ -21,6 +21,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/ushineko/terrariabonker/internal/inventory"
@@ -252,15 +253,57 @@ func (s *Service) LiveBlock() (locate.Block, error) {
 	return s.selectLive(blocks), nil
 }
 
-// allTargets is every copy as a handle to write through.
-func (s *Service) allTargets() ([]*player.Player, error) {
+/*
+writeTargets is every copy a write goes to: the live player's, never another
+character's.
+
+Writes go to more than the live copy because which copy is live has been a guess
+whenever ground truth could not answer, and a write to an inert snapshot of the
+same character costs nothing. A copy of a *different* character is not inert in
+that way: the selection screen keeps every character as a Player object -- seven
+of them on the maintainer's Windows game -- and a write there changes a character
+who may be played and saved later. So:
+
+  - with ground truth, the copies named as the live player is;
+  - without it, every copy only if they all share one name;
+  - otherwise nothing, and an error saying why: guessing which character is
+    being played is a write to someone else's save when it is wrong.
+*/
+func (s *Service) writeTargets() ([]locate.Block, error) {
 	blocks, err := s.Players()
 	if err != nil {
 		return nil, err
 	}
+	if live, ok := s.resolveLive(blocks); ok {
+		var out []locate.Block
+		for _, b := range blocks {
+			if b.Name == live.Name {
+				out = append(out, b)
+			}
+		}
+		return out, nil
+	}
+	names := map[string]bool{}
+	for _, b := range blocks {
+		names[b.Name] = true
+	}
+	if len(names) == 1 {
+		return blocks, nil
+	}
+	return nil, &Error{Message: fmt.Sprintf("%d characters are in memory and which one is being "+
+		"played cannot be told, so nothing was changed. Load into a world and try again", len(names))}
+}
+
+// allTargets is every write target as a handle to write through.
+func (s *Service) allTargets() ([]*player.Player, error) {
+	blocks, err := s.writeTargets()
+	if err != nil {
+		return nil, err
+	}
+	entry, _, _ := s.Support()
 	out := make([]*player.Player, 0, len(blocks))
 	for _, b := range blocks {
-		out = append(out, player.New(s.Mem, b.LifeAddr))
+		out = append(out, player.NewFor(entry, s.Mem, b.LifeAddr))
 	}
 	return out, nil
 }
@@ -275,7 +318,7 @@ func (s *Service) liveInventory() (*inventory.Inventory, error) {
 }
 
 /*
-allInventories is every copy's inventory, *for writing*.
+allInventories is every write target's inventory (writeTargets), *for writing*.
 
 Writes go to all of them so the live copy is always hit. Do not read from these
 to decide anything: the copies are not identical, a snapshot holds whatever the
@@ -283,7 +326,7 @@ slot contained when it was taken, and the first is not necessarily the live one.
 Read from liveInventory, which is what Inventory reports.
 */
 func (s *Service) allInventories() ([]*inventory.Inventory, error) {
-	blocks, err := s.Players()
+	blocks, err := s.writeTargets()
 	if err != nil {
 		return nil, err
 	}

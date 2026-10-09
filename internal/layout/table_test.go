@@ -42,7 +42,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "f3151d8595361c5c17b1abf29e983e1b1d70d3e144cd4d965fe2d1924dc0309b",
+	require.Equal(t, "e25faa49e126cd7133b87838a51f48f98230ddc9c37cd2dee7c2c69666f95e94",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -159,7 +159,9 @@ func TestTheCLRPlayerFieldsAreTheTable(t *testing.T) {
 
 // The mono player fields are the mono constants they always were.
 func TestTheMonoPlayerFieldsAreTheConstants(t *testing.T) {
-	require.Equal(t, PlayerFields{NameFromLife: -0x6C0, InventoryFromLife: -0x664, SelectedItemFromLife: -0x694}, monoEntry.Player)
+	require.Equal(t, PlayerFields{NameFromLife: -0x6C0, InventoryFromLife: -0x664, SelectedItemFromLife: -0x694,
+		LifeMaxFromLife: -0x08, LifeMax2FromLife: -0x04,
+		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C}, monoEntry.Player)
 }
 
 /*
@@ -220,3 +222,36 @@ func TestTheCLRItemFieldsAreTheTable(t *testing.T) {
 }
 
 func reflectFieldCount(v any) int { return reflect.TypeOf(v).NumField() }
+
+/*
+The CLR life and mana offsets are the CLR table's differences from statLife, and
+agree with the shape's statement of the caps' order.
+*/
+func TestTheCLRStatOffsetsAreTheTable(t *testing.T) {
+	at := map[string]int{}
+	for _, f := range CLRFields["Player"] {
+		at[f.Name] = int(f.Offset)
+	}
+	p, life := clrEntry.Player, at["statLife"]
+	require.Equal(t, at["statLifeMax"]-life, p.LifeMaxFromLife)
+	require.Equal(t, at["statLifeMax2"]-life, p.LifeMax2FromLife)
+	require.Equal(t, at["statMana"]-life, p.ManaFromLife)
+	require.Equal(t, at["statManaMax"]-life, p.ManaMaxFromLife)
+	require.Equal(t, at["statManaMax2"]-life, p.ManaMax2FromLife)
+	for _, e := range []Entry{monoEntry, clrEntry} {
+		require.Equal(t, e.Shapes.LifeMaxFirst, e.Player.LifeMaxFromLife < e.Player.LifeMax2FromLife,
+			"%s: the shape and the offsets disagree about the caps' order", e.Name)
+	}
+}
+
+// The CLR entry may write player stats and nothing else; mono may write
+// everything; an unsupported runtime nothing.
+func TestWritesArePerFeature(t *testing.T) {
+	require.True(t, clrEntry.CanWrite(WritePlayerStats))
+	require.False(t, clrEntry.CanWrite(ReadInventory), "an inventory write under the CLR")
+	require.False(t, clrEntry.Writes)
+	require.True(t, monoEntry.CanWrite(WritePlayerStats))
+	require.True(t, monoEntry.CanWrite(ReadInventory))
+	var none Entry
+	require.False(t, none.CanWrite(WritePlayerStats))
+}

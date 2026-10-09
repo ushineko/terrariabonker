@@ -24,14 +24,24 @@ type Mem interface {
 	WriteI32(addr uint32, value int32) bool
 }
 
-// Player is one player copy, addressed by where its statLife field is.
+// Player is one player copy, addressed by where its statLife field is, with one
+// version-table entry's offsets for the rest of the life and mana block.
 type Player struct {
 	Mem  Mem
 	Life uint32
+	f    layout.PlayerFields
 }
 
-// New is a handle on the player whose statLife is at life.
-func New(mem Mem, life uint32) *Player { return &Player{Mem: mem, Life: life} }
+// New is a handle on the player whose statLife is at life, with the mono entry's
+// offsets: what every caller got before the version table.
+func New(mem Mem, life uint32) *Player { return NewFor(layout.Mono(), mem, life) }
+
+// NewFor is a handle with an entry's offsets. The life caps are the other way
+// round under the CLR, so a mono handle writing statLifeMax there would write
+// statLifeMax2.
+func NewFor(e layout.Entry, mem Mem, life uint32) *Player {
+	return &Player{Mem: mem, Life: life, f: e.Player}
+}
 
 // at is the address of a field, which may be in front of statLife.
 func (p *Player) at(off int) uint32 {
@@ -44,32 +54,32 @@ func (p *Player) at(off int) uint32 {
 func (p *Player) field(off int) (int32, bool) { return p.Mem.ReadI32(p.at(off)) }
 
 // StatLife is current life.
-func (p *Player) StatLife() (int32, bool) { return p.field(layout.StatLifeOff) }
+func (p *Player) StatLife() (int32, bool) { return p.field(0) }
 
 // StatLifeMax is the permanent life cap, which is what the save file stores.
-func (p *Player) StatLifeMax() (int32, bool) { return p.field(layout.StatLifeMaxOff) }
+func (p *Player) StatLifeMax() (int32, bool) { return p.field(p.f.LifeMaxFromLife) }
 
 // StatLifeMax2 is the life cap in effect: the permanent one plus whatever
 // accessories and buffs add.
-func (p *Player) StatLifeMax2() (int32, bool) { return p.field(layout.StatLifeMax2Off) }
+func (p *Player) StatLifeMax2() (int32, bool) { return p.field(p.f.LifeMax2FromLife) }
 
 // StatMana is current mana.
-func (p *Player) StatMana() (int32, bool) { return p.field(layout.StatManaOff) }
+func (p *Player) StatMana() (int32, bool) { return p.field(p.f.ManaFromLife) }
 
 // StatManaMax is the permanent mana cap.
-func (p *Player) StatManaMax() (int32, bool) { return p.field(layout.StatManaMaxOff) }
+func (p *Player) StatManaMax() (int32, bool) { return p.field(p.f.ManaMaxFromLife) }
 
 // StatManaMax2 is the mana cap in effect.
-func (p *Player) StatManaMax2() (int32, bool) { return p.field(layout.StatManaMax2Off) }
+func (p *Player) StatManaMax2() (int32, bool) { return p.field(p.f.ManaMax2FromLife) }
 
 // SetLife writes current life.
 func (p *Player) SetLife(value int32) bool {
-	return p.Mem.WriteI32(p.at(layout.StatLifeOff), value)
+	return p.Mem.WriteI32(p.at(0), value)
 }
 
 // SetMana writes current mana.
 func (p *Player) SetMana(value int32) bool {
-	return p.Mem.WriteI32(p.at(layout.StatManaOff), value)
+	return p.Mem.WriteI32(p.at(p.f.ManaFromLife), value)
 }
 
 /*
@@ -82,14 +92,14 @@ the game is usually paused when this runs, so without it nothing appears to
 happen at all.
 */
 func (p *Player) SetMaxLife(value int32) bool {
-	ok := p.Mem.WriteI32(p.at(layout.StatLifeMax2Off), value)
-	return p.Mem.WriteI32(p.at(layout.StatLifeMaxOff), value) && ok
+	ok := p.Mem.WriteI32(p.at(p.f.LifeMax2FromLife), value)
+	return p.Mem.WriteI32(p.at(p.f.LifeMaxFromLife), value) && ok
 }
 
 // SetMaxMana raises the mana cap, both fields, for the reason above.
 func (p *Player) SetMaxMana(value int32) bool {
-	ok := p.Mem.WriteI32(p.at(layout.StatManaMax2Off), value)
-	return p.Mem.WriteI32(p.at(layout.StatManaMaxOff), value) && ok
+	ok := p.Mem.WriteI32(p.at(p.f.ManaMax2FromLife), value)
+	return p.Mem.WriteI32(p.at(p.f.ManaMaxFromLife), value) && ok
 }
 
 // HealFull sets life to the cap in effect, and reports false when the cap could

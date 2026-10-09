@@ -562,6 +562,24 @@ crit −0x64. Projectile: type/alpha −0x14, aiStyle/timeLeft/damage −0x18. B
 bytes do not follow: the CLR packs them at the end of each class (Projectile.active
 0x078 → 0x102, Item.prefix 0x15C → 0x12E). A shift predicts a candidate; only
 `clrfields` settles it.
+Slice 4 — player-stat writes on the CLR (done headless; live Windows check pending):
+- [x] Writes are gated per feature like reads: `Entry.WriteFeatures` and `CanWrite`;
+      `Service.RequireWritable(feature, force)`; the CLI's `gameWriting`. The CLR
+      entry allows `WritePlayerStats` only; every other write still needs an entry
+      that may make every write (`Writes`), so the CLR refuses them.
+- [x] `player.NewFor(entry, …)`, with the life and mana offsets on the entry. (After
+      the life-cap correction the six fields sit at the same offsets on both
+      runtimes, so the mono and CLR handles write the same bytes -- an equivalent
+      mutant, recorded; the field stays for a runtime that differs.)
+- [x] **Writes go to the live character only.** Every write used to go to every copy
+      found. Under the CLR that is every character on the selection screen -- seven on
+      the maintainer's game -- and a raised max HP there changes a save that may be
+      played later. Now: with ground truth, the copies named as the live player is;
+      without it, all copies only if they share one name; otherwise a refusal. On
+      Linux, where the copies are one character's, nothing changes (live: `set-hp max`
+      at full health went through, two copies, ground truth from the mono anchor).
+- [ ] Live on Windows: a stat write observed in-game by the maintainer.
+
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

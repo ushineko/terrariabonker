@@ -72,3 +72,34 @@ func TestUnderTheCLRThePlayerAndInventoryAreRead(t *testing.T) {
 	require.NotZero(t, code, "the catalog ran under the CLR entry")
 	require.Contains(t, errOut, runtime)
 }
+
+/*
+Under .NET Framework, the stat writes run and land in the CLR's fields; a write
+whose path still uses mono's numbers is refused.
+
+set-max-hp writes both caps, and the CLR stores them where clrfields says:
+statLifeMax at statLife-8, statLifeMax2 at statLife-4. set-stack is an inventory
+write, which the CLR entry does not allow yet.
+*/
+func TestUnderTheCLRTheStatWritesRunAndOthersAreRefused(t *testing.T) {
+	const runtime, life = "netfx-4.8.9345.0", 0x10000800
+	mem := clrGame()
+
+	code, _, errOut := runUnder(t, runtime, mem, "set-hp", "111")
+	require.Zero(t, code, errOut)
+	got, _ := mem.ReadI32(life)
+	require.EqualValues(t, 111, got)
+
+	code, _, errOut = runUnder(t, runtime, mem, "set-max-hp", "460")
+	require.Zero(t, code, errOut)
+	for _, off := range []uint32{8, 4} {
+		v, _ := mem.ReadI32(life - off)
+		require.EqualValues(t, 460, v, "the cap at statLife-%d", off)
+	}
+
+	before := mem.Hex()
+	code, _, errOut = runUnder(t, runtime, mem, "set-stack", "0", "99")
+	require.NotZero(t, code, "an inventory write ran under the CLR entry")
+	require.Contains(t, errOut, runtime)
+	require.Equal(t, before, mem.Hex(), "the refused write changed something")
+}
