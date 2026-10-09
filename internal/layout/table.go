@@ -126,8 +126,8 @@ type PlayerFields struct {
 	// SelectedItemFromLife is the hotbar index the player holds, or 0 when the
 	// entry has no measurement of it (statLife itself is never that field).
 	SelectedItemFromLife int
-	// The other five fields of the life and mana block. The life caps' order
-	// differs by runtime (Shapes.LifeMaxFirst); the mana fields do not.
+	// The other five fields of the life and mana block, in the same order under
+	// both runtimes measured (statLifeMax, the permanent cap, first).
 	LifeMaxFromLife, LifeMax2FromLife               int
 	ManaFromLife, ManaMaxFromLife, ManaMax2FromLife int
 }
@@ -203,116 +203,18 @@ type Entry struct {
 	// is ByStatics.
 	LocalPlayer LocalPlayerBy
 	Statics     MainStatics
+	// PlayerValues are player fields a cheat sets alongside its patch, by the
+	// game's field name, as offsets from statLife.
+	PlayerValues map[string]int
+	// Anchors and Cheats are the in-place code patches under this entry
+	// (patches.go).
+	Anchors map[string]AnchorDef
+	Cheats  map[string]CheatSite
+	// Injections names the injection set (patch's registry) this entry's
+	// stub-based cheats come from; "" when it has none.
+	Injections string
 	// Provenance is where the numbers came from.
 	Provenance string
-}
-
-/*
-monoEntry is the numbers this project has always had: the package-level
-constants, derived under wine-mono with Cheat Engine's mono dissector and
-cmd/monofields.
-
-Versions is nil -- any wine-mono -- because the version they were first verified
-under was never recorded: the accepted-builds ledger predates runtime tracking,
-and Proton Experimental has updated wine-mono since (11.3.0 as of 2026-10-08;
-10.4.1 and 11.2.0 are also installed on the maintainer's machine). Nil keeps
-today's behaviour, which accepted every wine-mono.
-
-11.3.0 has since been checked (Confirmed). Versions stays nil all the same:
-narrowing it would send every GE-Proton (10.4.1) and proton-cachyos (11.2.0)
-user to the "Terraria has updated" question on no evidence that their runtime
-differs. When a wine-mono version is measured to need different numbers, it gets
-an entry of its own.
-*/
-var monoEntry = Entry{
-	Name:   "wine-mono",
-	Family: WineMono,
-	Builds: []string{"1.4.5.7+24825745", "1.4.5.8+24893155"},
-	Confirmed: []string{
-		"11.3.0: 1.4.5.8+24893155 in a world, 2026-10-08 -- the player located by name, " +
-			"stats and inventory read, all 15 cheat anchors resolved, and the maintainer " +
-			"confirmed the cheats still work in play",
-	},
-	Shapes: Shapes{
-		ObjectHeader: 0x08,
-		StringLenOff: 0x08, StringCharsOff: 0x0C,
-		ArrLenOff: ArrLenOff, ArrDataOff: ArrDataOff,
-		LifeMaxFirst: true,
-	},
-	Player: PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff, SelectedItemFromLife: SelectedItemOff,
-		LifeMaxFromLife: StatLifeMaxOff, LifeMax2FromLife: StatLifeMax2Off,
-		ManaFromLife: StatManaOff, ManaMaxFromLife: StatManaMaxOff, ManaMax2FromLife: StatManaMax2Off},
-	Item: ItemFields{
-		Type: ItemType, Stack: ItemStack, UseTime: ItemUseTime, UseAnim: ItemUseAnim,
-		Pick: ItemPick, TileBoost: ItemTileBoost, Damage: ItemDamage, Rare: ItemRare,
-		Defense: ItemDefense, BuffType: ItemBuffType, Mana: ItemMana, Crit: ItemCrit,
-		Knockback: ItemKnockback, Scale: ItemScale, ShootSpeed: ItemShootSpeed,
-		FishingPole: ItemFishingPole, Bait: ItemBait, Prefix: ItemPrefix,
-		AutoReuse: ItemAutoReuse, Accessory: ItemAccessory, Favorited: ItemFavorited,
-		Consumable: ItemConsumable, Melee: ItemMelee, Magic: ItemMagic, Ranged: ItemRanged,
-		Summon: ItemSummon,
-		CopyLo: CopyLo, CopyHi: CopyHi,
-	},
-	Reads:       []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer},
-	LocalPlayer: ByAnchor,
-	Writes:      true,
-	Enabled:     true,
-	Provenance:  "Cheat Engine mono dissector and cmd/monofields, 1.4.5.7 and 1.4.5.8",
-}
-
-/*
-clrEntry is .NET Framework on native Windows, measured in spec 052 phase 0.
-
-Enabled for reading the player, which copy is live and their inventory, and never
-for writing yet: the CLR read path
-lands one feature at a time (spec 052 phase 3 step 2), and every other reader still
-uses the mono constants. A reader not in Reads must not run under this entry.
-
-The player fields are differences of CLRFields: name 0x08C and inventory 0x0D4,
-less statLife 0x470. TestTheCLRPlayerFieldsAreTheTable checks that.
-*/
-var clrEntry = Entry{
-	Name:     "netfx-4.8.1",
-	Family:   NetFx,
-	Builds:   []string{"1.4.5.8+24893155"},
-	Versions: []string{"4.8.9345.0"},
-	Shapes: Shapes{
-		ObjectHeader: 0x04,
-		StringLenOff: 0x04, StringCharsOff: 0x08,
-		ArrLenOff: 0x04, ArrDataOff: 0x08,
-		LifeMaxFirst: true,
-	},
-	Player: PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C,
-		LifeMaxFromLife: -0x08, LifeMax2FromLife: -0x04,
-		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C},
-	// Item: CLRFields["Item"], by name (TestTheCLRItemFieldsAreTheTable). No
-	// SelectedItemFromLife: the CLR has no selectedItem field, only a
-	// selectedItemState struct, and which word of it is the index is unmeasured.
-	Item: ItemFields{
-		Type: 0x050, Stack: 0x064, UseTime: 0x060, UseAnim: 0x05C,
-		Pick: 0x06C, TileBoost: 0x078, Damage: 0x088, Rare: 0x0B8,
-		Defense: 0x0A4, BuffType: 0x0DC, Mana: 0x0D4, Crit: 0x0EC,
-		Knockback: 0x08C, Scale: 0x09C, ShootSpeed: 0x0C0,
-		FishingPole: 0x048, Bait: 0x04C, Prefix: 0x12E,
-		AutoReuse: 0x111, Accessory: 0x10E, Favorited: 0x10C,
-		Consumable: 0x110, Melee: 0x12F, Magic: 0x130, Ranged: 0x131,
-		Summon: 0x132,
-		// Past the five reference fields at 0x04..0x17; to the end of the object,
-		// BaseSize 0x148 less the sync block (the Item MethodTable on the live
-		// game, 2026-10-08). TestTheCLRCopySpanHoldsNoReference.
-		CopyLo: 0x018, CopyHi: 0x144,
-	},
-	LocalPlayer: ByStatics,
-	Statics: MainStatics{
-		NPCFromPlayer: -0x54, ProjectileFromPlayer: -0x48,
-		PlayerLen: 256, NPCLen: 201, ProjectileLen: 1001,
-		PlayerActive: 0x70E, LifeInPlayer: 0x470,
-	},
-	Enabled:       true,
-	Reads:         []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory},
-	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields, WriteItemTemplates},
-	Writes:        false,
-	Provenance:    "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }
 
 // Entries is the table, in the order a family's candidates are tried.

@@ -31,14 +31,6 @@ type CheatDetail struct {
 	Sites     int    `json:"sites"`
 }
 
-// AnchorKey is the anchor a patch resolves through, whichever table declares it.
-func AnchorKey(name string) string {
-	if inj, ok := Injections[name]; ok {
-		return inj.Anchor
-	}
-	return Cheats[name].Anchor
-}
-
 /*
 Probe resolves every cheat against a build, patching nothing.
 
@@ -56,7 +48,12 @@ func (p *Patcher) Probe(build string) map[string]CheatProbe {
 			out[info.Name] = CheatProbe{Resolved: true, Applied: true, Sites: sites}
 			continue
 		}
-		res := p.Scanner.Resolve(AnchorKey(info.Name), build)
+		key := p.anchorKey(info.Name)
+		if key == "" {
+			out[info.Name] = CheatProbe{Reason: p.noSite(info.Name)}
+			continue
+		}
+		res := p.Scanner.Resolve(key, build)
 		out[info.Name] = CheatProbe{
 			Resolved: res.Available, Sites: len(res.Sites), Reason: res.Reason,
 		}
@@ -75,8 +72,12 @@ four of them.
 func (p *Patcher) Details(build string) map[string]CheatDetail {
 	out := make(map[string]CheatDetail, len(Cheats)+len(Injections))
 	for _, info := range Catalog() {
-		key := AnchorKey(info.Name)
-		verified := build != "" && contains(Anchors[key].Verified, build)
+		key := p.anchorKey(info.Name)
+		if key == "" {
+			out[info.Name] = CheatDetail{Reason: p.noSite(info.Name)}
+			continue
+		}
+		verified := build != "" && contains(p.anchorDef(key).Verified, build)
 		if p.IsEnabled(info.Name) {
 			sites := len(p.state.Inj[info.Name].Sites)
 			if sites == 0 {

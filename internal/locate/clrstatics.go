@@ -170,3 +170,12 @@ func (l Locator) LiveAt(mem Mem, slot uint32) (Block, bool) {
 	}
 	return l.ReadBlock(mem, live+uint32(s.LifeInPlayer)) //nolint:gosec // a field offset
 }
+
+// mainStatics is the CLR's LiveFinder: Main.player's static slot, recognised
+// from the copies a scan found.
+type mainStatics struct{ l Locator }
+
+func (m mainStatics) Find(mem ExecMem, copies []Block) (uint32, bool) {
+	return m.l.FindPlayerSlot(mem, copies)
+}
+func (m mainStatics) At(mem Mem, slot uint32) (Block, bool) { return m.l.LiveAt(mem, slot) }

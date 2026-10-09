@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/locate"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/proc"
@@ -107,7 +108,7 @@ func plantGame(t *testing.T) *game {
 	t.Helper()
 	mem := newMapped()
 	for anchor, at := range anchorSites {
-		mem.PokeBytes(at, filled(patch.Anchors[anchor].Pattern))
+		mem.PokeBytes(at, filled(monoAnchors[anchor].Pattern))
 	}
 
 	plantUnpatched(anchorSites, func(at uint32, b []byte) { mem.PokeBytes(at, b) })
@@ -126,7 +127,7 @@ func plantGame(t *testing.T) *game {
 	mem.PlantPlayer(playerAt, []int32{500, 500, 137, 200, 220, 220}, 0x10000040)
 	mem.PlantPlayer(otherPlayerAt, []int32{500, 500, 300, 200, 220, 220}, 0x10000040)
 	for anchor, at := range anchorTwins {
-		mem.PokeBytes(at, filled(patch.Anchors[anchor].Pattern))
+		mem.PokeBytes(at, filled(monoAnchors[anchor].Pattern))
 	}
 	plantUnpatched(anchorTwins, func(at uint32, b []byte) { mem.PokeBytes(at, b) })
 
@@ -158,7 +159,7 @@ func plantUnpatched(sites map[string]uint32, poke func(uint32, []byte)) {
 		a, ok := sites[anchor]
 		return a, ok
 	}
-	for _, c := range patch.Cheats {
+	for _, c := range layout.Mono().Cheats {
 		if a, ok := at(c.Anchor); ok {
 			poke(offsetOf(a, c.PatchOff), c.Orig)
 		}
@@ -204,7 +205,7 @@ stricter check applies to.
 */
 func restoresExactly(name string) bool {
 	if c, ok := patch.Cheats[name]; ok {
-		return c.ValueOff == 0
+		return c.ValueField == ""
 	}
 	// A scrubbed arena slot is 0xCC where it was zeros, so only the sites are
 	// restored exactly. The buffer comparison above is what covers the rest.

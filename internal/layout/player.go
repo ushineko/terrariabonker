@@ -43,6 +43,16 @@ const (
 		disagreed across 2473 samples; this is the lower of the pair.
 	*/
 	SelectedItemOff = -0x694
+	/*
+		PickSpeedOff and BlockRangeOff are the fields the mining and reach cheats
+		set alongside their code patches: Player.pickSpeed (a float, lower mines
+		faster) and Player.blockRange (extra tiles of placement reach). Cheat
+		Engine's mono dissector put them at 0x8D8 and 0x9F8 against statLife at
+		0x738 (ce/README.md). Until 2026-10-09 they were bare numbers in
+		patch/cheats.go.
+	*/
+	PickSpeedOff  = 0x1A0
+	BlockRangeOff = 0x2C0
 )
 
 // playerOffsets is the constants above under the Python's names for them.
@@ -57,4 +67,6 @@ var playerOffsets = map[string]int64{
 	"INVENTORY_PTR_OFF":  InventoryPtrOff,
 	"INVENTORY_SLOTS":    InventorySlots,
 	"SELECTED_ITEM_OFF":  SelectedItemOff,
+	"PICK_SPEED_OFF":     PickSpeedOff,
+	"BLOCK_RANGE_OFF":    BlockRangeOff,
 }

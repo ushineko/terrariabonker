@@ -2,6 +2,7 @@ package layout
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"reflect"
@@ -42,12 +43,12 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "72aad8292aabe9e9e33f53ef99f94a2acacd57433997b74b3fe136cae9be4ef7",
+	require.Equal(t, "a733ea9bc73f8f134523ff9224828902a42f9a22a039d9ad53dfde53d51a21ce",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
 func TestSelect(t *testing.T) {
-	const build = "1.4.5.8+24893155"
+	const build = Build1458s24893155
 	cases := []struct {
 		name           string
 		build, runtime string
@@ -57,7 +58,7 @@ func TestSelect(t *testing.T) {
 		// Linux today: any wine-mono, as before the table existed.
 		{"mono, known build", build, "wine-mono-11.3.0", Supported, "wine-mono"},
 		{"mono, another version", build, "wine-mono-10.4.1", Supported, "wine-mono"},
-		{"mono, older known build", "1.4.5.7+24825745", "wine-mono-11.2.0", Supported, "wine-mono"},
+		{"mono, older known build", Build1457s24825745, "wine-mono-11.2.0", Supported, "wine-mono"},
 		{"mono, a game update", "1.4.5.9+25000000", "wine-mono-11.3.0", Candidate, "wine-mono"},
 		// Windows: the CLR entry, never the mono one in its place. Whether it
 		// may write is a separate question (TestReadsAndWritesAreSeparate).
@@ -86,11 +87,11 @@ func TestAnEnabledEntryIsSelectedForItsOwnRuntime(t *testing.T) {
 	clr.Enabled = true
 	Entries = []Entry{monoEntry, clr}
 
-	e, got := Select("1.4.5.8+24893155", "netfx-4.8.9345.0")
+	e, got := Select(Build1458s24893155, "netfx-4.8.9345.0")
 	require.Equal(t, Supported, got)
 	require.Equal(t, "netfx-4.8.1", e.Name)
 
-	e, got = Select("1.4.5.8+24893155", "netfx-4.8.9400.0")
+	e, got = Select(Build1458s24893155, "netfx-4.8.9400.0")
 	require.Equal(t, Candidate, got)
 	require.Equal(t, "netfx-4.8.1", e.Name)
 }
@@ -117,7 +118,7 @@ func TestTheConfirmedRuntimeIsALedgerNotAGate(t *testing.T) {
 	require.Len(t, monoEntry.Confirmed, 1)
 	require.Contains(t, monoEntry.Confirmed[0], "11.3.0: 1.4.5.8+24893155")
 	require.Nil(t, monoEntry.Versions)
-	_, got := Select("1.4.5.8+24893155", "wine-mono-10.4.1")
+	_, got := Select(Build1458s24893155, "wine-mono-10.4.1")
 	require.Equal(t, Supported, got, "an unconfirmed wine-mono stopped matching")
 }
 
@@ -256,4 +257,60 @@ func TestWritesArePerFeature(t *testing.T) {
 	require.True(t, monoEntry.CanWrite(ReadInventory))
 	var none Entry
 	require.False(t, none.CanWrite(WritePlayerStats))
+}
+
+/*
+Each value-setting cheat's site stores to the very field its value is written
+to, under every entry.
+
+The original bytes at a site are the instruction the patch removes: mining's
+`fstp dword [reg+disp32]` (D9 9x) and reach's `mov [reg+disp32]` (C7 87 or 89 96)
+end in the field's object offset. That displacement, less statLife's object
+offset, is the PlayerValues entry -- so a site and its value cannot drift onto
+different fields. statLife's object offset is the CLR table's under the CLR, and
+0x738 under mono (cmd/monofields, ce/README.md).
+*/
+func TestEachCheatSiteStoresToTheFieldItsValueSets(t *testing.T) {
+	clrLife := 0
+	for _, f := range CLRFields["Player"] {
+		if f.Name == "statLife" {
+			clrLife = int(f.Offset)
+		}
+	}
+	lifeAt := map[string]int{monoEntry.Name: 0x738, clrEntry.Name: clrLife}
+	fieldOf := map[string]string{"mining": "pickSpeed", "reach": "blockRange"}
+	for _, e := range []Entry{monoEntry, clrEntry} {
+		for cheat, field := range fieldOf {
+			site, ok := e.Cheats[cheat]
+			require.True(t, ok, "%s has no %s site", e.Name, cheat)
+			disp := int(int32(binary.LittleEndian.Uint32(site.Orig[2:6]))) //nolint:gosec // a 4-byte displacement
+			require.Equal(t, disp-lifeAt[e.Name], e.PlayerValues[field],
+				"%s: %s stores to +%#x, and its value goes to %s", e.Name, cheat, disp, field)
+		}
+	}
+}
+
+// The CLR's cheat values are the CLR table's differences; mono's the constants.
+func TestTheCheatValuesAreTheTables(t *testing.T) {
+	at := map[string]int{}
+	for _, f := range CLRFields["Player"] {
+		at[f.Name] = int(f.Offset)
+	}
+	for _, field := range []string{"pickSpeed", "blockRange"} {
+		require.Equal(t, at[field]-at["statLife"], clrEntry.PlayerValues[field], field)
+	}
+	require.Equal(t, map[string]int{"pickSpeed": PickSpeedOff, "blockRange": BlockRangeOff},
+		monoEntry.PlayerValues)
+}
+
+// Every cheat site names an anchor its own entry declares.
+func TestEverySiteNamesItsEntrysAnchor(t *testing.T) {
+	for _, e := range Entries {
+		for name, site := range e.Cheats {
+			_, ok := e.Anchors[site.Anchor]
+			require.True(t, ok, "%s: %s names anchor %q, which the entry does not declare",
+				e.Name, name, site.Anchor)
+			require.True(t, e.CanWrite(CheatFeature(name)), "%s: %s has a site the entry may not write", e.Name, name)
+		}
+	}
 }

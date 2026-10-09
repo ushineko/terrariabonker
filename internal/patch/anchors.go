@@ -1,5 +1,7 @@
 package patch
 
+import "github.com/ushineko/terrariabonker/internal/layout"
+
 /*
 Anchor is a pattern plus its provenance: the builds it has been seen working on.
 
@@ -82,7 +84,7 @@ runtime nobody recorded would be a guess dressed as provenance.
 */
 var verifiedBuilds = []string{
 	// The build these AOBs were originally derived against.
-	"1.4.5.7+24825745",
+	layout.Build1457s24825745,
 	/*
 		2026-08-23, and a key to distrust: this one is a *mix*. The version came
 		from the frequency vote in detect_version, which returns a stale 1.4.5.7
@@ -93,13 +95,13 @@ var verifiedBuilds = []string{
 		detector that produced it has since been fixed to read the version out of
 		the exe the process maps.
 	*/
-	"1.4.5.7+24893155",
+	layout.Build1457s24893155,
 	/*
 		2026-08-23, after the update was actually loaded: every anchor resolved
 		on 1.4.5.8 and the maintainer confirmed all twelve cheats still working
 		in-game. The update did not touch the code any of them patch.
 	*/
-	"1.4.5.8+24893155",
+	layout.Build1458s24893155,
 }
 
 /*
@@ -120,8 +122,8 @@ var verifiedInstead = map[string][]string{
 		equip_benefits edit), the vanity armour in 10 to 12 stayed inert, and the
 		info accessories that already worked there were unchanged.
 	*/
-	"equip_apply":    {"1.4.5.7+24893155", "1.4.5.8+24893155"},
-	"equip_benefits": {"1.4.5.7+24893155", "1.4.5.8+24893155"},
+	"equip_apply":    {layout.Build1457s24893155, layout.Build1458s24893155},
+	"equip_benefits": {layout.Build1457s24893155, layout.Build1458s24893155},
 	/*
 		2026-08-23: confirmed in-game -- accessories carried in the inventory
 		granted their effects without being equipped, their Warding prefixes kept
@@ -129,40 +131,33 @@ var verifiedInstead = map[string][]string{
 		disabling restored the displaced bytes and stopped the effects with the
 		game still running.
 	*/
-	"inventory_scan": {"1.4.5.7+24893155", "1.4.5.8+24893155"},
+	"inventory_scan": {layout.Build1457s24893155, layout.Build1458s24893155},
 	/*
 		2026-08-23: confirmed in-game with reach and tool reach at 75 -- the
 		stutter, which merely holding Shift would trigger because it is the
 		per-frame search and not the placing, is gone, while manual placement
 		reach and tool reach are unchanged.
 	*/
-	"smart_cursor": {"1.4.5.7+24893155", "1.4.5.8+24893155"},
-	/*
-		2026-08-23: confirmed in-game on 1.4.5.8 -- a second Cavern pylon was
-		placed with a Cavern pylon already in the world, and both appear on the
-		map wired into the pylon network. Nothing downstream dedupes by type, as
-		the recon predicted.
-	*/
-	"pylon_place": {"1.4.5.8+24893155"},
+	"smart_cursor": {layout.Build1457s24893155, layout.Build1458s24893155},
 	/*
 		2026-08-24: confirmed in-game on 1.4.5.8 -- the extractor calls PickTile
 		through this for every tile it takes, and whole veins came out, 45 tiles
 		in two batches, with the game healthy. Only ever derived on 1.4.5.8, so
 		it claims nothing about 1.4.5.7.
 	*/
-	"pick_tile": {"1.4.5.8+24893155"},
+	"pick_tile": {layout.Build1458s24893155},
 	/*
 		2026-08-24: Player.Update's per-frame call to GrabItems, where the
 		extractor hooks. Derived and confirmed on 1.4.5.8 only.
 	*/
-	"grabitems_call": {"1.4.5.8+24893155"},
+	"grabitems_call": {layout.Build1458s24893155},
 	/*
 		2026-08-26: Player.Update's call to BordersMovement, where auto-use
 		hooks. Derived and confirmed on 1.4.5.8 only -- 20 arms produced 20
 		presses through this site, and two bites produced two fish. It claims
 		nothing about 1.4.5.7.
 	*/
-	"borders_movement": {"1.4.5.8+24893155"},
+	"borders_movement": {layout.Build1458s24893155},
 }
 
 // alsoVerified is per-anchor divergence, for a build that breaks only some
@@ -173,21 +168,6 @@ var alsoVerified = map[string][]string{}
 // rawAnchors is every pattern, under the name the rest of the program calls it
 // by. See docs/discovery.md for how each was found.
 var rawAnchors = map[string]Pattern{
-	/*
-		ResetEffects: the blockRange reset (mov [edi+9F8],0 at +0), fld1 (+10)
-		and the pickSpeed reset (fstp [edi+8D8] at +12) sit adjacent, so one
-		anchor covers reach (patch offset 0) and mining (patch offset 12).
-
-		The two reset instructions are wildcarded because those are exactly the
-		bytes reach and mining overwrite: fixed, the anchor would stop matching
-		once either cheat is applied, and a cold-cache re-resolve then failed
-		with "anchor not found". Uniqueness comes from the invariant fld1 plus
-		the downstream field-clear run, which no cheat touches.
-	*/
-	"reset_block": MustParse(
-		"?? ?? ?? ?? ?? ?? ?? ?? ?? ?? D9 E8 ?? ?? ?? ?? ?? ?? " +
-			"C6 87 66 08 00 00 00 C6 87 70 08 00 00 00 C6 87 71 08 00 00 01"),
-
 	/*
 		Player.Update's call to BordersMovement: the auto-use hook. The only call
 		site of that method in Update, unconditional, and about 50 IL bytes
@@ -233,40 +213,6 @@ var rawAnchors = map[string]Pattern{
 		"?? ?? ?? ?? ?? 56 83 EC 7C 8B 7D 08 8B 5D 0C B8 ?? ?? ?? ?? " +
 			"F7 00 01 00 00 00 74 08 8D 6D 00 E8 ?? ?? ?? ?? " +
 			"C7 45 E4 00 00 00 00 C7 45 E0 00 00 00 00 8B 05 ?? ?? ?? ??"),
-
-	/*
-		TETeleportationPylon.PlacementPreviewHook_CheckIfCanPlace: the whole
-		one-pylon-per-biome rule for single-player. Its IL is
-
-			type = GetPylonTypeFromPylonTileStyle(style)
-			return Main.PylonSystem.HasPylonOfType(type) ? 1 : 0
-
-		and it is registered with badReturn 1, so returning 0 always lifts the
-		limit. GetPylonTypeFromPylonTileStyle is inlined to the two movzx here.
-
-		The first three bytes are the ones the cheat overwrites, so they are
-		wildcarded -- otherwise a cold re-resolve fails once it is applied and it
-		could not be turned off again. The mono type-init immediate, the init
-		call, Main.PylonSystem's address and the call to HasPylonOfType are all
-		ASLR'd.
-	*/
-	"pylon_place": MustParse(
-		"?? ?? ?? 83 EC 18 B8 ?? ?? ?? ?? F7 00 01 00 00 00 74 05 " +
-			"E8 ?? ?? ?? ?? 8B 45 14 0F B6 C0 0F B6 C8 8B 05 ?? ?? ?? ?? " +
-			"89 4C 24 04 89 04 24 39 00 8D 6D 00 E8 ?? ?? ?? ??"),
-
-	/*
-		ApplyItemTime(Item, float): the fmulp, cvttsd2si, max(edi,1) tail.
-
-		fast_place overwrites the max(edi,1) at +20, turning `mov eax,1; cmp
-		edi,eax; cmovl edi,eax` into `mov edi,4` and five nops, so those ten
-		bytes are wildcarded -- otherwise a cold-cache re-resolve fails once the
-		cheat is applied. The invariant prefix and the downstream store keep it
-		unique.
-	*/
-	"place": MustParse(
-		"DE C9 DD 5D F0 F2 0F 10 45 F0 F2 0F 2C C8 8B F9 85 C0 7E 0A " +
-			"?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 89 7C 24 04 8B 45 08 89 04 24"),
 
 	/*
 		TileReachCheckSettings.GetRanges(this, out x, out y): prologue, mono
@@ -345,16 +291,6 @@ var rawAnchors = map[string]Pattern{
 	"player_teleport": MustParse(
 		"C7 83 F4 0B 00 00 64 00 00 00 C7 83 68 04 00 00 04 00 00 00 " +
 			"83 FE 0A 0F 94 C0 0F B6 C0"),
-
-	/*
-		Player.ResetEffects: the per-frame `maxMinions = 1` reset.
-
-		Its immediate, the reset value, is wildcarded so the anchor resolves
-		whether or not the cap cheat is applied; uniqueness comes from the
-		adjacent reset that follows it. The cheat rewrites the immediate to the
-		cap wanted.
-	*/
-	"reset_minions": MustParse("C7 87 F8 03 00 00 ?? ?? ?? ?? C7 87 60 0A 00 00 01 00 00 00"),
 
 	/*
 		UpdateEquips' accessory-effect loop:

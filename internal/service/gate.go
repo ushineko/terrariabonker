@@ -74,7 +74,7 @@ func (s *Service) BuildCheck(p *patch.Patcher) BuildReport {
 	entry, support, runtime := s.Support()
 
 	verified, everywhere := false, true
-	for _, anchor := range patch.Anchors {
+	for _, anchor := range patch.AnchorsFor(entry) {
 		if contains(anchor.Verified, key) {
 			verified = true
 		} else {

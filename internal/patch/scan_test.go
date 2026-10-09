@@ -44,7 +44,7 @@ const (
 // plantCode is a code region with the two matches and the near miss in it.
 func plantCode(t *testing.T) *codeMem {
 	t.Helper()
-	pat := patch.Anchors[probe].Pattern
+	pat := monoAnchors[probe].Pattern
 	mem := memtest.New(codeBase, codeSize)
 	body := filled(pat)
 	mem.PokeBytes(hitOne, body)
@@ -97,7 +97,7 @@ difference between a status that is instant and one that takes eight seconds.
 */
 func TestResolvedSitesAreKept(t *testing.T) {
 	mem := plantCode(t)
-	scanner := patch.NewScanner(mem)
+	scanner := monoScanner(mem)
 
 	first := scanner.Resolve(probe, "")
 	require.True(t, first.Available)
@@ -106,7 +106,7 @@ func TestResolvedSitesAreKept(t *testing.T) {
 	// The code is gone. A fresh scan would find nothing; the kept answer stands.
 	mem.PokeBytes(hitOne, make([]byte, 0x400))
 	mem.PokeBytes(hitTwo, make([]byte, 0x400))
-	require.Empty(t, patch.NewScanner(mem).Scan(probe, ""), "the code was not really overwritten")
+	require.Empty(t, monoScanner(mem).Scan(probe, ""), "the code was not really overwritten")
 
 	again := scanner.Resolve(probe, "")
 	require.Equal(t, first.Sites, again.Sites, "the sites were scanned for again")

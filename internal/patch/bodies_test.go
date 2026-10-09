@@ -59,7 +59,7 @@ func plantForStubs() *planted {
 		{"equip_benefits", atEquipBenefits},
 		{"pick_tile", atPickTile},
 	} {
-		mem.PokeBytes(a.at, filled(patch.Anchors[a.anchor].Pattern))
+		mem.PokeBytes(a.at, filled(monoAnchors[a.anchor].Pattern))
 	}
 
 	// get_LocalPlayer, and the player it leads to.

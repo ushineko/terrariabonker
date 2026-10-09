@@ -621,6 +621,42 @@ Slice 6 — item templates on the CLR (done):
       once the maintainer had moved the stack -- the guard working -- and it was
       cleared from its new slot.
 
+Slice 7 — in-place cheats as entry data; mining and reach on the CLR:
+- [x] Every in-place cheat's site is data on its entry (`layout.CheatSite`: anchor,
+      patch offset, original and patched bytes, or a named encoder), with its anchors
+      (`layout.AnchorDef`) and the player fields it sets (`Entry.PlayerValues`). The
+      mono entry's are the mono tables, moved: their patterns, ledgers, offsets, bytes,
+      encoder output and value fields print to the same SHA-256 as before the move
+      (`TestTheMonoCheatsAreWhatTheyWere`).
+- [x] `patch.Cheat` is what does not vary by runtime (name, label, value field, on and
+      off values). The patcher takes an entry (`UseEntry`); the service equips it with
+      the selected entry and the live character's copies as the targets of a cheat's
+      value (`Service.Equip`), the same targets as every other write.
+- [x] Each cheat is a write feature of its own (`layout.CheatFeature`). The CLR entry
+      allows `mining` and `reach`; a cheat it has no site for reads "has no code site
+      under netfx-4.8.1 yet" in `patch status`, and enabling it is refused with the game
+      untouched.
+- [x] CLR sites, from `ResetEffects` on the live game: the `reset_block` anchor; reach
+      NOPs `mov [esi+0x570], edx` (blockRange, statLife + 0x100); mining replaces
+      `fstp dword [esi+0x514]` (pickSpeed, statLife + 0xA4) with `fstp st0` and NOPs. A
+      test checks each site's original instruction stores to the field its value is
+      written to, under both entries.
+- [x] Code that differs by runtime is a module selected by name, not a branch: the live
+      player's finder (`locate.LiveFinder`: mono's get_LocalPlayer tail, the CLR's Main
+      statics) replaces the `ByStatics` branch in `resolveLive`; the stub-based cheats
+      are the injection set an entry names; encoders are a registry. `layout.Derive`
+      makes a variant entry from a base without sharing its maps or lists. Recorded as a
+      rule in `AGENTS.md`.
+- [x] Build keys are declared once (`layout.Build1458s24893155` and the two before it)
+      and every table names the constant; a test fails on any key in the version table
+      or an anchor ledger that is not a declared one.
+- [x] Live on Windows (2026-10-09): `build-check` resolved mining and reach at one site
+      each and reported every other cheat as having no site under netfx-4.8.1. Both
+      enabled (pickSpeed 0.2, reach 20); the maintainer confirmed faster mining and
+      longer placement reach in play. Both disabled; the site read back from the game
+      as `89 96 70 05 00 00 D9 E8 D9 9E 14 05 00 00`, the original bytes. 1.4.5.8 is
+      added to the CLR `reset_block` ledger.
+
 Next slices:
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.

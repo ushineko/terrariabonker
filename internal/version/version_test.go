@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/version"
 )
@@ -29,8 +30,8 @@ there is only one.
 func TestTheKnownBuild(t *testing.T) {
 	require.Equal(t, "1.4.5.8", version.KnownVersion)
 	require.Equal(t, "24893155", version.KnownBuildID)
-	require.Equal(t, "1.4.5.8+24893155", version.KnownBuildKey,
-		"the key is the version and the build id, joined")
+	require.Equal(t, layout.Build1458s24893155, version.KnownBuildKey,
+		"the known build is not the key the version table names")
 }
 
 /*

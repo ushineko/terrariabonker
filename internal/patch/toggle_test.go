@@ -127,8 +127,8 @@ patch lands in the middle of an unrelated method -- or it matches nothing and
 takes a cheat offline, which reads as a game update.
 */
 func TestTheAnchorTableIsWhatItWas(t *testing.T) {
-	names := make([]string, 0, len(patch.Anchors))
-	for name := range patch.Anchors {
+	names := make([]string, 0, len(monoAnchors))
+	for name := range monoAnchors {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -136,7 +136,7 @@ func TestTheAnchorTableIsWhatItWas(t *testing.T) {
 
 	table := map[string]any{}
 	for _, name := range names {
-		a := patch.Anchors[name]
+		a := monoAnchors[name]
 		off, seed := a.Pattern.Seed()
 		require.NotEmptyf(t, seed, "%s has no fixed bytes to search for", name)
 		require.NotEmptyf(t, a.Verified, "%s was never verified against a build", name)

@@ -47,6 +47,11 @@ type Scanner struct {
 	// never padding.
 	Skip [2]uint32
 
+	// Lookup finds an anchor by key. A patcher points it at its entry's
+	// anchors (UseEntry); nil means the package table, as before the version
+	// table.
+	Lookup func(key string) (Anchor, bool)
+
 	sites map[string][]uint32
 }
 
@@ -87,7 +92,7 @@ An anchor may carry per-build variants, and each is tried in turn until one
 matches. Trying them all is deliberate: see Anchor.Candidates.
 */
 func (s *Scanner) Scan(anchorKey, build string) []uint32 {
-	anchor, known := Anchors[anchorKey]
+	anchor, known := s.anchor(anchorKey)
 	if !known {
 		return nil
 	}
@@ -143,7 +148,7 @@ than one arena, and the copies are identical where this patches. Only an anchor
 declared unique treats that as a failure.
 */
 func (s *Scanner) Resolve(anchorKey, build string) Resolution {
-	anchor := Anchors[anchorKey]
+	anchor, _ := s.anchor(anchorKey)
 	verified := build != "" && contains(anchor.Verified, build)
 
 	sites := s.sites[anchorKey]
@@ -182,4 +187,13 @@ func contains(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// anchor is an anchor by key, through Lookup when the scanner has one.
+func (s *Scanner) anchor(key string) (Anchor, bool) {
+	if s.Lookup != nil {
+		return s.Lookup(key)
+	}
+	a, ok := Anchors[key]
+	return a, ok
 }

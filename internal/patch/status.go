@@ -18,22 +18,18 @@ exactly the case where the answer matters, a run against a game some other
 process patched.
 */
 
-// IsEnabled reports whether a patch is applied, by reading the game.
-func IsEnabled(sc *Scanner, mem Mem, name string) bool {
-	return isEnabledWith(sc, mem, name, State{Inj: map[string]Installed{}})
-}
-
-// isEnabledWith is the same, given a record that may already know where the
-// stubs went.
-func isEnabledWith(sc *Scanner, mem Mem, name string, state State) bool {
-	if inj, ok := Injections[name]; ok {
+// isEnabledWith reports whether a patch is applied under the patcher's entry, by
+// reading the game, given a record that may already know where the stubs went.
+func (p *Patcher) isEnabledWith(name string, state State) bool {
+	sc, mem := p.Scanner, p.Mem
+	if inj, ok := p.injection(name); ok {
 		return injectionEnabled(sc, mem, inj, state)
 	}
-	cheat, ok := Cheats[name]
+	site, ok := p.cheatSite(name)
 	if !ok {
 		return false
 	}
-	res := sc.Resolve(cheat.Anchor, "")
+	res := sc.Resolve(site.Anchor, "")
 	if !res.Available {
 		return false // not compiled yet: there is nothing to be on
 	}
@@ -43,16 +39,16 @@ func isEnabledWith(sc *Scanner, mem Mem, name string, state State) bool {
 		part-way through an operation.
 	*/
 	for _, base := range res.Sites {
-		site := base + uint32(cheat.PatchOff) //nolint:gosec // an offset inside a match
-		if cheat.Tunable() {
+		at := base + uint32(site.PatchOff) //nolint:gosec // an offset inside a match
+		if tunable(site) {
 			// A tunable cheat is on when the site is anything but the original:
 			// what it was set to is a value, not a second thing to recognise.
-			if !bytes.Equal(mem.Read(site, len(cheat.Orig)), cheat.Orig) {
+			if !bytes.Equal(mem.Read(at, len(site.Orig)), site.Orig) {
 				return true
 			}
 			continue
 		}
-		if bytes.Equal(mem.Read(site, len(cheat.Patched)), cheat.Patched) {
+		if bytes.Equal(mem.Read(at, len(site.Patched)), site.Patched) {
 			return true
 		}
 	}

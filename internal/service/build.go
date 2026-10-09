@@ -6,6 +6,7 @@ import (
 	"github.com/ushineko/terrariabonker/internal/inventory"
 	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/locate"
+	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/version"
 )
 
@@ -159,4 +160,29 @@ func (s *Service) inventoryAt(life uint32) *inventory.Inventory {
 func (s *Service) CanWrite(f layout.Feature) bool {
 	entry, _, _ := s.Support()
 	return entry.CanWrite(f)
+}
+
+/*
+Equip points a patcher at the selected entry -- its cheat sites, anchors and
+injection set -- and at the live character's copies for a cheat's value, the
+same targets every other write takes. A game attached only to read has no
+patcher, and there is nothing to equip.
+*/
+func (s *Service) Equip(p *patch.Patcher) {
+	if p == nil {
+		return
+	}
+	entry, _, _ := s.Support()
+	p.UseEntry(entry)
+	p.Targets = func() ([]uint32, error) {
+		blocks, err := s.writeTargets()
+		if err != nil {
+			return nil, err
+		}
+		out := make([]uint32, len(blocks))
+		for i, b := range blocks {
+			out[i] = b.LifeAddr
+		}
+		return out, nil
+	}
 }

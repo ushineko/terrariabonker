@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/patch"
 )
 
@@ -166,4 +167,20 @@ func pyTiles(tiles []patch.Tile) string {
 		parts[i] = fmt.Sprintf("(%d, %d)", t.X, t.Y)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// monoAnchors is every anchor a patcher on the mono entry resolves through: the
+// entry's in-place anchors and the mono injection set's. What the tests plant
+// and scan for is this, not patch.Anchors, which holds the injection set alone.
+var monoAnchors = patch.AnchorsFor(layout.Mono())
+
+// monoScanner is a scanner that looks anchors up as a patcher on the mono entry
+// does.
+func monoScanner(mem patch.Mem) *patch.Scanner {
+	s := patch.NewScanner(mem)
+	s.Lookup = func(key string) (patch.Anchor, bool) {
+		a, ok := monoAnchors[key]
+		return a, ok
+	}
+	return s
 }

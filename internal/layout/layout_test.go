@@ -128,11 +128,15 @@ var goldenOffsets = map[string]int64{
 	"SAFE_PTR_OFF":         -1620,
 	"SCALE_OFF":            140,
 	"SELECTED_ITEM_OFF":    -1684,
-	"SELL_SLOTS":           58,
-	"TILECOLLIDE_OFF":      256,
-	"TIMELEFT_OFF":         180,
-	"TYPE_OFF":             148,
-	"WET_OFF":              60,
+	// pickSpeed 0x8D8 and blockRange 0x9F8 against statLife 0x738 (ce/README.md);
+	// were bare numbers in patch/cheats.go until 2026-10-09.
+	"PICK_SPEED_OFF":  0x1A0,
+	"BLOCK_RANGE_OFF": 0x2C0,
+	"SELL_SLOTS":      58,
+	"TILECOLLIDE_OFF": 256,
+	"TIMELEFT_OFF":    180,
+	"TYPE_OFF":        148,
+	"WET_OFF":         60,
 }
 
 /*

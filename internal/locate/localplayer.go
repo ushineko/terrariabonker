@@ -187,3 +187,11 @@ func readU32(mem Mem, addr uint32) (uint32, bool) {
 	}
 	return binary.LittleEndian.Uint32(b), true
 }
+
+// getLocalPlayer is mono's LiveFinder: get_LocalPlayer's JIT code.
+type getLocalPlayer struct{}
+
+func (getLocalPlayer) Find(mem ExecMem, _ []Block) (uint32, bool) {
+	return FindLocalPlayerAnchor(mem)
+}
+func (getLocalPlayer) At(mem Mem, anchor uint32) (Block, bool) { return LocalPlayerAt(mem, anchor) }

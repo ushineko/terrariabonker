@@ -1,6 +1,10 @@
 package patch
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ushineko/terrariabonker/internal/layout"
+)
 
 /*
 Cheat is a patch applied in place: a few bytes at a known offset inside an
@@ -9,97 +13,55 @@ anchor match, swapped for the same number of different bytes.
 Everything that fits in the space the game already uses is one of these. When
 what is wanted is longer than the site has room for, it becomes an Injection
 instead.
+
+This is the part of a cheat that is the same under every runtime: what it is
+called, what it does, and the player field it sets. Where it patches and with
+what bytes is the version-table entry's (layout.CheatSite): different compiled
+code under a different runtime is a different entry, not a different Cheat.
 */
 type Cheat struct {
-	Name     string
-	Label    string
-	Anchor   string // which pattern finds the code
-	PatchOff int    // where in the match to write
-	Orig     []byte // what is there, and what disabling puts back
-	Patched  []byte // what enabling writes, when it is fixed
+	Name  string
+	Label string
 
-	// ValueOff is a player field to set alongside the patch, as an offset from
-	// statLife, or zero when the cheat has none.
-	ValueOff int
-	ValueF32 bool // the field is a float rather than an integer
-	OnValue  float64
-	OffValue float64
+	// ValueField is the player field to set alongside the patch, by the game's
+	// name for it ("pickSpeed"), or "" when the cheat has none. Its offset is
+	// the entry's (layout.Entry.PlayerValues).
+	ValueField string
+	ValueF32   bool // the field is a float rather than an integer
+	OnValue    float64
+	OffValue   float64
 
 	Note string
-
-	/*
-		MakePatched builds the bytes from a value, for a patch that is tunable in
-		place -- an immediate inside an instruction, say. Patched is then unused:
-		enabling writes what this returns, disabling restores Orig, and the cheat
-		reads as on when the site differs from Orig.
-	*/
-	MakePatched func(int32) []byte
 }
 
-// Tunable reports whether the bytes are built from a value rather than fixed.
-func (c Cheat) Tunable() bool { return c.MakePatched != nil }
+// tunable reports whether a site's bytes are built from a value rather than
+// fixed.
+func tunable(site layout.CheatSite) bool { return site.Encoder != "" }
 
 // Cheats is every in-place patch.
 var Cheats = map[string]Cheat{
 	"mining": {
 		Name: "mining", Label: "Global mining speed (pickSpeed)",
-		Anchor: "reset_block", PatchOff: 12,
-		// fstp [edi+8D8] becomes fstp st(0) and five nops: the per-frame reset
-		// of pickSpeed is thrown away instead of being stored.
-		Orig:     []byte{0xD9, 0x9F, 0xD8, 0x08, 0x00, 0x00},
-		Patched:  []byte{0xDD, 0xD8, 0x90, 0x90, 0x90, 0x90},
-		ValueOff: 0x1A0, ValueF32: true, OnValue: 0.2, OffValue: 1.0,
+		ValueField: "pickSpeed", ValueF32: true, OnValue: 0.2, OffValue: 1.0,
 		Note: "Global mining speed. Lower is faster.",
 	},
 	"reach": {
 		Name: "reach", Label: "Placement reach (blockRange)",
-		Anchor: "reset_block", PatchOff: 0,
-		// The per-frame `blockRange = 0` reset, nopped out.
-		Orig:     []byte{0xC7, 0x87, 0xF8, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-		Patched:  []byte{0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90},
-		ValueOff: 0x2C0, OnValue: 20, OffValue: 0,
+		ValueField: "blockRange", OnValue: 20, OffValue: 0,
 		Note: "Extended placement reach for every item.",
 	},
 	"pylons": {
 		Name: "pylons", Label: "Multiple pylons per biome",
-		Anchor: "pylon_place", PatchOff: 0,
-		// The whole one-per-biome check becomes `xor eax,eax; ret`. The method
-		// is registered with a bad return of 1, so returning 0 always allows it.
-		Orig:    []byte{0x55, 0x8B, 0xEC},
-		Patched: []byte{0x31, 0xC0, 0xC3},
 		Note: "Place more than one pylon of the same type. Needs one pylon placed " +
 			"first, so the game compiles the check.",
 	},
-	/*
-		fast_place forces a low itemTime where the placement timing is read.
-
-		`mov eax,1; cmp edi,eax; cmovl edi,eax` -- the max(edi,1) that keeps the
-		item time from going below one -- becomes `mov edi,N` and five nops.
-		Lower is faster.
-	*/
 	"fast_place": {
 		Name: "fast_place", Label: "Fast placement (ApplyItemTime)",
-		Anchor: "place", PatchOff: 20,
-		Orig: []byte{0xB8, 0x01, 0x00, 0x00, 0x00, 0x3B, 0xF8, 0x0F, 0x4C, 0xF8},
-		MakePatched: func(n int32) []byte {
-			return append(append([]byte{0xBF}, i32(max32(n, 1))...),
-				0x90, 0x90, 0x90, 0x90, 0x90)
-		},
 		Note: "Near-instant block placement.",
 	},
-	/*
-		max_minions rewrites ResetEffects' `maxMinions = 1` to `maxMinions = N`,
-		so N slots hold every frame and accessory bonuses still stack on top.
-
-		The patch offset is the four-byte immediate inside that instruction, and
-		the value is packed straight into it.
-	*/
 	"max_minions": {
 		Name: "max_minions", Label: "Minion cap (maxMinions)",
-		Anchor: "reset_minions", PatchOff: 6,
-		Orig:        []byte{0x01, 0x00, 0x00, 0x00},
-		MakePatched: func(n int32) []byte { return i32(max32(n, 1)) },
-		Note:        "Raises the minion (summon) cap.",
+		Note: "Raises the minion (summon) cap.",
 	},
 }
 

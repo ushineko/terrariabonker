@@ -14,7 +14,7 @@ const cBase, cLife = 0x10000000, 0x10000800
 
 func clrEntry(t *testing.T) layout.Entry {
 	t.Helper()
-	e, support := layout.Select("1.4.5.8+24893155", "netfx-4.8.9345.0")
+	e, support := layout.Select(layout.Build1458s24893155, "netfx-4.8.9345.0")
 	require.Equal(t, layout.Supported, support)
 	return e
 }

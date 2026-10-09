@@ -223,6 +223,7 @@ func (a *App) game(guard, force bool) (*Game, error) {
 				return nil, err
 			}
 		}
+		a.warm.Svc.Equip(a.warm.Patcher)
 		return a.warm, nil
 	}
 	if err := a.elevate(); err != nil {
@@ -232,6 +233,7 @@ func (a *App) game(guard, force bool) (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
+	got.Svc.Equip(got.Patcher)
 	if guard {
 		if err := got.Svc.RequireCompatible(force); err != nil {
 			return nil, err

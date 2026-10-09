@@ -36,13 +36,15 @@ func TestAnUnverifiedBuildStillResolves(t *testing.T) {
 	}
 }
 
-// Every anchor key names an anchor that exists, whichever table declared the
-// patch.
+// Under the mono entry, every patch's anchor key names an anchor that exists,
+// whichever table declared the patch.
 func TestEveryPatchResolvesThroughARealAnchor(t *testing.T) {
+	atHome(t)
+	p := newPatcher(t, plantGame(t))
 	for _, info := range patch.Catalog() {
-		key := patch.AnchorKey(info.Name)
+		key := p.AnchorKey(info.Name)
 		require.NotEmptyf(t, key, "%s resolves through no anchor at all", info.Name)
-		_, known := patch.Anchors[key]
+		_, known := monoAnchors[key]
 		require.Truef(t, known, "%s resolves through %q, which is not an anchor",
 			info.Name, key)
 	}

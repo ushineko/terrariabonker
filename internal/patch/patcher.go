@@ -8,6 +8,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/locate"
 )
 
@@ -36,6 +37,17 @@ type Patcher struct {
 
 	state State
 	arena uint32
+
+	// The version-table entry this patcher applies (UseEntry): its in-place
+	// cheats, anchors and player fields, and its injection set.
+	entry   layout.Entry
+	set     injectionSet
+	anchors map[string]Anchor
+
+	// Targets is the player copies a cheat's value is written to: the live
+	// character's, as for every other write. Nil means every copy the entry's
+	// locator finds.
+	Targets func() ([]uint32, error)
 }
 
 /*
@@ -51,6 +63,7 @@ var ErrNotAPatch = errors.New("not a patch")
 // NewPatcher is a patcher over a running game.
 func NewPatcher(mem BuilderMem, pid int) *Patcher {
 	p := &Patcher{Mem: mem, PID: pid, Scanner: NewScanner(mem)}
+	p.UseEntry(layout.Mono())
 	p.state = LoadState(pid)
 	p.adoptArena()
 	return p
@@ -92,14 +105,14 @@ func (p *Patcher) setArena(base uint32) {
 func (p *Patcher) Status() map[string]bool {
 	out := make(map[string]bool, len(Cheats)+len(Injections))
 	for _, info := range Catalog() {
-		out[info.Name] = isEnabledWith(p.Scanner, p.Mem, info.Name, p.state)
+		out[info.Name] = p.isEnabledWith(info.Name, p.state)
 	}
 	return out
 }
 
 // IsEnabled is that question for one patch.
 func (p *Patcher) IsEnabled(name string) bool {
-	return isEnabledWith(p.Scanner, p.Mem, name, p.state)
+	return p.isEnabledWith(name, p.state)
 }
 
 // Values are the values each cheat was last given.
@@ -114,7 +127,7 @@ saves a record that does not know about the first.
 */
 func (p *Patcher) Enable(name string, value *float64) error {
 	return p.locked(func(s *State) error {
-		if inj, ok := Injections[name]; ok {
+		if inj, ok := p.injection(name); ok {
 			v := valueFor(name, value, 30)
 			if err := p.enableInjection(s, inj, v); err != nil {
 				return err
@@ -124,11 +137,11 @@ func (p *Patcher) Enable(name string, value *float64) error {
 			p.changed(name, true, s.Values[name])
 			return nil
 		}
-		cheat, ok := Cheats[name]
-		if !ok {
-			return fmt.Errorf("%q is %w", name, ErrNotAPatch)
+		cheat, site, err := p.inPlace(name)
+		if err != nil {
+			return err
 		}
-		res := p.Scanner.Resolve(cheat.Anchor, "")
+		res := p.Scanner.Resolve(site.Anchor, "")
 		if !res.Available {
 			return fmt.Errorf("%s", res.Reason)
 		}
@@ -138,16 +151,16 @@ func (p *Patcher) Enable(name string, value *float64) error {
 			identical where this writes, so a stale one is inert and the live one
 			takes effect.
 		*/
-		if cheat.Tunable() {
+		if tunable(site) {
 			v := valueFor(name, value, 1)
-			blob := cheat.MakePatched(int32(v))
+			blob := encoders[site.Encoder](int32(v))
 			for _, base := range res.Sites {
-				p.Mem.Write(offsetBy(base, cheat.PatchOff), blob)
+				p.Mem.Write(offsetBy(base, site.PatchOff), blob)
 			}
 			p.recordValue(s, name, v)
 		} else {
 			for _, base := range res.Sites {
-				p.Mem.Write(offsetBy(base, cheat.PatchOff), cheat.Patched)
+				p.Mem.Write(offsetBy(base, site.PatchOff), site.Patched)
 			}
 			if err := p.setValue(cheat, true, value); err != nil {
 				return err
@@ -163,7 +176,7 @@ func (p *Patcher) Enable(name string, value *float64) error {
 // Disable removes a patch and puts back what was there.
 func (p *Patcher) Disable(name string) error {
 	return p.locked(func(s *State) error {
-		if inj, ok := Injections[name]; ok {
+		if inj, ok := p.injection(name); ok {
 			if err := p.disableInjection(s, inj); err != nil {
 				return err
 			}
@@ -171,18 +184,18 @@ func (p *Patcher) Disable(name string) error {
 			p.changed(name, false, 0)
 			return nil
 		}
-		cheat, ok := Cheats[name]
-		if !ok {
-			return fmt.Errorf("%q is %w", name, ErrNotAPatch)
+		cheat, site, err := p.inPlace(name)
+		if err != nil {
+			return err
 		}
-		res := p.Scanner.Resolve(cheat.Anchor, "")
+		res := p.Scanner.Resolve(site.Anchor, "")
 		if !res.Available {
 			return fmt.Errorf("%s", res.Reason)
 		}
 		for _, base := range res.Sites {
-			p.Mem.Write(offsetBy(base, cheat.PatchOff), cheat.Orig)
+			p.Mem.Write(offsetBy(base, site.PatchOff), site.Orig)
 		}
-		if !cheat.Tunable() {
+		if !tunable(site) {
 			if err := p.setValue(cheat, false, nil); err != nil {
 				return err
 			}
@@ -412,8 +425,12 @@ Every copy for the same reason the code sites are: which one the game reads is
 not knowable here, and the inert ones ignore what lands on them.
 */
 func (p *Patcher) setValue(cheat Cheat, on bool, override *float64) error {
-	if cheat.ValueOff == 0 {
+	if cheat.ValueField == "" {
 		return nil
+	}
+	off, ok := p.entry.PlayerValues[cheat.ValueField]
+	if !ok {
+		return fmt.Errorf("%s has no offset for Player.%s under %s", cheat.Name, cheat.ValueField, p.entry.Name)
 	}
 	val := cheat.OffValue
 	if on {
@@ -428,14 +445,34 @@ func (p *Patcher) setValue(cheat Cheat, on bool, override *float64) error {
 	} else {
 		raw = i32(int32(val))
 	}
-	blocks := locate.FindPlayers(p.Mem)
-	if len(blocks) == 0 {
-		return fmt.Errorf("no player found")
+	targets, err := p.valueTargets()
+	if err != nil {
+		return err
 	}
-	for _, b := range blocks {
-		p.Mem.Write(offsetBy(b.LifeAddr, cheat.ValueOff), raw)
+	for _, life := range targets {
+		p.Mem.Write(offsetBy(life, off), raw)
 	}
 	return nil
+}
+
+/*
+valueTargets is the statLife addresses a cheat's value goes to: the caller's
+Targets -- the live character's copies, as for every other write -- or, without
+one, every copy the entry's locator finds.
+*/
+func (p *Patcher) valueTargets() ([]uint32, error) {
+	if p.Targets != nil {
+		return p.Targets()
+	}
+	blocks := locate.With(p.entry).FindPlayers(p.Mem)
+	if len(blocks) == 0 {
+		return nil, fmt.Errorf("no player found")
+	}
+	out := make([]uint32, 0, len(blocks))
+	for _, b := range blocks {
+		out = append(out, b.LifeAddr)
+	}
+	return out, nil
 }
 
 // valueFor is the value to use: the caller's, else the cheat's own default, else

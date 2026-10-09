@@ -51,6 +51,25 @@ reverse-engineering credit for those hooks belongs to the ReGrind authors.
   package that needs an offset imports it from there. Never re-spell a constant in a second
   package — a game update is the routine event here, and re-deriving one number should be one
   edit, not a hunt for every spelling of it. (It was five spellings under four names once.)
+- **What is supported is a table, and like goes with like (spec 052).** A supported version
+  is a game build *and* the runtime running it — wine-mono and .NET Framework compile the
+  same game into different layouts and different machine code, and so can two versions of
+  either. Each one with numbers of its own is a `layout.Entry`, selected at startup:
+  - **Numbers are entry data**, in a file per runtime (`internal/layout/entry_mono.go`,
+    `entry_netfx.go`): field offsets, object shapes, anchors, cheat sites, the player fields
+    a cheat sets, and which reads and writes the entry allows (per feature, per cheat).
+  - **Code that differs by runtime is a module of its own**, named by the entry and found in a
+    registry: how the live player is found (`locate.LiveFinder`, by `LocalPlayerBy`), the
+    stub-based cheats (`patch`'s injection sets, by `Injections`), how a value is encoded
+    into bytes (`patch`'s encoders, by `CheatSite.Encoder`).
+  - **No `switch`/`if` on the runtime or the entry in shared code.** Shared code asks the
+    entry or its module. A new runtime, or a new version of one, is a new entry and, where
+    it needs code, a new module — never another case in a routine both use.
+  - **A version that differs in a few places is `layout.Derive`d** from the one it differs
+    from, stating only the differences. What it carries over, it carries over on purpose:
+    whoever adds it checks that each anchor still matches and adds the build to its
+    `Verified` ledger. A missing site is never filled in from another entry at run time — an
+    anchor carried over unchecked can match the wrong code.
 
 ---
 

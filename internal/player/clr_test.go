@@ -20,7 +20,7 @@ func TestTheCLRHandleReadsAndHealsToTheBoostedCap(t *testing.T) {
 	const base, life = 0x10000000, 0x10000800
 	mem := memtest.New(base, 0x1000)
 	mem.PlantCLRPlayer(life, []int32{400, 500, 300, 150, 200, 260}, base+0x40)
-	e, _ := layout.Select("1.4.5.8+24893155", "netfx-4.8.9345.0")
+	e, _ := layout.Select(layout.Build1458s24893155, "netfx-4.8.9345.0")
 	p := player.NewFor(e, mem, life)
 
 	got, _ := p.StatLifeMax()

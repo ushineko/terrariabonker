@@ -14,7 +14,7 @@ import (
 // out for the measured build and runtime.
 func clrLocator(t *testing.T) locate.Locator {
 	t.Helper()
-	e, support := layout.Select("1.4.5.8+24893155", "netfx-4.8.9345.0")
+	e, support := layout.Select(layout.Build1458s24893155, "netfx-4.8.9345.0")
 	require.Equal(t, layout.Supported, support)
 	return locate.With(e)
 }
@@ -108,7 +108,7 @@ func TestTheCLRPrefilterReadsThePermanentCap(t *testing.T) {
 
 func monoEntry(t *testing.T) layout.Entry {
 	t.Helper()
-	e, _ := layout.Select("1.4.5.8+24893155", "wine-mono-11.3.0")
+	e, _ := layout.Select(layout.Build1458s24893155, "wine-mono-11.3.0")
 	return e
 }
 

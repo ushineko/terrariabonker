@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ushineko/terrariabonker/internal/builds"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/profile"
 	"github.com/ushineko/terrariabonker/internal/trainer"
@@ -35,11 +36,17 @@ func patchArgs(_ *cobra.Command, args []string) error {
 	if !oneOf(args[0], patchActions) {
 		return usagef("%q is not one of %s", args[0], strings.Join(patchActions, ", "))
 	}
-	if len(args) == 2 && patch.Injections[args[1]].Anchor == "" &&
-		patch.Cheats[args[1]].Anchor == "" {
+	if len(args) == 2 && !isPatch(args[1]) {
 		return usagef("%q is not a patch", args[1])
 	}
 	return nil
+}
+
+// isPatch reports whether the catalog has a cheat of that name, under any entry.
+func isPatch(name string) bool {
+	_, inPlace := patch.Cheats[name]
+	_, injected := patch.Injections[name]
+	return inPlace || injected
 }
 
 // oneOf reports whether a word is in a list.
@@ -82,7 +89,7 @@ func (a *App) patchCmd() *cobra.Command {
 			if len(args) > 1 {
 				cheat = args[1]
 			}
-			got, err := a.game(true, force)
+			got, err := a.patchGame(cheat, force)
 			if err != nil {
 				return err
 			}
@@ -127,6 +134,17 @@ func (a *App) patchCmd() *cobra.Command {
 }
 
 /*
+patchGame attaches for a patch action. Turning a cheat on or off is a write of
+that one cheat, allowed per entry as its site is derived. Status is a read.
+*/
+func (a *App) patchGame(cheat string, force bool) (*Game, error) {
+	if cheat == "" {
+		return a.game(false, false)
+	}
+	return a.gameWriting(layout.CheatFeature(cheat), force)
+}
+
+/*
 patchStatus is what is applied right now, and what could be.
 
 The window polls this every couple of seconds, which is the one moment the game
@@ -135,7 +153,10 @@ so toggling a cheat later -- which means clicking away from the game and pausing
 it -- does not have to.
 */
 func (a *App) patchStatus(cmd *cobra.Command, got *Game, asJSON bool) error {
-	got.Svc.EnsureArena(got.Patcher)
+	// The arena is a write into the game, so only where writing is allowed.
+	if got.Svc.RequireCompatible(false) == nil {
+		got.Svc.EnsureArena(got.Patcher)
+	}
 	build := got.Svc.BuildKey()
 	detail := got.Patcher.Details(build)
 	values := got.Patcher.Values()
