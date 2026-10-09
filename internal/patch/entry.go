@@ -1,6 +1,7 @@
 package patch
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -28,6 +29,44 @@ var encoders = map[string]func(int32) []byte{
 	"mov-edi-imm32-min1": func(n int32) []byte {
 		return append(append([]byte{0xBF}, i32(max32(n, 1))...), 0x90, 0x90, 0x90, 0x90, 0x90)
 	},
+	// `mov eax, N` (N at least 1) and ten nops, over a 15-byte clamp: fast_place's
+	// item time where the clamp leaves the time in eax.
+	"mov-eax-imm32-min1": func(n int32) []byte {
+		return append(append([]byte{0xB8}, i32(max32(n, 1))...), bytes.Repeat([]byte{0x90}, 10)...)
+	},
+}
+
+/*
+holds reports whether bytes read at a site are what this cheat expects to find
+there: the original, or the cheat's own patch -- for a cheat built from a value,
+the encoder's output for some value, recognised by every byte the value does not
+change.
+
+Anchors wildcard exactly the bytes a cheat writes, so that they resolve with the
+cheat on. That makes a match no evidence of what those bytes are, and a write
+guarded only by the anchor would overwrite whatever an unexpected match holds.
+*/
+func holds(site layout.CheatSite, cur []byte) bool {
+	if len(cur) != len(site.Orig) {
+		return false
+	}
+	if bytes.Equal(cur, site.Orig) {
+		return true
+	}
+	if site.Encoder == "" {
+		return bytes.Equal(cur, site.Patched)
+	}
+	enc := encoders[site.Encoder]
+	a, b := enc(0x01010101), enc(0x02020202)
+	if len(a) != len(cur) {
+		return false
+	}
+	for i := range cur {
+		if a[i] == b[i] && cur[i] != a[i] {
+			return false
+		}
+	}
+	return true
 }
 
 /*

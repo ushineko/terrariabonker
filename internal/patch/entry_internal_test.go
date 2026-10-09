@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/ushineko/terrariabonker/internal/layout"
 )
 
@@ -86,4 +88,36 @@ func TestEveryBuildKeyIsADeclaredOne(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Every encoder writes exactly as many bytes as the site it is named by holds,
+// for any value: more would overwrite the next instruction, fewer leave part of
+// the old one to execute.
+func TestEveryEncoderFillsItsSiteExactly(t *testing.T) {
+	for _, e := range layout.Entries {
+		for name, site := range e.Cheats {
+			if site.Encoder == "" {
+				require.Len(t, site.Patched, len(site.Orig), "%s: %s", e.Name, name)
+				continue
+			}
+			for _, v := range []int32{-5, 0, 1, 4, 255, 1 << 20} {
+				require.Len(t, encoders[site.Encoder](v), len(site.Orig), "%s: %s at %d", e.Name, name, v)
+			}
+		}
+	}
+}
+
+// A site is recognised as the original, as the cheat's patch for any value, and
+// as nothing else.
+func TestASiteHoldsItsOriginalOrItsPatch(t *testing.T) {
+	site := layout.Mono().Cheats["max_minions"]
+	require.True(t, holds(site, site.Orig))
+	require.True(t, holds(site, encoders[site.Encoder](37)))
+	fixed := layout.Mono().Cheats["fast_place"]
+	require.True(t, holds(fixed, encoders[fixed.Encoder](3)))
+	require.False(t, holds(fixed, append([]byte{0xB9}, encoders[fixed.Encoder](3)[1:]...)), "another register")
+	mining := layout.Mono().Cheats["mining"]
+	require.True(t, holds(mining, mining.Patched))
+	require.False(t, holds(mining, []byte{0x90, 0x90, 0x90, 0x90, 0x90, 0x90}))
+	require.False(t, holds(mining, mining.Orig[:4]), "short read")
 }

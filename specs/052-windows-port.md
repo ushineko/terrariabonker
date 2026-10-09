@@ -659,7 +659,30 @@ Slice 7 â€” in-place cheats as entry data; mining and reach on the CLR:
       as `89 96 70 05 00 00 D9 E8 D9 9E 14 05 00 00`, the original bytes. 1.4.5.8 is
       added to the CLR `reset_block` ledger.
 
+Slice 8 — the remaining in-place cheats on the CLR:
+- [x] max_minions: ResetEffects' `maxMinions = 1; maxTurrets = 1` (0x30C, 0x5A8), the
+      shape of mono's anchor with esi for edi; the immediate is the value.
+- [x] fast_place: `ApplyItemTime(Item, float)`, found by its useTime load and
+      truncation. The CLR's clamp is 15 bytes (`if (useTime > 0 && time <= 0) time =
+      1`), both jumps landing past it, so the whole of it becomes `mov eax, N` and ten
+      nops (encoder `mov-eax-imm32-min1`).
+- [x] pylons: `PlacementPreviewHook_CheckIfCanPlace`, found among the code that loads
+      `Main.PylonSystem`'s static slot (Main.player's + 0x48); its first instruction
+      becomes `xor eax, eax; ret 0x10`. Compiled only after a pylon's placement preview.
+- [x] **A site is written only if it holds the original bytes or the cheat's own
+      patch** (a value-built patch is recognised by every byte its value does not
+      change), on enable and disable, under every entry. Anchors wildcard exactly the
+      bytes a cheat writes, so a match was no evidence of them. Every encoder's output
+      is the length of the bytes it replaces (tested for every site).
+- [x] Live on Windows (2026-10-09): a minion cap of 10, faster placement, and a
+      second pylon of a type already placed, each confirmed in play by the
+      maintainer; each disabled and its site read back as the original bytes. All
+      five in-place cheats now work under .NET Framework; the stub-based ones need a
+      CLR injection set.
+
 Next slices:
+- [ ] The stub-based cheats under the CLR: an injection set of its own (arena,
+      springboard, bodies), selected by the entry's `Injections`.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

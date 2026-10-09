@@ -145,6 +145,9 @@ func (p *Patcher) Enable(name string, value *float64) error {
 		if !res.Available {
 			return fmt.Errorf("%s", res.Reason)
 		}
+		if err := p.expectSites(name, site, res.Sites); err != nil {
+			return err
+		}
 		/*
 			Every copy is patched. mono can JIT one method into more than one
 			arena and which copy executes is not knowable; the copies are
@@ -173,6 +176,21 @@ func (p *Patcher) Enable(name string, value *float64) error {
 	})
 }
 
+/*
+expectSites refuses a write unless every site holds what the cheat expects: its
+original bytes or its own patch. Nothing is written to any of them otherwise.
+*/
+func (p *Patcher) expectSites(name string, site layout.CheatSite, bases []uint32) error {
+	for _, base := range bases {
+		at := offsetBy(base, site.PatchOff)
+		if cur := p.Mem.Read(at, len(site.Orig)); !holds(site, cur) {
+			return fmt.Errorf("%s: the code at %#x is neither the original nor this "+
+				"cheat's patch (% X), so nothing was changed", name, at, cur)
+		}
+	}
+	return nil
+}
+
 // Disable removes a patch and puts back what was there.
 func (p *Patcher) Disable(name string) error {
 	return p.locked(func(s *State) error {
@@ -191,6 +209,9 @@ func (p *Patcher) Disable(name string) error {
 		res := p.Scanner.Resolve(site.Anchor, "")
 		if !res.Available {
 			return fmt.Errorf("%s", res.Reason)
+		}
+		if err := p.expectSites(name, site, res.Sites); err != nil {
+			return err
 		}
 		for _, base := range res.Sites {
 			p.Mem.Write(offsetBy(base, site.PatchOff), site.Orig)
