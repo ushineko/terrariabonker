@@ -218,7 +218,10 @@ func (l Locator) FindPlayers(mem Mem) []Block {
 			// every word of about 1.6 GB.
 			lifeMax := word(buf, i+capAt)
 			life := word(buf, i+2)
-			if lifeMax < 100 || lifeMax > 500 || life < 1 || life > lifeMax {
+			// Life is bounded by the boosted cap, which is at most the permanent
+			// one plus BoostHeadroom; ValidBlock applies the exact rule. Bounding
+			// it by the permanent cap here dropped every buffed player.
+			if lifeMax < 100 || lifeMax > 500 || life < 1 || life > lifeMax+BoostHeadroom {
 				continue
 			}
 			fields := l.inGameOrder([]int32{

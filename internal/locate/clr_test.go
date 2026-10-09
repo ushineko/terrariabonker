@@ -111,3 +111,16 @@ func monoEntry(t *testing.T) layout.Entry {
 	e, _ := layout.Select("1.4.5.8+24893155", "wine-mono-11.3.0")
 	return e
 }
+
+// A buffed CLR player -- life above the permanent cap, within the boosted one --
+// is found, as under mono.
+func TestABuffedCLRPlayerIsFound(t *testing.T) {
+	const base, size = 0x10000000, 0x4000
+	mem := memtest.New(base, size)
+	mem.PlantCLRString(base+0x40, "lifeforce")
+	mem.PlantCLRPlayer(base+0x800, []int32{400, 500, 480, 200, 200, 200}, base+0x40)
+
+	got := clrLocator(t).FindPlayers(mem)
+	require.Len(t, got, 1, "a player above their permanent life cap was not found")
+	require.EqualValues(t, 480, got[0].StatLife)
+}
