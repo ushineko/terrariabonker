@@ -74,10 +74,11 @@ type Service struct {
 	Mem Mem
 	PID int
 
-	blocks []locate.Block // the located player copies, kept and re-validated
-	anchor uint32         // where get_LocalPlayer was found
-	found  bool           // and whether it was
-	build  *Build         // the running build, once it reads as a real one
+	blocks  []locate.Block // the located player copies, kept and re-validated
+	anchor  uint32         // where get_LocalPlayer was found
+	found   bool           // and whether it was
+	build   *Build         // the running build, once it reads as a real one
+	runtime string         // the runtime executing it, once detected
 
 	// Main's static block, found once. Finding it is a full memory scan, and
 	// the statics do not move while the process lives.

@@ -20,12 +20,19 @@ code patches match is the output of that build's JIT, and a servicing update
 changes the build without changing "4.8.1". Spec 052 keys version support on
 this string.
 */
-func DetectRuntime(pid int) string {
-	for _, path := range proc.ModulePaths(pid) {
+func DetectRuntime(pid int) string { return runtimeOf(proc.ModulePaths(pid), fileVersion) }
+
+// runtimeOf is the runtime a module list shows, reading versions with version.
+// Separate from DetectRuntime so the decision can be tested without a game.
+func runtimeOf(modules []string, version func(string) string) string {
+	for _, path := range modules {
 		if strings.EqualFold(filepath.Base(path), "clr.dll") {
-			if v := fileVersion(path); v != "" {
+			// The CLR is loaded even when its version cannot be read, and the
+			// family alone is enough to refuse numbers derived under mono.
+			if v := version(path); v != "" {
 				return "netfx-" + v
 			}
+			return "netfx-unknown"
 		}
 	}
 	return ""

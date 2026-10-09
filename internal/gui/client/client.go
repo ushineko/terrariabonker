@@ -432,6 +432,9 @@ type BuildCheck struct {
 	Build   string `json:"build"`
 	Level   string `json:"level"`
 	Runtime string `json:"runtime"`
+	// Support is the version table's answer for this build and runtime: supported,
+	// candidate, unsupported or unknown.
+	Support string `json:"support"`
 	// Message is the CLI's own sentence about how this build compares with the
 	// one the patterns were derived on. Shown as it stands rather than restated
 	// here, so the known-good build is spelled in one place.
@@ -448,6 +451,9 @@ type BuildCheck struct {
 	DecidedFailed []string              `json:"decided_failed"`
 	Cheats        map[string]CheatProbe `json:"cheats"`
 }
+
+// SupportUnsupported is the Support of a runtime no numbers were derived for.
+const SupportUnsupported = "unsupported"
 
 // BuildCheckArgv asks what build is running and whether the cheats resolve on
 // it. It needs the game, and it writes nothing.

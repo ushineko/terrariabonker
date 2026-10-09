@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ushineko/terrariabonker/internal/builds"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/profile"
 	"github.com/ushineko/terrariabonker/internal/version"
@@ -31,12 +32,16 @@ var detectRuntime = version.DetectRuntime
 
 // BuildReport is everything the panel needs to decide what to say about a build.
 type BuildReport struct {
-	Build   string        `json:"build"`
-	Version string        `json:"version"`
-	BuildID string        `json:"buildid"`
-	Runtime string        `json:"runtime"`
-	Level   version.Level `json:"level"`
-	Message string        `json:"message"`
+	Build   string `json:"build"`
+	Version string `json:"version"`
+	BuildID string `json:"buildid"`
+	Runtime string `json:"runtime"`
+	// Support is the version table's answer for this build and runtime (layout.Select),
+	// and RuntimeEntry the entry it chose. Additive: older readers ignore them.
+	Support      string        `json:"support"`
+	RuntimeEntry string        `json:"runtime_entry"`
+	Level        version.Level `json:"level"`
+	Message      string        `json:"message"`
 	// Known is whether this project verified an anchor against this build;
 	// VerifiedEverywhere is whether it verified all of them.
 	Known              bool `json:"known"`
@@ -64,6 +69,7 @@ on it?". It patches nothing.
 func (s *Service) BuildCheck(p *patch.Patcher) BuildReport {
 	key := s.BuildKey()
 	info := s.BuildInfo()
+	entry, support, runtime := s.Support()
 
 	verified, everywhere := false, true
 	for _, anchor := range patch.Anchors {
@@ -90,14 +96,25 @@ func (s *Service) BuildCheck(p *patch.Patcher) BuildReport {
 		sort.Strings(decidedFailed)
 	}
 
-	return BuildReport{
+	report := BuildReport{
 		Build: key, Version: info.Version, BuildID: info.BuildID,
-		Runtime: detectRuntime(s.PID),
-		Level:   info.Level, Message: info.Message,
+		Runtime: runtime, Support: string(support), RuntimeEntry: entry.Name,
+		Level: info.Level, Message: info.Message,
 		Known: verified, VerifiedEverywhere: everywhere,
 		Decision: decided.Decision, Recognised: verified || hasDecision,
 		Cheats: probe, Failed: failed, DecidedFailed: decidedFailed,
 	}
+	/*
+		The anchor ledger and this machine's decisions are keyed by build, and say
+		nothing about a runtime no entry covers: the build matching is not the
+		numbers fitting. Reported as what it is, so neither the CLI nor the window
+		calls it known-good.
+	*/
+	if support == layout.Unsupported {
+		report.Known, report.VerifiedEverywhere, report.Recognised = false, false, false
+		report.Message = unsupportedRuntime(runtime)
+	}
+	return report
 }
 
 // contains reports whether a list has a string in it.
@@ -120,7 +137,11 @@ type Accepted struct {
 // AcceptBuild records this machine's decision about the running build.
 func (s *Service) AcceptBuild(how string, failed []string) (Accepted, error) {
 	key := s.BuildKey()
-	if err := builds.Remember(key, how, failed, detectRuntime(s.PID)); err != nil {
+	_, support, runtime := s.Support()
+	if support == layout.Unsupported {
+		return Accepted{}, &Error{Message: unsupportedRuntime(runtime)}
+	}
+	if err := builds.Remember(key, how, failed, runtime); err != nil {
 		return Accepted{}, &Error{Message: err.Error()}
 	}
 	sorted := append([]string{}, failed...)

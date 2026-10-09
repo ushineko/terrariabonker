@@ -1,6 +1,6 @@
 # Spec 052: Native Windows port
 
-**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete. Phases 2 and 3 are next, together (`clrfields --verify` checks against the version table's CLR entry): a Windows build must not ship before it, because the build gate cannot yet tell the runtimes apart.
+**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete; phase 2 and phase 3 step 1 (the version table and its gate) done and checked live on both platforms. Next: phase 3 step 2, the CLR read path. The gate now refuses memory writes under .NET Framework, so a Windows build fails safe; it still reads nothing useful until step 2.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -433,19 +433,55 @@ Phase 1
 - [x] The Windows CLI identifies the live game: build from the executable, runtime from
       `clr.dll` (`build-check`, read-only).
 
-Phase 3 (version table; full criteria when phase 0 is complete)
-- [ ] Version support is a table keyed by `(game build key, runtime)`; every offset,
-      shape, field order, statics locator and anchor comes from the selected entry.
-- [ ] Today's numbers are the first entry, keyed by the measured wine-mono version;
-      Linux behaviour is unchanged (characterization tests pass before and after).
-- [ ] Startup matching: exact → supported; same family → candidate through the
-      degraded-build flow; other family or none → memory features disabled with the
-      reason.
-- [ ] `build-check` no longer reports a build as `exact`/known-good under a runtime no
-      entry covers (phase 1 finding).
-- [ ] Each entry pinned as literals with provenance, and by a frozen `sha256`.
+Phase 2 (CLR field-offset tool)
+- [x] The CLR offsets live once, in `internal/layout` (`CLRFields`, by declaring class),
+      generated from the measurement and checked against `docs/clr-fields-1.4.5.8.txt`
+      field for field, with a frozen `sha256`.
+- [x] `clrfields --verify` checks that table against a running game and exits non-zero
+      on any disagreement, a missing field, or a class without exactly one complete
+      FieldDesc list.
+- [x] `clrfields --verify` against the live game (a fresh process, not the phase 0
+      one): 103 of 103 fields agree, exit 0. Built with one offset deliberately wrong
+      (`statLife` 0x474), it exits 1 naming the field.
 
-Later phases get their criteria when phase 0 is complete.
+Phase 3, step 1 (the version table and the gate)
+- [x] Version support is a table keyed by `(game build key, runtime)`
+      (`layout.Entries`, `layout.Select`): a mono entry and a CLR entry, each with its
+      shapes, builds, runtime versions and provenance, pinned as literals and by a
+      frozen `sha256`.
+- [x] Startup matching: exact → `supported`; same family, other build or runtime
+      version → `candidate`, through the existing degraded-build flow; a family with no
+      enabled entry → `unsupported`, memory writes refused even with `--force`;
+      undetected → `unknown`, let through as an unreadable game version is.
+- [x] `build-check` no longer reports a build as known-good or recognised under a
+      runtime no enabled entry covers; it reports `support` and `runtime_entry`
+      (additive JSON). `accept-build` refuses. The window marks every cheat unusable and
+      asks nothing.
+- [x] Windows runtime detection fails closed: a loaded `clr.dll` whose version cannot be
+      read reports `netfx-unknown` (refused), not "nothing detected" (let through).
+- [x] Linux behaviour unchanged: the mono entry accepts any wine-mono, as before.
+- [x] Live check on Windows: `build-check` reports `netfx-4.8.9345.0 (unsupported)`,
+      recognised and known-good false; `set-hp max --force` and `accept-build` are
+      refused with the runtime named; nothing was written.
+- [x] The mono entry's runtime measured on Linux, 2026-10-08: under wine-mono 11.3.0
+      (Proton Experimental) in a world, both the installed v0.42.0 and this branch found
+      the player by name, read stats and inventory, and resolved all 15 cheat anchors
+      (at the menu, `pickup` and `spawn_rate` had not been JIT-compiled yet and did not).
+      Recorded in `monoEntry.Confirmed` as a ledger, not a gate: `Versions` stays nil,
+      so GE-Proton's 10.4.1 and proton-cachyos's 11.2.0 still match as before. The
+      maintainer then confirmed the cheats still work in play under it. This branch's `build-check` there reported
+      `support: supported`, `runtime_entry: wine-mono`, known and recognised unchanged.
+
+Phase 3, step 2 (the CLR read path) — next
+- [ ] Every reader takes its offsets and shapes from the selected entry instead of the
+      package-level mono constants; characterization tests pinned before the change and
+      re-run as mutations after it (AGENTS.md, "Refactors are pinned before they start").
+- [ ] The CLR entry's read path: player locate (CLR life-block order, name at
+      statLife − 0x3E4), inventory, player stats, NPC and projectile reads, Main's two
+      static blocks located without a live player to start from.
+- [ ] `clrEntry.Enabled` set only once that read path is confirmed against the live game.
+
+Phases 4 and 5 get their criteria when phase 3 is complete.
 
 ## Risks & Assumptions
 

@@ -20,6 +20,7 @@ fields is that class's list. The isStatic bit is checked against the
 metadata's own static flag, so a wrong model shows up as disagreement rather
 than as plausible numbers.
 
+	clrfields --verify                       # check internal/layout's CLR table
 	clrfields Terraria.Player Terraria.Entity
 
 Read-only. It never writes to the game.
@@ -62,6 +63,7 @@ type record struct {
 }
 
 func main() {
+	verifyFlag := flag.Bool("verify", false, "check internal/layout's CLR table against the running game; exits non-zero on any disagreement")
 	stride := flag.Int("stride", fieldDescBytes, "record size for -raw")
 	fragments := flag.Bool("fragments", false, "also print runs shorter than the class's stored-field count")
 	bits := flag.Bool("bits", false, "cross-tabulate each record's high flag byte against the metadata")
@@ -78,8 +80,8 @@ func main() {
 	for _, a := range flag.Args() {
 		want[a] = true
 	}
-	if len(want) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: clrfields [-exe path] Namespace.Type ...")
+	if len(want) == 0 && !*verifyFlag {
+		fmt.Fprintln(os.Stderr, "usage: clrfields [-exe path] (--verify | Namespace.Type ...)")
 		os.Exit(2)
 	}
 	byRID := map[uint32]owner{}
@@ -106,6 +108,9 @@ func main() {
 		return
 	}
 	runs := scan(h, byRID)
+	if *verifyFlag {
+		os.Exit(verify(types, byRID, runs))
+	}
 
 	for ti, t := range types {
 		if !want[t.FullName()] {

@@ -132,6 +132,27 @@ func TestAnUnrecognisedBuildOpensTheQuestion(t *testing.T) {
 	require.True(t, u.gate.open)
 }
 
+/*
+A runtime with no numbers asks nothing and leaves every cheat unusable.
+
+The "Terraria has updated" question offers to accept or degrade a build, and
+there is nothing to accept under a runtime whose layout was never derived: the
+CLI would refuse the decision and every write anyway. Under such a runtime the
+CLI also reports every anchor as resolving nothing, but the window marks the
+cheats unusable from the support answer, not from the probe -- an anchor that
+happened to match would not make the numbers fit.
+*/
+func TestAnUnsupportedRuntimeAsksNothingAndDisablesEveryCheat(t *testing.T) {
+	u := testUI(t)
+	r := probe(false, []string{"reach", "mining"})
+	r.Support = client.SupportUnsupported
+	r.Message = "Terraria is running on netfx-4.8.9345.0, and this version has no memory layout"
+	u.applyBuildDecision(r)
+	require.False(t, u.gate.open, "a runtime with no numbers opened the accept-or-degrade question")
+	require.True(t, u.gated("reach"), "a cheat that resolved is usable under a runtime with no numbers")
+	require.True(t, u.gated("mining"))
+}
+
 // The dialog grows with the list of dead cheats, and stops growing before it
 // runs off the screen.
 func TestTheGateDialogGrowsWithWhatItHasToList(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ushineko/terrariabonker/internal/builds"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/profile"
 	"github.com/ushineko/terrariabonker/internal/trainer"
@@ -264,7 +265,10 @@ func (a *App) buildCheckCmd() *cobra.Command {
 				untouched, and this is the only thing on screen that would show
 				it changed.
 			*/
-			printf(cmd, "  runtime: %s", orUnknown(report.Runtime))
+			printf(cmd, "  runtime: %s (%s)", orUnknown(report.Runtime), report.Support)
+			if report.Support == string(layout.Unsupported) {
+				printf(cmd, "  %s", report.Message)
+			}
 			printf(cmd, "  recognised: %t  known-good: %t  decision: %s",
 				report.Recognised, report.Known, report.Decision)
 			names := make([]string, 0, len(report.Cheats))

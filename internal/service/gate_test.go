@@ -225,3 +225,72 @@ func asGoShaped(v any) any {
 		return v
 	}
 }
+
+/*
+A runtime the version table has no numbers for is refused, forced or not.
+
+Forcing exists for a build whose offsets might still fit. Numbers derived under
+wine-mono are measured not to fit .NET Framework -- not one field offset is
+shared -- so there is nothing for force to be right about (spec 052).
+*/
+func TestAnUnsupportedRuntimeIsRefusedEvenWhenForced(t *testing.T) {
+	_, _, svc := gateFixture(t)
+	service.WatchRuntime(t, "netfx-4.8.9345.0")
+
+	for _, force := range []bool{false, true} {
+		err := svc.RequireCompatible(force)
+		require.Error(t, err, "force=%t", force)
+		require.Contains(t, err.Error(), "netfx-4.8.9345.0")
+		require.Contains(t, err.Error(), "nothing was changed")
+	}
+}
+
+// What Linux runs today still passes: any wine-mono, and a runtime that could
+// not be detected, which is not evidence of anything.
+func TestWineMonoAndAnUndetectedRuntimeStillPass(t *testing.T) {
+	for _, runtime := range []string{"wine-mono-11.3.0", "wine-mono-10.4.1", ""} {
+		_, _, svc := gateFixture(t)
+		service.WatchRuntime(t, runtime)
+		require.NoError(t, svc.RequireCompatible(false), "runtime %q", runtime)
+	}
+}
+
+/*
+A build this machine accepted is not recognised under a runtime with no numbers.
+
+The decision is keyed by build, and the build matching is not the numbers
+fitting. Before the version table, the Windows game read "known-good" on
+exactly this basis. Recognised is checked true under wine-mono first, so the
+false that follows is the runtime's doing and not a fixture that was never
+recognised.
+*/
+func TestAnAcceptedBuildIsNotRecognisedUnderAnUnsupportedRuntime(t *testing.T) {
+	_, mem, svc := gateFixture(t)
+	service.WatchRuntime(t, "wine-mono-11.3.0")
+	_, err := svc.AcceptBuild(builds.Accepted, nil)
+	require.NoError(t, err)
+	before := svc.BuildCheck(patch.NewPatcher(mem, -1))
+	require.True(t, before.Recognised, "the accepted build is not recognised to begin with")
+	require.NotEqual(t, "unsupported", before.Support)
+
+	// The same game and the same recorded decision, under .NET Framework. A
+	// fresh service, because a service keeps the runtime it first read.
+	service.WatchRuntime(t, "netfx-4.8.9345.0")
+	after := service.New(mem, -1).BuildCheck(patch.NewPatcher(mem, -1))
+	require.Equal(t, "unsupported", after.Support)
+	require.False(t, after.Recognised, "an accepted build is recognised under a runtime with no numbers")
+	require.False(t, after.Known)
+	require.Contains(t, after.Message, "netfx-4.8.9345.0")
+}
+
+// Nothing is recorded about a build running under a runtime with no numbers:
+// a decision there would be a decision about nothing.
+func TestNoDecisionIsRecordedUnderAnUnsupportedRuntime(t *testing.T) {
+	home, _, svc := gateFixture(t)
+	service.WatchRuntime(t, "netfx-4.8.9345.0")
+
+	_, err := svc.AcceptBuild(builds.Accepted, nil)
+	require.Error(t, err)
+	_, statErr := os.Stat(filepath.Join(memtest.ConfigUnder(home), "accepted-builds.json"))
+	require.True(t, os.IsNotExist(statErr), "a decision file was written anyway")
+}
