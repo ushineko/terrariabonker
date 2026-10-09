@@ -60,7 +60,7 @@ func TestUnderTheCLRThePlayerAndInventoryAreRead(t *testing.T) {
 
 	code, out, errOut := runUnder(t, runtime, clrGame(), "status")
 	require.Zero(t, code, errOut)
-	require.Contains(t, out, `"terrariabonker": HP 390/400  Mana 200/200`)
+	require.Contains(t, out, `"terrariabonker": HP 390/420  Mana 200/200`)
 	require.Contains(t, out, "slot  0: type=757   stack=1 dmg=85 auto")
 	require.Contains(t, out, "slot  3: type=2     stack=250")
 

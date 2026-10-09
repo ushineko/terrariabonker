@@ -89,7 +89,7 @@ func (f *Freezer) Tick() bool {
 	anyOK := false
 	for _, p := range f.players {
 		if f.Godmode {
-			if mx, ok := p.StatLifeMax(); ok {
+			if mx, ok := p.StatLifeMax2(); ok {
 				anyOK = true
 				if life, got := p.StatLife(); got && life != mx {
 					p.SetLife(mx)
@@ -98,7 +98,7 @@ func (f *Freezer) Tick() bool {
 			}
 		}
 		if f.Mana {
-			if mx, ok := p.StatManaMax(); ok {
+			if mx, ok := p.StatManaMax2(); ok {
 				anyOK = true
 				if mana, got := p.StatMana(); got && mana != mx {
 					p.SetMana(mx)

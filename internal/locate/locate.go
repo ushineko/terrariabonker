@@ -39,10 +39,11 @@ type Mem interface {
 
 /*
 The life and mana block: six integers the game keeps together, starting two words
-before statLife under both runtimes. Which of the first two is the boosted cap
-differs by runtime (layout.Shapes.LifeMaxFirst), and where the name is differs
-by runtime too (layout.PlayerFields) -- so those come from the entry a Locator
-is built with, not from here.
+before statLife under both runtimes, statLifeMax (the permanent cap) first. Which
+of the first two is which comes from the entry (layout.Shapes.LifeMaxFirst) --
+the same answer for both runtimes as measured, kept on the entry so a runtime that
+differs needs no change here -- and where the name is differs by runtime
+(layout.PlayerFields).
 */
 const (
 	BlockLen   = 6
@@ -125,9 +126,10 @@ type Block struct {
 	Name         string
 }
 
-// Fields is the block as the game keeps it, in order.
+// Fields is the block as the game keeps it, in storage order: statLifeMax,
+// statLifeMax2, statLife, statMana, statManaMax, statManaMax2.
 func (b Block) Fields() []int32 {
-	return []int32{b.StatLifeMax2, b.StatLifeMax, b.StatLife,
+	return []int32{b.StatLifeMax, b.StatLifeMax2, b.StatLife,
 		b.StatMana, b.StatManaMax, b.StatManaMax2}
 }
 
@@ -330,7 +332,7 @@ func PickLive(mem Mem, players []Block, samples int, gap time.Duration) (Block, 
 	}
 	below := make([]bool, len(players))
 	for i, p := range players {
-		below[i] = p.StatLife < p.StatLifeMax
+		below[i] = p.StatLife < p.StatLifeMax2
 	}
 	return theOne(players, below)
 }

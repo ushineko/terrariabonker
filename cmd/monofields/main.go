@@ -63,7 +63,14 @@ var expected = map[string]map[string]uint32{
 		"knockBack": 0x0B0, "healLife": 0x0B4, "healMana": 0x0B8, "scale": 0x0CC,
 		"shootSpeed": 0x100, "mana": 0x11C, "crit": 0x150, "prefix": 0x15C,
 	},
-	"Player": {"statLife": 0x738, "itemAnimation": 0x0BCC},
+	// The six life and mana fields were added on 2026-10-08, when statLifeMax and
+	// statLifeMax2 turned out to have been named the wrong way round for as long as
+	// the project had used them: nothing here asked the runtime about them.
+	"Player": {
+		"statLifeMax": 0x730, "statLifeMax2": 0x734, "statLife": 0x738,
+		"statMana": 0x73C, "statManaMax": 0x740, "statManaMax2": 0x744,
+		"itemAnimation": 0x0BCC,
+	},
 }
 
 /*

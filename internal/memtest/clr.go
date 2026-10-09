@@ -16,9 +16,9 @@ A 32-bit CLR String is a MethodTable pointer, a length in characters, then UTF-1
 -- four bytes shorter than mono's, which has a sync block word before the length.
 On the live game, cmd/winrecon decoded all seven characters' names this way.
 
-The life and mana block starts two words before statLife, as under mono, but its
-first two words are the other way round: statLifeMax, then statLifeMax2
-(cmd/clrfields: 0x468 and 0x46C, statLife 0x470). The name pointer is 0x3E4 below
+The life and mana block starts two words before statLife, as under mono, in the
+same order: statLifeMax, then statLifeMax2 (cmd/clrfields: 0x468 and 0x46C,
+statLife 0x470; mono: 0x730, 0x734, 0x738). The name pointer is 0x3E4 below
 statLife (Player.name at 0x08C).
 */
 const (

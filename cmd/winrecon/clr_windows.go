@@ -43,7 +43,7 @@ func clrPlayer(g game, data []region) {
 				for k := range v {
 					v[k] = int32(binary.LittleEndian.Uint32(buf[i+4*k:])) //nolint:gosec // a field, as its bits
 				}
-				v[0], v[1] = v[1], v[0] // CLR keeps statLifeMax first
+				v[0], v[1] = v[1], v[0] // statLifeMax is stored first
 				if !validBlock(v) {
 					continue
 				}

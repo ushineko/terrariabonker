@@ -15,7 +15,9 @@ The two entries' shapes, pinned as literals with where each was measured.
 
 mono: the szarray constants (ArrLenOff/ArrDataOff, from the projectile array
 work in docs/discovery.md) and locate.ReadMonoString's 12-byte string header;
-statLifeMax2 before statLifeMax is layout.StatLifeMax2Off < StatLifeMaxOff.
+statLifeMax before statLifeMax2, as cmd/monofields reports them (0x730, 0x734) --
+the same order as the CLR. It was recorded as the opposite order until the mono
+names were found to be swapped (2026-10-08).
 
 CLR (spec 052 phase 0, cmd/winrecon against the live game): all seven of the
 maintainer's characters had the Player MethodTable at statLife - 0x470 with
@@ -26,7 +28,7 @@ names decoded with length at +4 and characters at +8; Item[] read MethodTable,
 */
 func TestTheShapesAreWhatWasMeasured(t *testing.T) {
 	require.Equal(t, Shapes{ObjectHeader: 8, StringLenOff: 8, StringCharsOff: 12,
-		ArrLenOff: 0x0C, ArrDataOff: 0x10, LifeMaxFirst: false}, monoEntry.Shapes)
+		ArrLenOff: 0x0C, ArrDataOff: 0x10, LifeMaxFirst: true}, monoEntry.Shapes)
 	require.Equal(t, Shapes{ObjectHeader: 4, StringLenOff: 4, StringCharsOff: 8,
 		ArrLenOff: 4, ArrDataOff: 8, LifeMaxFirst: true}, clrEntry.Shapes)
 }
@@ -40,7 +42,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "c306c0e4693ef59a8956fa2c1d9c0ee5bf64d77052085e98c19d80e2f8826be7",
+	require.Equal(t, "f3151d8595361c5c17b1abf29e983e1b1d70d3e144cd4d965fe2d1924dc0309b",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 

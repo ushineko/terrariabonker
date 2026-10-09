@@ -101,18 +101,18 @@ A player is planted twice -- the live copy and a snapshot, which is what a real
 game looks like -- plus a block that passes the cheap prefilter and has no name
 behind it, which is what random memory looks like.
 
-The live copy is buffed: life 420 against a permanent cap of 400 and a boosted cap
-of 420, as a Lifeforce potion leaves it. Until 2026-10-08 the scan's prefilter
-dropped any player whose life was above the permanent cap, and this test pinned
-that: it expected one player, not the two it plants. A buffed player could not be
-found at all.
+The live copy is buffed: life 420 against a permanent cap of 400 and a cap in
+effect of 420, as a Lifeforce potion leaves it, planted in storage order
+(statLifeMax, then statLifeMax2 -- cmd/monofields, 2026-10-08). Until that day this
+test pinned the bug it now catches: it expected one player, not the two it plants,
+and it planted the buffed copy in the swapped order the names then claimed.
 */
 func TestFindPlayers(t *testing.T) {
 	const base, size = 0x10000000, 0x4000
 
 	mem := memtest.New(base, size)
 	mem.PlantMonoString(base+0x40, "Nakama")
-	mem.PlantPlayer(base+0x800, []int32{420, 400, 420, 220, 200, 220}, base+0x40)
+	mem.PlantPlayer(base+0x800, []int32{400, 420, 420, 200, 200, 220}, base+0x40)
 	mem.PlantPlayer(base+0x1800, []int32{400, 400, 400, 200, 200, 200}, base+0x40)
 	// A near miss: it passes the prefilter and has nothing readable where a
 	// name pointer would be.
@@ -123,7 +123,7 @@ func TestFindPlayers(t *testing.T) {
 	got := locate.FindPlayers(mem)
 	require.Len(t, got, 2, "a different number of players was found")
 	require.EqualValues(t, base+0x800, got[0].LifeAddr, "the buffed copy is somewhere else, or missing")
-	require.Equal(t, []int32{420, 400, 420, 220, 200, 220}, got[0].Fields())
+	require.Equal(t, []int32{400, 420, 420, 200, 200, 220}, got[0].Fields())
 	require.EqualValues(t, base+0x1800, got[1].LifeAddr, "the player is somewhere else")
 	require.Equal(t, "Nakama", got[1].Name)
 	require.Equal(t, []int32{400, 400, 400, 200, 200, 200}, got[1].Fields())

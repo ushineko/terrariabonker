@@ -58,8 +58,8 @@ func TestTheCLRTableIsFrozen(t *testing.T) {
 /*
 The CLR life block is the order the shapes say, and contiguous.
 
-locate.ValidBlock reads six consecutive ints; on the CLR the first two are
-statLifeMax then statLifeMax2, the reverse of mono. The shape and the table are
+locate.ValidBlock reads six consecutive ints; the first two are statLifeMax then
+statLifeMax2, under the CLR as under mono. The shape and the table are
 two statements of one measurement, so they are checked against each other.
 */
 func TestTheCLRLifeBlockMatchesItsShape(t *testing.T) {

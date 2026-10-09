@@ -9,10 +9,19 @@ negative for the same reason -- the fields are in front of it.
 
 The six life and mana fields are contiguous and in declaration order, which is
 why a block read of them is one read rather than six.
+
+The names are the game's, as the mono runtime reports them (cmd/monofields
+against the live game, 2026-10-08: statLifeMax 0x730, statLifeMax2 0x734,
+statLife 0x738). statLifeMax is the permanent cap, from Life Crystals and Life
+Fruit; statLifeMax2 is the cap in effect, after accessories and buffs. Until then
+the two names here were swapped -- inferred, never asked -- while the comments
+beside them were right, and ValidBlock, trusting the names, took the permanent cap
+for the boosted one: a player whose cap in effect was above the permanent one
+was never found.
 */
 const (
-	StatLifeMax2Off = -0x08 // the permanent cap, from hearts
-	StatLifeMaxOff  = -0x04 // the cap in effect, permanent plus temporary bonuses
+	StatLifeMaxOff  = -0x08 // statLifeMax: the permanent cap, from hearts
+	StatLifeMax2Off = -0x04 // statLifeMax2: the cap in effect, permanent plus bonuses
 	StatLifeOff     = 0x00  // current life, the field everything is measured from
 	StatManaOff     = 0x04
 	StatManaMaxOff  = 0x08

@@ -57,9 +57,12 @@ func TestReadingAPlayer(t *testing.T) {
 		read func() (int32, bool)
 		want int32
 	}{
-		"life":      {p.StatLife, 137},
-		"life_max":  {p.StatLifeMax, 400},
-		"life_max2": {p.StatLifeMax2, 380},
+		"life": {p.StatLife, 137},
+		// statLifeMax, the permanent cap, is at statLife-8 and statLifeMax2, the
+		// cap in effect, at statLife-4 (cmd/monofields, 2026-10-08). This test
+		// had them the other way round, from the same swapped names it checked.
+		"life_max":  {p.StatLifeMax, 380},
+		"life_max2": {p.StatLifeMax2, 400},
 		"mana":      {p.StatMana, 201},
 		"mana_max":  {p.StatManaMax, 220},
 		"mana_max2": {p.StatManaMax2, 180},
@@ -88,7 +91,10 @@ func TestWritingAPlayer(t *testing.T) {
 		{"set_max_life", "1abc2dee5858dfdd", func(p *player.Player) bool { return p.SetMaxLife(500) }},
 		{"set_max_mana", "b5ce83101d4a1d35", func(p *player.Player) bool { return p.SetMaxMana(400) }},
 		{"heal_full", "09272104de09215d", func(p *player.Player) bool { return p.HealFull() }},
-		{"mana_full", "911f2e6da92d4863", func(p *player.Player) bool { return p.ManaFull() }},
+		// Mana fills to statManaMax2, the cap in effect (180 in this fixture, whose
+		// numbers all differ on purpose). It filled to statManaMax, the permanent
+		// cap, until 2026-10-08, which left mana short under a mana boost.
+		{"mana_full", "43e2425b543dab3d", func(p *player.Player) bool { return p.ManaFull() }},
 		// Raising the cap and then filling to it is the sequence the trainer
 		// actually performs, and it is where writing only the permanent field
 		// would leave the fill short.

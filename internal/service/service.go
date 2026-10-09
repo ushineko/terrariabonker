@@ -345,7 +345,7 @@ func (s *Service) Snapshot(withInventory bool) Snapshot {
 	out.Copies = len(blocks)
 	live := s.selectLive(blocks)
 	out.Player = &PlayerState{
-		Name: live.Name, HP: live.StatLife, MaxHP: live.StatLifeMax,
+		Name: live.Name, HP: live.StatLife, MaxHP: live.StatLifeMax2,
 		Mana: live.StatMana, MaxMana: live.StatManaMax,
 	}
 	if withInventory && s.CanRead(layout.ReadInventory) {

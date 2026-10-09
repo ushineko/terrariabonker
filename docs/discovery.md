@@ -53,6 +53,14 @@ Dumping the ints around the confirmed `statLife` showed the tell-tale block:
  max2   max    life   mana  manaMax manaMax2
 ```
 
+> **Correction, 2026-10-08:** the first two labels above are the wrong way round. The
+> mono runtime reports `statLifeMax` at 0x730 (statLife − 8) and `statLifeMax2` at 0x734
+> (statLife − 4) -- `cmd/monofields`, against the live game. Both caps read 100 in this
+> dump, so nothing in it could tell them apart, and the guess stood for the whole project:
+> `locate.ValidBlock` took the permanent cap for the boosted one and could not find a
+> player whose cap in effect was raised. An inference that equal values could not
+> contradict is exactly what AGENTS.md's "ask the game before inferring" is about.
+
 That contiguous life/mana run (`statLifeMax2, statLifeMax, statLife, statMana,
 statManaMax, statManaMax2`) is the Player object's signature. A second address
 also tracked HP but was surrounded by an array-of-structs, not this block; it is
@@ -170,8 +178,10 @@ carries over**. Measured 2026-10-08; spec 052 has the tables.
   `docs/clr-fields-1.4.5.8.txt`.
 - **Shapes**: MethodTable at `+0`, fields from `+4`; strings length `+4`, chars `+8`;
   arrays (reference-type too) length `+4`, data `+8`.
-- **The player block** is still six contiguous ints, but `statLifeMax` comes before
-  `statLifeMax2`. Name at statLife `-0x3E4`, inventory at `-0x39C`.
+- **The player block** is six contiguous ints in the same order as under mono --
+  `statLifeMax` (permanent) first, then `statLifeMax2` (in effect). This section first
+  said the order differed; that came from comparing against swapped mono names (see
+  below). Name at statLife `-0x3E4`, inventory at `-0x39C`.
 - **Main's reference statics** sit in a block of their own (found from the live player:
   the `Player[256]` that holds it, the slot that holds that array, minus `0x878`; the same
   base then reaches `NPC[201]` and `Projectile[1001]`). Primitive statics (`maxTilesX`,

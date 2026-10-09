@@ -65,8 +65,9 @@ type Shapes struct {
 	// ArrLenOff and ArrDataOff locate an szarray's length and first element.
 	ArrLenOff, ArrDataOff int
 	// LifeMaxFirst is whether statLifeMax is stored before statLifeMax2. The
-	// six life and mana fields are contiguous under both runtimes, in a
-	// different order.
+	// six life and mana fields are contiguous, in declaration order, under both
+	// runtimes (cmd/monofields and cmd/clrfields, 2026-10-08). It was once
+	// thought to differ: the mono names had been swapped.
 	LifeMaxFirst bool
 }
 
@@ -216,7 +217,7 @@ var monoEntry = Entry{
 		ObjectHeader: 0x08,
 		StringLenOff: 0x08, StringCharsOff: 0x0C,
 		ArrLenOff: ArrLenOff, ArrDataOff: ArrDataOff,
-		LifeMaxFirst: false,
+		LifeMaxFirst: true,
 	},
 	Player: PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff, SelectedItemFromLife: SelectedItemOff},
 	Item: ItemFields{

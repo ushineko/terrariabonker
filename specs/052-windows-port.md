@@ -106,20 +106,26 @@ to look.
 | --- | --- | --- | --- |
 | name | `0x08C` | `-0x3E4` | `-0x6C0` |
 | inventory | `0x0D4` | `-0x39C` | `-0x664` |
-| statLifeMax | `0x468` | `-0x08` | `-0x04` |
-| statLifeMax2 | `0x46C` | `-0x04` | `-0x08` |
+| statLifeMax | `0x468` | `-0x08` | `-0x08` |
+| statLifeMax2 | `0x46C` | `-0x04` | `-0x04` |
 | statLife | `0x470` | `0` | `0` |
 | statMana / ManaMax / ManaMax2 | `0x474` / `0x478` / `0x47C` | `+0x04..+0x0C` | same |
 | pickSpeed | `0x514` | `+0xA4` | `+0x1A0` |
 | wallSpeed / tileSpeed | `0x518` / `0x51C` | `+0xA8` / `+0xAC` | — |
 | blockRange | `0x570` | `+0x100` | `+0x2C0` |
 
-**`statLifeMax` and `statLifeMax2` are in the opposite order from mono.** The six fields
-are still contiguous, but `locate.ValidBlock` reads them as `[Max2, Max, …]`. Unmodified,
-it only accepts a Windows player whose boosted life cap equals the permanent one: it
-found none of the seven characters by name at mono's offset, and found them all once the
-first two were swapped. The rule itself is runtime-independent; the field order it
-reads is not.
+**Correction (2026-10-08, later the same day): the life caps are in the same order on
+both runtimes.** This section first said `statLifeMax` and `statLifeMax2` were in the
+opposite order from mono. They are not: `cmd/monofields` against the live Linux game
+reports `statLifeMax` 0x730 and `statLifeMax2` 0x734, statLife 0x738 -- the permanent cap
+first, as on the CLR and in the metadata's declaration order. The mono *names* in
+`internal/layout` had been swapped since they were first written, inferred rather than
+asked; the comments beside them were right. Comparing the CLR's runtime-reported names
+with those swapped names is what produced the "opposite order". The consequence on Linux
+was a bug: `locate.ValidBlock`, trusting the names, took the permanent cap for the boosted
+one, so a player whose cap in effect was above the permanent one (Lifeforce, max-life
+accessories) was never found. Fixed with the names (see the life-cap fix's validation
+report); `cmd/monofields --verify` now checks all six fields.
 
 There is no `selectedItem` field in 1.4.5.8's metadata on either runtime's view of the
 assembly — the closest is `selectedItemState` (`0x9F0`, a struct). Mono's
@@ -391,7 +397,7 @@ Deferred, because nothing in phase 1 needs it:
 3. **Version table, then the read path on CLR.** First, the table with one entry, today's
    mono numbers, and startup matching, with no behaviour change on Linux. That step is
    useful on its own: it is also how a wine-mono update would be handled. Then the CLR
-   entry: player locate (with the CLR life-block order), inventory, player stats,
+   entry: player locate (CLR name offset), inventory, player stats,
    NPC/projectile reads. Main statics located per the phase 0 measurement.
 4. **Code-patch cheats on CLR.** Re-derive each anchor from the clrjit output, cheat by
    cheat, as variants. Each cheat is confirmed in play by the maintainer before its anchor
@@ -410,7 +416,8 @@ disabled with its reason (the existing degraded-build mechanism).
 Phase 0
 - [x] Runtime executing the game on Windows identified from its loaded modules.
 - [x] Whether `locate.ValidBlock` finds the player on Windows, measured (only when the
-      two life caps are equal; the CLR stores them in the opposite order).
+      two life caps are equal -- a bug on both runtimes, from swapped mono names; see the
+      correction under "Player").
 - [x] Distance from statLife to the player name pointer and inventory `Item[]` pointer
       on CLR, measured (`-0x3E4`, `-0x39C`), and compared with the mono values
       (`-0x6C0`, `-0x664`).

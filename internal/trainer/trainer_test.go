@@ -176,3 +176,23 @@ func TestRepeatedFailuresRelocate(t *testing.T) {
 	require.NoError(t, f.Run(t.Context(), 50*time.Millisecond, nil))
 	require.Positive(t, relocated, "dead addresses were never looked for again")
 }
+
+/*
+A buffed player is held at the caps in effect, not the permanent ones.
+
+Storage order (cmd/monofields, 2026-10-08): permanent life 400 then 480 in
+effect, mana 200 permanent then 260 in effect. Holding the permanent caps would
+leave godmode 80 life short and the mana freeze 60 short of full while the buff
+runs -- and the earlier tests, planted with equal caps, could not tell.
+*/
+func TestABuffedPlayerIsHeldAtTheCapsInEffect(t *testing.T) {
+	mem := fake(t, []int32{400, 480, 100, 10, 200, 260})
+	f := New(mem, true, true, DefaultHz)
+	f.players = []*player.Player{player.New(mem, life)}
+
+	require.True(t, f.Tick())
+	got, _ := player.New(mem, life).StatLife()
+	require.EqualValues(t, 480, got, "godmode held life at the permanent cap")
+	mana, _ := player.New(mem, life).StatMana()
+	require.EqualValues(t, 260, mana, "the freeze held mana at the permanent cap")
+}

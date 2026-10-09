@@ -46,20 +46,20 @@ func (p *Player) field(off int) (int32, bool) { return p.Mem.ReadI32(p.at(off)) 
 // StatLife is current life.
 func (p *Player) StatLife() (int32, bool) { return p.field(layout.StatLifeOff) }
 
-// StatLifeMax is the cap in effect, which is the permanent one plus whatever
-// temporary bonuses are running.
+// StatLifeMax is the permanent life cap, which is what the save file stores.
 func (p *Player) StatLifeMax() (int32, bool) { return p.field(layout.StatLifeMaxOff) }
 
-// StatLifeMax2 is the permanent cap, which is what the save file stores.
+// StatLifeMax2 is the life cap in effect: the permanent one plus whatever
+// accessories and buffs add.
 func (p *Player) StatLifeMax2() (int32, bool) { return p.field(layout.StatLifeMax2Off) }
 
 // StatMana is current mana.
 func (p *Player) StatMana() (int32, bool) { return p.field(layout.StatManaOff) }
 
-// StatManaMax is the mana cap in effect.
+// StatManaMax is the permanent mana cap.
 func (p *Player) StatManaMax() (int32, bool) { return p.field(layout.StatManaMaxOff) }
 
-// StatManaMax2 is the permanent mana cap.
+// StatManaMax2 is the mana cap in effect.
 func (p *Player) StatManaMax2() (int32, bool) { return p.field(layout.StatManaMax2Off) }
 
 // SetLife writes current life.
@@ -95,12 +95,12 @@ func (p *Player) SetMaxMana(value int32) bool {
 // HealFull sets life to the cap in effect, and reports false when the cap could
 // not be read rather than writing a number it guessed.
 func (p *Player) HealFull() bool {
-	limit, ok := p.StatLifeMax()
+	limit, ok := p.StatLifeMax2()
 	return ok && p.SetLife(limit)
 }
 
 // ManaFull sets mana to the cap in effect.
 func (p *Player) ManaFull() bool {
-	limit, ok := p.StatManaMax()
+	limit, ok := p.StatManaMax2()
 	return ok && p.SetMana(limit)
 }

@@ -308,7 +308,7 @@ func TestNoDecisionIsRecordedUnderAnUnsupportedRuntime(t *testing.T) {
 Under the CLR entry the service reads a CLR player and their inventory, with the
 CLR's numbers.
 
-The game is planted the CLR way: the caps in CLR order, the name and the Item[]
+The game is planted the CLR way: the caps in storage order, the name and the Item[]
 at the CLR offsets, item fields where the CLR keeps them. Something readable is
 also planted where mono keeps the inventory pointer -- a full mono-shaped
 inventory, as real memory has other data there -- so a reader using mono's
@@ -336,7 +336,7 @@ func TestTheCLREntryReadsTheCLRPlayerAndInventory(t *testing.T) {
 	require.NotNil(t, snap.Player)
 	require.Equal(t, "terrariabonker", snap.Player.Name)
 	require.EqualValues(t, 390, snap.Player.HP)
-	require.EqualValues(t, 400, snap.Player.MaxHP, "the permanent cap, which the CLR stores first")
+	require.EqualValues(t, 420, snap.Player.MaxHP, "status shows the cap in effect, as it always has under mono")
 
 	var held []service.ItemSlot
 	for _, s := range snap.Inventory {
