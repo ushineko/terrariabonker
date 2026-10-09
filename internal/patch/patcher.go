@@ -236,6 +236,9 @@ injection sites overlap their own anchor bytes, so a pristine scan finds nothing
 once the jump is in place. A fresh resolve happens only on a first enable.
 */
 func (p *Patcher) enableInjection(s *State, inj Injection, value float64) error {
+	if err := p.checkEdits(inj.Edits); err != nil {
+		return err
+	}
 	body, err := p.stubBody(inj, value)
 	if err != nil {
 		return err
@@ -297,6 +300,26 @@ func (p *Patcher) enableInjection(s *State, inj Injection, value float64) error 
 		return err
 	}
 	s.Inj[inj.Name] = Installed{Sites: sites, StubLen: stubLen}
+	return nil
+}
+
+// checkEdits refuses unless every edit's every site holds its original or patched
+// bytes. It writes nothing, so it can run before any part of a cheat is applied.
+func (p *Patcher) checkEdits(edits []Edit) error {
+	for _, e := range edits {
+		res := p.Scanner.Resolve(e.Anchor, "")
+		if !res.Available {
+			return fmt.Errorf("%s", res.Reason)
+		}
+		for _, base := range res.Sites {
+			at := offsetBy(base, e.Off)
+			cur := p.Mem.Read(at, len(e.Orig))
+			if !bytes.Equal(cur, e.Orig) && !bytes.Equal(cur, e.Patched) {
+				return fmt.Errorf("the code at %#x is neither the original nor the edit "+
+					"(% X), so nothing was changed", at, cur)
+			}
+		}
+	}
 	return nil
 }
 
@@ -395,6 +418,9 @@ func (p *Patcher) caveFor(inj Injection, site, stubLen int, claimed []uint32, s 
 
 // disableInjection puts the displaced bytes back and scrubs the stub.
 func (p *Patcher) disableInjection(s *State, inj Injection) error {
+	if err := p.checkEdits(inj.Edits); err != nil {
+		return err
+	}
 	rec, known := s.Inj[inj.Name]
 	if !known || len(rec.Sites) == 0 {
 		// No record, which is rare: resolve every site again and restore those.
@@ -420,14 +446,20 @@ func (p *Patcher) disableInjection(s *State, inj Injection) error {
 	return nil
 }
 
-// applyEdits writes each edit at every site its anchor resolves to, because a
-// method can be JIT'd into more than one arena.
+/*
+applyEdits writes each edit at every site its anchor resolves to, because a
+method can be JIT'd into more than one arena.
+
+Every site is checked before any is written: each must hold the edit's original
+or patched bytes. The anchors wildcard exactly these bytes, so a match says
+nothing about them -- the same reason an in-place cheat's site is checked.
+*/
 func (p *Patcher) applyEdits(edits []Edit, on bool) error {
+	if err := p.checkEdits(edits); err != nil {
+		return err
+	}
 	for _, e := range edits {
 		res := p.Scanner.Resolve(e.Anchor, "")
-		if !res.Available {
-			return fmt.Errorf("%s", res.Reason)
-		}
 		want := e.Orig
 		if on {
 			want = e.Patched

@@ -24,9 +24,9 @@ each cheat is applied.
 netfxInjectionAnchors are the patterns the CLR set's stubs resolve through.
 
 Ledger: on 2026-10-09 pickup (x10), the drop floor (100%), the spawn cap (30),
-tool reach (30) and the smart cursor clamp (20) were each confirmed in play on
-the maintainer's Windows game, then disabled and every site read back as its
-original bytes.
+tool reach (30), the smart cursor clamp (20) and the vanity accessory slots
+were each confirmed in play on the maintainer's Windows game, then disabled and
+every site read back as its original bytes.
 */
 var netfxInjectionAnchors = map[string]Anchor{
 	/*
@@ -74,6 +74,32 @@ var netfxInjectionAnchors = map[string]Anchor{
 			"8B 43 10 3B 43 1C 7C 10 8B 43 10 3B 43 20 7F 08"),
 		Verified: netfxVerified},
 	/*
+		Player.UpdateEquips' effects loop, from `mov ebx, 3`:
+
+			for (k = 3; k < 10; k++)
+			    if (IsItemSlotUnlockedAndUsable(k))
+			        ApplyEquipFunctional(k, GetEffectiveArmor(k))
+
+		The hook is `push eax; mov edx, ebx; mov ecx, esi` before the call, at
+		42: the item pushed, the slot into edx. The loop bound is at 56. Both
+		are wildcarded; the vanity loop after it starts at 13 and does not
+		match. No jump lands inside the hook.
+	*/
+	"equip_apply": {Pattern: MustParse(
+		"BB 03 00 00 00 8B CE 8B D3 E8 ?? ?? ?? ?? 85 C0 74 23 8D 7D ?? 0F 57 C0 " +
+			"66 0F D6 07 8D 45 ?? 50 8B CE 8B D3 FF 15 ?? ?? ?? ?? ?? ?? ?? ?? ?? " +
+			"FF 15 ?? ?? ?? ?? 43 83 FB ?? 7C CA"),
+		Verified: netfxVerified},
+	/*
+		UpdateEquips' benefit loop: `if (item.accessory) GrantPrefixBenefits(item);
+		GrantArmorBenefits(item)` (accessory is Item +0x10E), through the `k < 10`
+		bound at 32, wildcarded.
+	*/
+	"equip_benefits": {Pattern: MustParse(
+		"80 BF 0E 01 00 00 00 74 0A 8B CE 8B D7 FF 15 ?? ?? ?? ?? 8B CE 8B D7 " +
+			"FF 15 ?? ?? ?? ?? 43 83 FB ?? 0F 8C"),
+		Verified: netfxVerified},
+	/*
 		CommonDrop.TryDroppingItem and its three twins, from the prologue:
 		`mov esi, ecx` (the rule) and `mov edx, [esi+0C]` (chanceDenominator, the
 		roll's bound) are the hook, wildcarded -- the same five bytes in all four.
@@ -116,6 +142,17 @@ var netfxInjections = map[string]Injection{
 		Overwrite: []byte{0x89, 0x43, 0x20, 0x83, 0x7D, 0xC4, 0x00},
 		MakeBody:  netfxSmartCursor.shrink, RerunOverwrite: false, Arena: true,
 	},
+	// The slot clamped in edx on its way to ApplyEquipFunctional, and both loops
+	// widened to the vanity slots, together.
+	"vanity_accs": {
+		Name: "vanity_accs", Anchor: "equip_apply", InjectOff: 42,
+		Overwrite: []byte{0x50, 0x8B, 0xD3, 0x8B, 0xCE},
+		MakeBody:  ClampVanitySlotEDX, RerunOverwrite: false, Arena: true,
+		Edits: []Edit{
+			{Anchor: "equip_apply", Off: 56, Orig: []byte{0x0A}, Patched: []byte{0x14}},
+			{Anchor: "equip_benefits", Off: 32, Orig: []byte{0x0A}, Patched: []byte{0x14}},
+		},
+	},
 	// The denominator load is reproduced with a cap; all four twins.
 	"loot": {
 		Name: "loot", Anchor: "trydrop", InjectOff: 6,
@@ -145,6 +182,22 @@ var netfxSmartCursor = smartCursorBox{
 	reg: 3, targetX: 0x0C, targetY: 0x10, startX: 0x14, endX: 0x18, startY: 0x1C, endY: 0x20,
 	first: []byte{0x89, 0x43, 0x20},
 	last:  []byte{0x83, 0x7D, 0xC4, 0x00},
+}
+
+/*
+ClampVanitySlotEDX is ClampVanitySlot for the CLR, where the slot reaches
+ApplyEquipFunctional in edx: the displaced `push eax; mov edx, ebx` and `mov
+ecx, esi` reproduced around the clamp.
+
+	push eax        the item, the call's stack argument
+	mov edx, ebx    the slot
+	cmp edx, 0xA    a vanity slot?
+	jl  +3
+	sub edx, 0xA    13..19 becomes 3..9, the mirror whose hide-visual flag it follows
+	mov ecx, esi    the player
+*/
+func ClampVanitySlotEDX(int32) []byte {
+	return []byte{0x50, 0x8B, 0xD3, 0x83, 0xFA, 0x0A, 0x7C, 0x03, 0x83, 0xEA, 0x0A, 0x8B, 0xCE}
 }
 
 /*

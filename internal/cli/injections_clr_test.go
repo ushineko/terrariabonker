@@ -55,14 +55,34 @@ var (
 	}
 )
 
+/*
+clrEffectsLoop and clrBenefitLoop are UpdateEquips' two accessory loops: the
+effects loop from `mov ebx, 3` through its `k < 10` bound, and the benefit loop
+from the accessory test through its own.
+*/
+var (
+	clrEffectsLoop = []byte{
+		0xBB, 0x03, 0x00, 0x00, 0x00, 0x8B, 0xCE, 0x8B, 0xD3, 0xE8, 0, 0, 0, 0, 0x85, 0xC0, 0x74, 0x23,
+		0x8D, 0x7D, 0xE0, 0x0F, 0x57, 0xC0, 0x66, 0x0F, 0xD6, 0x07, 0x8D, 0x45, 0xE0, 0x50, 0x8B, 0xCE,
+		0x8B, 0xD3, 0xFF, 0x15, 0, 0, 0, 0, 0x50, 0x8B, 0xD3, 0x8B, 0xCE, 0xFF, 0x15, 0, 0, 0, 0,
+		0x43, 0x83, 0xFB, 0x0A, 0x7C, 0xCA,
+	}
+	clrBenefitLoop = []byte{
+		0x80, 0xBF, 0x0E, 0x01, 0x00, 0x00, 0x00, 0x74, 0x0A, 0x8B, 0xCE, 0x8B, 0xD7, 0xFF, 0x15, 0, 0, 0, 0,
+		0x8B, 0xCE, 0x8B, 0xD7, 0xFF, 0x15, 0, 0, 0, 0, 0x43, 0x83, 0xFB, 0x0A, 0x0F, 0x8C,
+	}
+)
+
 const (
-	clrGrab   = clrCode + 0x300
-	clrSpawn  = clrCode + 0x380
-	clrDropA  = clrCode + 0x400
-	clrDropB  = clrCode + 0x480
-	clrRanges = clrCode + 0x500
-	clrSmart  = clrCode + 0x600
-	clrHookTo = clrCode + 0x700
+	clrGrab     = clrCode + 0x300
+	clrSpawn    = clrCode + 0x380
+	clrDropA    = clrCode + 0x400
+	clrDropB    = clrCode + 0x480
+	clrRanges   = clrCode + 0x500
+	clrSmart    = clrCode + 0x600
+	clrEffects  = clrCode + 0x700
+	clrBenefits = clrCode + 0x780
+	clrHookTo   = clrCode + 0x800
 )
 
 // clrStubbed is the CLR coder with the three hooks' code planted, and memory
@@ -77,6 +97,8 @@ func clrStubbed() *execMem {
 	mem.PokeBytes(clrDropB, clrTryDrop(0x10))
 	mem.PokeBytes(clrRanges, clrGetRanges)
 	mem.PokeBytes(clrSmart, clrSmartCursor)
+	mem.PokeBytes(clrEffects, clrEffectsLoop)
+	mem.PokeBytes(clrBenefits, clrBenefitLoop)
 	return mem
 }
 
@@ -102,7 +124,7 @@ func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 	const runtime = "netfx-4.8.9345.0"
 	mem := clrStubbed()
 	for _, on := range [][]string{{"pickup", "5"}, {"spawn_rate", "0"}, {"loot", "50"},
-		{"tool_reach", "30"}, {"smart_cursor", "20"}} {
+		{"tool_reach", "30"}, {"smart_cursor", "20"}, {"vanity_accs", "1"}} {
 		code, _, errOut := runUnder(t, runtime, mem, "patch", "enable", on[0], "--value", on[1])
 		require.Zero(t, code, errOut)
 	}
@@ -133,7 +155,14 @@ func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 	require.Equal(t, smart, body)
 	require.Equal(t, uint32(clrSmart+7), home, "back to the jz after the displaced compare")
 
-	for _, off := range []string{"pickup", "spawn_rate", "loot", "tool_reach", "smart_cursor"} {
+	body, home = stubAt(t, mem, clrEffects+42, 13)
+	require.Equal(t, []byte{0x50, 0x8B, 0xD3, 0x83, 0xFA, 0x0A, 0x7C, 0x03, 0x83, 0xEA, 0x0A, 0x8B, 0xCE}, body,
+		"push the item, the slot clamped in edx, the player in ecx")
+	require.Equal(t, uint32(clrEffects+47), home, "back to the call")
+	require.Equal(t, []byte{0x14}, mem.Read(clrEffects+56, 1), "the effects loop runs to 20")
+	require.Equal(t, []byte{0x14}, mem.Read(clrBenefits+32, 1), "the benefit loop runs to 20")
+
+	for _, off := range []string{"pickup", "spawn_rate", "loot", "tool_reach", "smart_cursor", "vanity_accs"} {
 		code, _, errOut := runUnder(t, runtime, mem, "patch", "disable", off)
 		require.Zero(t, code, errOut)
 	}
@@ -143,6 +172,25 @@ func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 	require.Equal(t, clrTryDrop(0x10), mem.Read(clrDropB, len(clrTryDrop(0x10))))
 	require.Equal(t, clrGetRanges, mem.Read(clrRanges, len(clrGetRanges)))
 	require.Equal(t, clrSmartCursor, mem.Read(clrSmart, len(clrSmartCursor)))
+	require.Equal(t, clrEffectsLoop, mem.Read(clrEffects, len(clrEffectsLoop)))
+	require.Equal(t, clrBenefitLoop, mem.Read(clrBenefits, len(clrBenefitLoop)))
+}
+
+/*
+A cheat with an edit is refused whole when an edit's site holds something
+unexpected: nothing is written, not the edit, not the stub, not the jump. The
+benefit loop's bound here is neither 10 nor 20.
+*/
+func TestUnderTheCLRAnUnexpectedEditRefusesTheWholeCheat(t *testing.T) {
+	const runtime = "netfx-4.8.9345.0"
+	mem := clrStubbed()
+	mem.PokeBytes(clrBenefits+32, []byte{0x0B})
+	before := mem.Read(clrBase, 0x80000)
+
+	code, _, errOut := runUnder(t, runtime, mem, "patch", "enable", "vanity_accs")
+	require.NotZero(t, code)
+	require.Contains(t, errOut, "neither the original nor the edit")
+	require.Equal(t, before, mem.Read(clrBase, 0x80000), "something was written")
 }
 
 /*

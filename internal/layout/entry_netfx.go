@@ -54,7 +54,7 @@ var clrEntry = Entry{
 		CheatFeature("mining"), CheatFeature("reach"),
 		CheatFeature("max_minions"), CheatFeature("fast_place"), CheatFeature("pylons"),
 		CheatFeature("pickup"), CheatFeature("spawn_rate"), CheatFeature("loot"),
-		CheatFeature("tool_reach"), CheatFeature("smart_cursor")},
+		CheatFeature("tool_reach"), CheatFeature("smart_cursor"), CheatFeature("vanity_accs")},
 	Writes:       false,
 	PlayerValues: map[string]int{"pickSpeed": 0xA4, "blockRange": 0x100},
 	Anchors:      netfxAnchors,

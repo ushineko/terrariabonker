@@ -715,8 +715,22 @@ Slice 10 — tool reach and the smart cursor clamp on the CLR:
 - [x] Live on Windows (2026-10-09): both confirmed in play by the maintainer;
       disabled, and both sites read back as their original instructions.
 
+Slice 11 — vanity accessories on the CLR; edits checked first:
+- [x] vanity_accs: UpdateEquips reached through GrantPrefixBenefits (the one
+      `prefix == 62` test) and its single call slot. The stub clamps the slot in
+      edx before ApplyEquipFunctional; both `k < 10` bounds become 20.
+- [x] A cheat's edits are checked at every site before any part of the cheat is
+      written, on enable and disable, under every entry.
+- [x] Live on Windows (2026-10-09): confirmed in play; disabled, and both loops
+      matched their fully literal original bytes.
+- **Finding:** a stub that calls managed code from the arena is unsafe under the
+  CLR. Its precise GC stack walk stops at a return address outside managed code,
+  leaving the GC roots of the frames above unreported. Mono scans such frames
+  conservatively. inventory_accs, teleport and ore_extract do this under mono and
+  need a design in which managed code makes the call.
+
 Next slices:
-- [ ] The remaining stubs under the CLR: vanity_accs and inventory_accs; then teleport, auto_use and ore_extract, which call into the
+- [ ] The remaining stubs under the CLR: inventory_accs (see the finding above); then teleport, auto_use and ore_extract, which call into the
       game or carry state the mono code builds from mono-only locators.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
