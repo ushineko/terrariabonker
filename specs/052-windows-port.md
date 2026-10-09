@@ -680,9 +680,34 @@ Slice 8 — the remaining in-place cheats on the CLR:
       five in-place cheats now work under .NET Framework; the stub-based ones need a
       CLR injection set.
 
+Slice 9 — the CLR injection set; pickup, spawn rate and the drop floor:
+- [x] How an arena's memory comes to exist is a module the injection set names
+      (`arenaMakers`): the mono set's `springboard` (the game calls VirtualAlloc
+      from a per-frame hook, so it needs frames), and the CLR set's `allocate`
+      (`proc.Mem.AllocateAt`, VirtualAllocEx at the address `FreeBase` chose -- no
+      frames needed). Finding, stamping and adopting an arena stay shared.
+      `AllocateAt` is tested against a real process (the test's own).
+- [x] `injections_netfx.go` is the CLR set: its own anchors, hook offsets,
+      displaced bytes and bodies, selected by the entry's `Injections: "netfx"`.
+      Each hook was found read-only on the live game, and every byte position in
+      the surrounding code was read as a possible jump to check none lands inside
+      the displaced bytes except at their first.
+- [x] pickup: `GetItemGrabRange`'s exit (edi holds the summed range; `imul edi,
+      edi, N` before it is returned). Unlike mono, which scales at the GrabItems
+      call, this scales the range for every caller.
+- [x] spawn_rate: `GetSpawnRate`'s exit, esi and edi the out pointers as under
+      mono; mono's `ForceSpawn` body, the CLR's `lea esp; pop ebx; pop esi` replayed.
+- [x] loot: `TryDroppingItem` and its three twins, at `mov esi, ecx; mov edx,
+      [esi+0C]` (chanceDenominator, CLR offset 0x0C), reproduced with the cap in edx.
+- [x] Live on Windows (2026-10-09): the arena allocated directly; pickup x10, a
+      100% drop floor and a spawn cap of 30 confirmed in play by the maintainer;
+      disabled, and every site (the four twins included) read back as its original
+      instruction.
+
 Next slices:
-- [ ] The stub-based cheats under the CLR: an injection set of its own (arena,
-      springboard, bodies), selected by the entry's `Injections`.
+- [ ] The remaining stubs under the CLR: tool_reach, smart_cursor, vanity_accs and
+      inventory_accs; then teleport, auto_use and ore_extract, which call into the
+      game or carry state the mono code builds from mono-only locators.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

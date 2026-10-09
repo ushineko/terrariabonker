@@ -78,12 +78,16 @@ own set, and an entry names the one it uses.
 type injectionSet struct {
 	anchors    map[string]Anchor
 	injections map[string]Injection
+	// arena names how the set's arena is made (arenaMakers).
+	arena string
 }
 
 // injectionSets is every set, by the name a layout.Entry gives in Injections.
-// The mono set is the tables in anchors.go and injections.go.
+// The mono set is the tables in anchors.go and injections.go; the .NET Framework
+// set is injections_netfx.go.
 var injectionSets = map[string]injectionSet{
-	"mono": {anchors: Anchors, injections: Injections},
+	"mono":  {anchors: Anchors, injections: Injections, arena: "springboard"},
+	"netfx": {anchors: netfxInjectionAnchors, injections: netfxInjections, arena: "allocate"},
 }
 
 /*

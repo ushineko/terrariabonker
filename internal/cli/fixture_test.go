@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -53,17 +54,49 @@ const (
 // liveBlock is the player's life and mana, as a scan recognises them.
 var liveBlock = []int32{500, 500, 137, 200, 220, 220}
 
-// execMem is a fake whose whole buffer is code as well, so the resolver has
-// somewhere to look.
-type execMem struct{ *memtest.FakeMem }
+/*
+execMem is a fake whose whole buffer is code as well, so the resolver has
+somewhere to look.
+
+With allocates set it is also a native Windows game this program can map memory
+in (patch.Allocator): its map gains a distant mapping, so there is a hole past
+the buffer for an arena, and AllocateAt maps one there. The buffer has to reach
+that far for the arena to be written to.
+*/
+type execMem struct {
+	*memtest.FakeMem
+	allocates bool
+	mapped    []proc.Region
+}
+
+// farMapping is the mapping that bounds the hole an arena is allocated in.
+const farMapping = base + 0x400000
 
 func (m *execMem) ExePath() string { return "" }
 
 func (m *execMem) AllRegions() []proc.Region {
-	return []proc.Region{{
+	out := []proc.Region{{
 		Start: base, End: base + size,
 		Readable: true, Writable: true, Executable: true,
 	}}
+	if m.allocates {
+		out = append(out, proc.Region{Start: farMapping, End: farMapping + 0x10000, Readable: true})
+	}
+	return append(out, m.mapped...)
+}
+
+func (m *execMem) AllocateAt(addr uint32, n int) error {
+	if !m.allocates {
+		return fmt.Errorf("this fake cannot allocate")
+	}
+	for _, r := range m.AllRegions() {
+		if addr < r.End && r.Start < addr+uint32(n) { //nolint:gosec // a test size
+			return fmt.Errorf("%#x is mapped", addr)
+		}
+	}
+	m.mapped = append(m.mapped, proc.Region{Start: addr, End: addr + uint32(n), //nolint:gosec // a test size
+		Readable: true, Writable: true, Executable: true})
+	return nil
 }
 
 // plantGame is a game with one player in it, carrying two items.
@@ -111,7 +144,7 @@ func plantGame() *execMem {
 		mem.PokeI32(addr+uint32(layout.ItemDamage), it.damage) //nolint:gosec // a field offset
 		mem.PokeI32(addr+uint32(layout.ItemUseTime), 20)       //nolint:gosec // a field offset
 	}
-	return &execMem{mem}
+	return &execMem{FakeMem: mem}
 }
 
 func u32(v uint32) []byte {

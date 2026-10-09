@@ -111,3 +111,29 @@ func TestTheExecutableIsThisProcess(t *testing.T) {
 	got := proc.New(os.Getpid()).ExePath()
 	require.True(t, bytes.EqualFold([]byte(got), []byte(self)), "ExePath %q, want %q", got, self)
 }
+
+/*
+AllocateAt maps read-write-execute memory at the address asked for, in a real
+process: this one, at a low address found free by allocating and releasing it.
+The region list sees it, and a write lands in it.
+*/
+func TestAllocateAtMapsExecutableMemoryWhereAsked(t *testing.T) {
+	addr, size := lowPage(t)
+	require.NoError(t, windows.VirtualFree(uintptr(addr), 0, windows.MEM_RELEASE))
+
+	mem := proc.New(os.Getpid())
+	require.NoError(t, mem.AllocateAt(addr, int(size)))
+	t.Cleanup(func() { _ = windows.VirtualFree(uintptr(addr), 0, windows.MEM_RELEASE) })
+
+	var found bool
+	for _, r := range mem.AllRegions() {
+		if r.Start <= addr && addr < r.End {
+			found = r.Writable && r.Executable
+		}
+	}
+	require.True(t, found, "the allocation is not a writable, executable region")
+	require.True(t, mem.Write(addr, []byte{0xC3}))
+	require.Equal(t, []byte{0xC3}, observe(t, addr, 1))
+
+	require.Error(t, mem.AllocateAt(addr, int(size)), "allocating over a mapping succeeded")
+}

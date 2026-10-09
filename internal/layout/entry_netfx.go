@@ -52,11 +52,13 @@ var clrEntry = Entry{
 	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory},
 	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields, WriteItemTemplates,
 		CheatFeature("mining"), CheatFeature("reach"),
-		CheatFeature("max_minions"), CheatFeature("fast_place"), CheatFeature("pylons")},
+		CheatFeature("max_minions"), CheatFeature("fast_place"), CheatFeature("pylons"),
+		CheatFeature("pickup"), CheatFeature("spawn_rate"), CheatFeature("loot")},
 	Writes:       false,
 	PlayerValues: map[string]int{"pickSpeed": 0xA4, "blockRange": 0x100},
 	Anchors:      netfxAnchors,
 	Cheats:       netfxCheats,
+	Injections:   "netfx",
 	Provenance:   "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }
 

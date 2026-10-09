@@ -36,7 +36,7 @@ func runUnder(t *testing.T, runtime string, mem *execMem, argv ...string) (int, 
 // clrGame is a game with one player and two items planted the CLR way.
 func clrGame() *execMem {
 	const base, size = 0x10000000, 0x20000
-	mem := &execMem{memtest.New(base, size)}
+	mem := &execMem{FakeMem: memtest.New(base, size)}
 	mem.PlantCLRString(base+0x40, "terrariabonker")
 	mem.PlantCLRPlayer(base+0x800, []int32{400, 420, 390, 200, 200, 220}, base+0x40)
 	mem.PlantCLRInventory(base+0x800, base+0xC000, base+0xD000, []memtest.CLRItem{

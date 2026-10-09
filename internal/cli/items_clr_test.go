@@ -15,7 +15,7 @@ const (
 
 // clrArmoury is a CLR game holding a sword in slot 0 and a pickaxe in slot 3.
 func clrArmoury() *execMem {
-	mem := &execMem{memtest.New(clrBase, 0x20000)}
+	mem := &execMem{FakeMem: memtest.New(clrBase, 0x80000)}
 	mem.PlantCLRString(clrBase+0x40, "terrariabonker")
 	mem.PlantCLRPlayer(clrBase+0x800, []int32{400, 400, 390, 200, 200, 200}, clrBase+0x40)
 	mem.PlantCLRInventory(clrBase+0x800, clrBase+0xC000, clrItems, []memtest.CLRItem{

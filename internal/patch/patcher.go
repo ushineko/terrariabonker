@@ -593,19 +593,20 @@ func (p *Patcher) ArenaWithin(wait time.Duration) (uint32, error) {
 		return found, nil
 	}
 
+	makeArena, ok := arenaMakers[p.set.arena]
+	if !ok {
+		return 0, fmt.Errorf("%s has no way to make an arena", p.entry.Name)
+	}
 	base, err := FreeBase(p.Mem, ArenaSize)
 	if err != nil {
 		return 0, err
 	}
-	if err := p.bootstrapArena(base, wait); err != nil {
+	if err := makeArena(p, base, wait); err != nil {
 		return 0, err
 	}
 	region, ok := Mapped(p.Mem, base)
 	if !ok {
-		return 0, fmt.Errorf("VirtualAlloc did not run. The springboard sits on a " +
-			"per-frame path, so this means the game is not advancing frames -- Terraria " +
-			"pauses in single-player whenever its window loses focus. Focus the game " +
-			"and try again")
+		return 0, fmt.Errorf("nothing was mapped at %#x for the arena", base)
 	}
 	if !region.Writable || !region.Executable {
 		return 0, fmt.Errorf("the arena at %#x is not writable and executable", base)
