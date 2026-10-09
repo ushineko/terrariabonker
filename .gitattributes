@@ -1,0 +1,11 @@
+# Text is checked out with LF on every platform, not just stored with it.
+#
+# A Windows checkout with core.autocrlf=true converts text to CRLF, and several
+# tests compare a checked-in file byte for byte (cmd/prefixstats reproduces
+# data/prefix_stats.json and compares) -- they failed on Windows for line
+# endings alone. gofmt also wants LF. The repository already stores LF, so this
+# changes no stored content.
+* text=auto eol=lf
+
+*.png binary
+*.pyc binary
