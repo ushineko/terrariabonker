@@ -562,7 +562,7 @@ crit −0x64. Projectile: type/alpha −0x14, aiStyle/timeLeft/damage −0x18. B
 bytes do not follow: the CLR packs them at the end of each class (Projectile.active
 0x078 → 0x102, Item.prefix 0x15C → 0x12E). A shift predicts a candidate; only
 `clrfields` settles it.
-Slice 4 — player-stat writes on the CLR (done headless; live Windows check pending):
+Slice 4 — player-stat writes on the CLR (done):
 - [x] Writes are gated per feature like reads: `Entry.WriteFeatures` and `CanWrite`;
       `Service.RequireWritable(feature, force)`; the CLI's `gameWriting`. The CLR
       entry allows `WritePlayerStats` only; every other write still needs an entry
@@ -578,7 +578,10 @@ Slice 4 — player-stat writes on the CLR (done headless; live Windows check pen
       without it, all copies only if they share one name; otherwise a refusal. On
       Linux, where the copies are one character's, nothing changes (live: `set-hp max`
       at full health went through, two copies, ground truth from the mono anchor).
-- [ ] Live on Windows: a stat write observed in-game by the maintainer.
+- [x] Live on Windows: `set-hp 100` on the maintainer's game. Of seven copies in memory,
+      the two of "terrariabonker" went 470 → 100 and the five other characters were
+      unchanged; the maintainer saw 100/470 on the health bar. `set-hp max` put both
+      back to 470.
 
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
