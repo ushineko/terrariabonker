@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/service"
 )
@@ -229,7 +230,7 @@ func patchRecord(t *testing.T) string {
 	t.Helper()
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
-	dir := filepath.Join(home, ".config", "terrariabonker")
+	dir := memtest.ConfigUnder(home)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	return filepath.Join(dir, "patches.json")
 }

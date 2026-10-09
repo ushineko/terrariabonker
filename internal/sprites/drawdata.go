@@ -17,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/ushineko/terrariabonker/internal/paths"
 )
 
 /*
@@ -40,11 +42,11 @@ type NPCDrawData struct {
 // NPCFramesFile is where the two live, beside the icon cache rather than in the
 // config directory, which can be root-owned.
 func NPCFramesFile() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir, ok := paths.CacheDir()
+	if !ok {
 		return ""
 	}
-	return filepath.Join(home, ".cache", "terrariabonker", "npcframes.json")
+	return filepath.Join(dir, "npcframes.json")
 }
 
 /*

@@ -53,10 +53,12 @@ stop the whole thing rather than leave a rod raised with no way back.
 */
 func TestNothingIsRaisedIfTheOriginalCannotBeRecorded(t *testing.T) {
 	home := atHome(t)
-	require.NoError(t, os.MkdirAll(filepath.Dir(profile.Path()), 0o755))
-	// The profile's directory is made unwritable, so recording fails.
-	require.NoError(t, os.Chmod(filepath.Dir(profile.Path()), 0o500))
-	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(profile.Path()), 0o755) })
+	// A plain file where the profile's directory should be, so recording fails.
+	// A directory chmod-ed to 0500 did this on Linux, but Windows ignores a
+	// directory's permission bits and the record was written anyway.
+	dir := filepath.Dir(profile.Path())
+	require.NoError(t, os.MkdirAll(filepath.Dir(dir), 0o755))
+	require.NoError(t, os.WriteFile(dir, nil, 0o600))
 	_ = home
 
 	mem := plant()

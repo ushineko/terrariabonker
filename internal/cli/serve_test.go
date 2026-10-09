@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/cli"
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/service"
 )
@@ -27,7 +28,7 @@ command line runs, and are covered where they live.
 // served runs the worker over canned input and returns the replies.
 func served(t *testing.T, mem *execMem, lines ...string) []reply {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	memtest.IsolateHome(t, t.TempDir())
 
 	var out strings.Builder
 	app := cli.NewApp(cli.Options{
@@ -170,7 +171,7 @@ That is the whole point of the worker: a one-shot run pays a full memory scan
 and a warm request pays a read.
 */
 func TestTheWorkerAttachesOnce(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	memtest.IsolateHome(t, t.TempDir())
 	mem := plantGame()
 	attached := 0
 
@@ -226,7 +227,7 @@ somebody else may be using now. Without this the worker keeps writing to them
 and reports that it worked.
 */
 func TestTheWorkerReattachesWhenTheGameRestarts(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	memtest.IsolateHome(t, t.TempDir())
 	mem := plantGame()
 	attached, there := 0, true
 

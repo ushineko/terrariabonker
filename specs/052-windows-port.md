@@ -1,6 +1,6 @@
 # Spec 052: Native Windows port
 
-**Status**: DRAFT — phase 0 recon complete. Nothing past phase 0 is started.
+**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete. Phases 2 and 3 are next, together (`clrfields --verify` checks against the version table's CLR entry): a Windows build must not ship before it, because the build gate cannot yet tell the runtimes apart.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -311,21 +311,72 @@ same rule as the mono ones.
 
 ### Platform layer
 
-Split by build tags (`_linux.go` / `_windows.go`), smallest surface first:
+Split by build tags (`_linux.go` / `_windows.go`). Landed in phase 1:
 
-- `proc`: `Mem` over a process handle; `Regions`/`ExecRegions`/`AllRegions` from
-  `VirtualQueryEx`; `FindPID` from a Toolhelp snapshot; `ExePath` from
-  `QueryFullProcessImageName`.
-- File locks: one helper (`LockFileEx`/`flock`) replacing four copies of the `Flock` call.
-- `version`: `inodeOf`/`stampOf` → file index from `GetFileInformationByHandle`.
-- Paths: config under `%APPDATA%\terrariabonker`, cache under `%LOCALAPPDATA%`, via
-  `os.UserConfigDir`/`os.UserCacheDir`; GUI single-instance lock without
-  `XDG_RUNTIME_DIR`. Steam library discovery from `libraryfolders.vdf`.
-- `patch` arena: `VirtualAllocEx(PAGE_EXECUTE_READWRITE)` directly. The springboard
-  bootstrap stays for Linux only.
-- Dependency: `golang.org/x/sys/windows` v0.48.0, previously indirect (via fyne).
-  Approved as a direct dependency by the maintainer, 2026-10-08.
+- `proc`: the region types and `/proc/maps` parsers stay common; the `/proc` half moved
+  verbatim to `proc_linux.go`. `proc_windows.go`: `Mem` over a process handle opened
+  once per `Mem`; `Regions` (committed, writable), `ExecRegions` (committed, executable,
+  **private** — JIT code is private memory, so the executable sections of mapped DLLs
+  are left out of an anchor search), `AllRegions` (committed or reserved, for gap
+  finding) from `VirtualQueryEx`; `Read` retries once clamped to the region end, because
+  `ReadProcessMemory` fails a whole read that crosses into an unreadable page where
+  `/proc/<pid>/mem` returns it short; `Write` flushes the instruction cache;
+  `FindPID` from a Toolhelp snapshot; `ExePath` from `QueryFullProcessImageName`;
+  `ModulePaths` for runtime detection. `Elevate` is a no-op on Windows.
+- `proc.Alive` replaces `cli`'s `/proc/<pid>` stat. On Windows it checks the exit code:
+  a process object outlives its process while any handle to it is open.
+- `internal/filelock`: one `Lock`/`TryLock` replacing four copies of `syscall.Flock`
+  (`flock` on Linux; `LockFileEx` on Windows, over one byte past any real file's end so
+  the GUI's lock file stays readable for the "already open (pid N)" message).
+- `internal/paths`: one `ConfigDir`/`CacheDir` replacing eight hand-spelled
+  `home/.config/terrariabonker` and `home/.cache/terrariabonker`. Linux keeps exactly
+  the old paths — deliberately not `os.UserConfigDir`, which honours `XDG_CONFIG_HOME`
+  and would move existing state. Windows: `%APPDATA%\terrariabonker` and
+  `%LOCALAPPDATA%\terrariabonker`.
+- `version`: `mappingIsCurrent` per platform (Linux keeps the inode check; Windows
+  cannot overwrite a running image, so the check is true there, with the rename gap
+  documented); Windows `stampOf` uses the NTFS file index; Windows `DetectRuntime` reads
+  `clr.dll`'s file version from the module list (`netfx-4.8.9345.0` on the live game).
+- Catalog cache filenames: Windows refuses `?`, which is what an undetected half of a
+  build key reads as. Reserved characters are replaced on Windows only, so Linux caches
+  keep their names.
+- GUI single-instance lock: no uid in the name on Windows (`Getuid` is -1 and the temp
+  directory is already per-user).
+- `.gitattributes`: text checked out with LF everywhere (`* text=auto eol=lf`).
+- Dependencies: `golang.org/x/sys/windows` v0.48.0 direct (approved 2026-10-08);
+  `golang.org/x/net` v0.59.0 → v0.60.0, indirect via fyne, for GO-2026-6610..6617
+  (not called by this code; govulncheck now reports none).
+
+Deferred, because nothing in phase 1 needs it:
+
+- `patch` arena via `VirtualAllocEx(PAGE_EXECUTE_READWRITE)`; the springboard bootstrap
+  stays Linux-only. Phase 4, with the first Windows code patch.
+- Steam library discovery from `libraryfolders.vdf` (sprite extraction finds the
+  install through the running game today). Phase 5.
+- `cmd/monofields` compiles on Windows and fails at run time reading `/proc/<pid>/maps`;
+  `cmd/clrfields` is its Windows counterpart.
 - Not ported: KWin rules, `install.sh`, `tools/screenshot.sh`, `.desktop` file.
+
+### Phase 1 findings
+
+- **Test isolation leaked on Windows.** Tests isolated config by setting `HOME`, which
+  Windows ignores (`os.UserHomeDir` reads `USERPROFILE`; config and cache come from
+  `APPDATA`/`LOCALAPPDATA`). The first full run wrote `accepted-builds.json`,
+  `patches.json`, `profile.json` and a sprite cache into the developer's real
+  `%APPDATA%`/`%LOCALAPPDATA%`; patch's `TestTheTestsNeverTouchTheRealState` caught it.
+  The files were removed (the directories did not exist before the run). Fixed with
+  `memtest.IsolateHome`, which sets all four variables, and `memtest.ConfigUnder`/
+  `CacheUnder`, which spell each platform's expected layout as literals. Re-run with the
+  real directories redirected to a trap: nothing of this program's landed there.
+- **The build gate calls an unverified runtime "known good".** `build-check` against the
+  live Windows game reports `1.4.5.8+24893155 (exact)`, `known-good: true`, with runtime
+  `netfx-4.8.9345.0` and every cheat unresolved. The gate keys on the build only. Nothing
+  mis-writes (the player locate finds no match under mono offsets, measured in phase 0,
+  and every anchor fails), but the claim is wrong. Phase 3's `(build, runtime)` key fixes
+  it; until then a Windows build must not ship.
+- `TestNothingIsRaisedIfTheOriginalCannotBeRecorded` made the profile directory
+  unwritable with `chmod 0500`, which Windows ignores for directories. It now puts a
+  plain file where the directory should be, which fails on both platforms.
 
 ## Phases
 
@@ -372,9 +423,15 @@ Phase 0
 - [x] Findings recorded in `docs/discovery.md`.
 
 Phase 1
-- [ ] `go build ./...` and `go test ./...` pass on Windows without the game running.
-- [ ] `make test` and `make lint` still pass on Linux.
-- [ ] No behaviour change on Linux.
+- [x] `go build ./...` and `go test ./...` pass on Windows without the game running
+      (27 packages, GUI included — cgo with MSYS2 gcc).
+- [x] `make test` and `make lint` still pass on Linux (27 packages; 0 issues). The
+      Windows-only files also lint clean with `GOOS=windows`.
+- [x] No behaviour change on Linux: the `/proc` code moved verbatim, config and cache
+      paths are byte-identical (pinned as literals in `paths_test`, with `XDG_*` set to
+      prove they are ignored), `flock` semantics unchanged, cache filenames unchanged.
+- [x] The Windows CLI identifies the live game: build from the executable, runtime from
+      `clr.dll` (`build-check`, read-only).
 
 Phase 3 (version table; full criteria when phase 0 is complete)
 - [ ] Version support is a table keyed by `(game build key, runtime)`; every offset,
@@ -384,6 +441,8 @@ Phase 3 (version table; full criteria when phase 0 is complete)
 - [ ] Startup matching: exact → supported; same family → candidate through the
       degraded-build flow; other family or none → memory features disabled with the
       reason.
+- [ ] `build-check` no longer reports a build as `exact`/known-good under a runtime no
+      entry covers (phase 1 finding).
 - [ ] Each entry pinned as literals with provenance, and by a frozen `sha256`.
 
 Later phases get their criteria when phase 0 is complete.

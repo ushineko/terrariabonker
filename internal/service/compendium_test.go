@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/service"
 	"github.com/ushineko/terrariabonker/internal/sprites"
 )
@@ -185,7 +187,7 @@ func TestACacheMissingAFieldIsRescanned(t *testing.T) {
 	first, err := svc.Compendium(false)
 	require.NoError(t, err)
 
-	path := filepath.Join(home, ".cache", "terrariabonker",
+	path := filepath.Join(memtest.CacheUnder(home),
 		"templates-"+cacheKey(svc)+".json")
 	require.NoError(t, os.WriteFile(path,
 		[]byte(`{"757": {"type": 757, "damage": 1}}`), 0o600))
@@ -201,8 +203,12 @@ func TestACacheMissingAFieldIsRescanned(t *testing.T) {
 func cacheKey(svc *service.Service) string {
 	out := []rune(svc.BuildKey())
 	for i, c := range out {
-		if c == '+' {
+		switch {
+		case c == '+':
 			out[i] = '-'
+		// Windows refuses "?" in a filename, and an undetected build key is "?+?".
+		case c == '?' && runtime.GOOS == "windows":
+			out[i] = '_'
 		}
 	}
 	return string(out)
@@ -211,7 +217,7 @@ func cacheKey(svc *service.Service) string {
 // cacheFiles is what is in the cache directory, in order.
 func cacheFiles(t *testing.T, home string) []string {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(home, ".cache", "terrariabonker"))
+	entries, err := os.ReadDir(memtest.CacheUnder(home))
 	require.NoError(t, err)
 	var out []string
 	for _, e := range entries {
@@ -270,7 +276,7 @@ func TestTheCachesAreHandedBackToTheUser(t *testing.T) {
 	_, err := svc.Compendium(false)
 	require.NoError(t, err)
 
-	dir := filepath.Join(home, ".cache", "terrariabonker")
+	dir := memtest.CacheUnder(home)
 	require.Equal(t, []string{
 		dir, filepath.Join(dir, "templates-"+cacheKey(svc)+".json"),
 		dir, filepath.Join(dir, "npcs-"+cacheKey(svc)+".json"),

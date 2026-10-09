@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/sprites"
 	"github.com/ushineko/terrariabonker/internal/version"
 )
@@ -25,7 +26,7 @@ the one failure worth guarding.
 func atHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	memtest.IsolateHome(t, home)
 	return home
 }
 
@@ -38,9 +39,9 @@ same directory: a path that changed in one place is an icon cache nobody reads.
 */
 func TestTheCachePaths(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	memtest.IsolateHome(t, home)
 
-	require.Equal(t, filepath.Join(home, ".cache", "terrariabonker", "sprites",
+	require.Equal(t, filepath.Join(memtest.CacheUnder(home), "sprites",
 		version.KnownVersion), sprites.CacheDir(""))
 	require.Equal(t, filepath.Join(sprites.CacheDir(""), "Item_757.png"),
 		sprites.IconPath(757, ""))
@@ -48,7 +49,7 @@ func TestTheCachePaths(t *testing.T) {
 		sprites.NPCIconPath(1, ""))
 	require.Equal(t, filepath.Join(sprites.CacheDir(""), "NPCt_-3.png"),
 		sprites.NPCTintedIconPath(-3, ""))
-	require.Equal(t, filepath.Join(home, ".cache", "terrariabonker", "paths.json"),
+	require.Equal(t, filepath.Join(memtest.CacheUnder(home), "paths.json"),
 		sprites.PathsFile())
 
 	// Under ~/.cache rather than ~/.config: extraction runs unprivileged, and

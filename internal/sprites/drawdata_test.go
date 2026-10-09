@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/sprites"
 )
 
@@ -36,7 +37,7 @@ than checked by writing and reading it back -- which would pass with any pair of
 names as long as they matched.
 */
 func TestTheFileIsTheAgreedShape(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	memtest.IsolateHome(t, t.TempDir())
 	require.NoError(t, sprites.SaveNPCDrawData(frames, tints))
 
 	raw, err := os.ReadFile(sprites.NPCFramesFile())
@@ -56,7 +57,7 @@ func TestTheFileIsTheAgreedShape(t *testing.T) {
 // And it reads back as what went in, including the negative netID a variant is
 // keyed by.
 func TestTheFileIsReadBack(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	memtest.IsolateHome(t, t.TempDir())
 	require.NoError(t, sprites.SaveNPCDrawData(frames, tints))
 
 	gotFrames, gotTints := sprites.LoadNPCDrawData()
@@ -74,15 +75,15 @@ has to read it.
 */
 func TestTheFilePath(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	require.Equal(t, filepath.Join(home, ".cache", "terrariabonker", "npcframes.json"),
+	memtest.IsolateHome(t, home)
+	require.Equal(t, filepath.Join(memtest.CacheUnder(home), "npcframes.json"),
 		sprites.NPCFramesFile())
 }
 
 // Nothing there is not a failure: the extractor runs before the first scan has
 // ever happened, and has to draw what it can.
 func TestNoDrawDataAtAll(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	memtest.IsolateHome(t, t.TempDir())
 	gotFrames, gotTints := sprites.LoadNPCDrawData()
 	require.Empty(t, gotFrames)
 	require.Empty(t, gotTints)
@@ -99,8 +100,8 @@ missing its last few NPCs looks like the game not having them.
 */
 func TestGarbageDrawData(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	dir := filepath.Join(home, ".cache", "terrariabonker")
+	memtest.IsolateHome(t, home)
+	dir := memtest.CacheUnder(home)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "npcframes.json"),
 		[]byte(`{"frames": {"1": 2, "4": "fifteen"}}`), 0o600))

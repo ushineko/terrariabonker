@@ -20,7 +20,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"syscall"
+
+	"github.com/ushineko/terrariabonker/internal/filelock"
+	"github.com/ushineko/terrariabonker/internal/paths"
 )
 
 // The two decisions a person can make about a build.
@@ -33,11 +35,11 @@ const (
 
 // Path is where the decisions live.
 func Path() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
+	dir, ok := paths.ConfigDir()
+	if !ok {
+		dir = filepath.Join(".", ".config", paths.App)
 	}
-	return filepath.Join(home, ".config", "terrariabonker", "accepted-builds.json")
+	return filepath.Join(dir, "accepted-builds.json")
 }
 
 /*
@@ -134,10 +136,11 @@ func update(change func(map[string]Decision) bool) error {
 		return fmt.Errorf("open the builds lock: %w", err)
 	}
 	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	unlock, err := filelock.Lock(lock)
+	if err != nil {
 		return fmt.Errorf("take the builds lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
+	defer unlock()
 
 	all := Load()
 	if !change(all) {

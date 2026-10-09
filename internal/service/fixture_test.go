@@ -536,7 +536,7 @@ const anchorAt = base + 0x50000
 func atHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	memtest.IsolateHome(t, home)
 	return home
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/builds"
+	"github.com/ushineko/terrariabonker/internal/memtest"
 )
 
 /*
@@ -27,8 +28,8 @@ both existed.
 func atHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	return filepath.Join(home, ".config", "terrariabonker", "accepted-builds.json")
+	memtest.IsolateHome(t, home)
+	return filepath.Join(memtest.ConfigUnder(home), "accepted-builds.json")
 }
 
 const (

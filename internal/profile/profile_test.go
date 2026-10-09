@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/profile"
 )
 
@@ -25,7 +26,7 @@ So every case round-trips both ways.
 func atHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	memtest.IsolateHome(t, home)
 	return home
 }
 
@@ -133,7 +134,7 @@ func TestTheTestsNeverTouchTheRealProfile(t *testing.T) {
 
 func writeProfile(t *testing.T, home, body string) {
 	t.Helper()
-	path := filepath.Join(home, ".config", "terrariabonker", "profile.json")
+	path := filepath.Join(memtest.ConfigUnder(home), "profile.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
 }

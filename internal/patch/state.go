@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"syscall"
+
+	"github.com/ushineko/terrariabonker/internal/filelock"
+	"github.com/ushineko/terrariabonker/internal/paths"
 )
 
 /*
@@ -24,11 +26,11 @@ state, and the file is ignored rather than trusted.
 
 // StatePath is where the record lives.
 func StatePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
+	dir, ok := paths.ConfigDir()
+	if !ok {
+		dir = filepath.Join(".", ".config", paths.App)
 	}
-	return filepath.Join(home, ".config", "terrariabonker", "patches.json")
+	return filepath.Join(dir, "patches.json")
 }
 
 // Site is one place an injection was installed: the hooked address and the cave
@@ -161,10 +163,11 @@ func WithLock(pid int, do func(*State) error) error {
 	}
 	defer func() { _ = lock.Close() }()
 
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	unlock, err := filelock.Lock(lock)
+	if err != nil {
 		return fmt.Errorf("take the state lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
+	defer unlock()
 
 	state := LoadState(pid)
 	if err := do(&state); err != nil {

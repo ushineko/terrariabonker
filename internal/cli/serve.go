@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"strconv"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ushineko/terrariabonker/internal/proc"
 )
 
 /*
@@ -162,7 +162,4 @@ func (a *App) answer(w io.Writer, id json.RawMessage, ok bool, out string) {
 
 // alive reports whether a pid is still there, which is how a game restart is
 // noticed.
-func alive(pid int) bool {
-	_, err := os.Stat("/proc/" + strconv.Itoa(pid))
-	return err == nil
-}
+func alive(pid int) bool { return proc.Alive(pid) }

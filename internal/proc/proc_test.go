@@ -3,6 +3,7 @@ package proc_test
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -34,6 +35,9 @@ the width every address in the 32-bit game has. Nothing here asserts *which*
 regions, because that is the machine's business and changes between runs.
 */
 func TestARealListingParsesIntoScannableRegions(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("a /proc maps listing exists only on Linux")
+	}
 	raw, err := os.ReadFile("/proc/self/maps")
 	require.NoError(t, err)
 	require.NotEmpty(t, raw)

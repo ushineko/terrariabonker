@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/builds"
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/profile"
 	"github.com/ushineko/terrariabonker/internal/service"
@@ -91,7 +92,7 @@ func TestTheDecisionRecordsTheRuntime(t *testing.T) {
 	_, err := svc.AcceptBuild(builds.Accepted, nil)
 	require.NoError(t, err)
 
-	raw, err := os.ReadFile(filepath.Join(home, ".config", "terrariabonker",
+	raw, err := os.ReadFile(filepath.Join(memtest.ConfigUnder(home),
 		"accepted-builds.json"))
 	require.NoError(t, err)
 	require.Contains(t, string(raw), "wine-mono-11.2.0",

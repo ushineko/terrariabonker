@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"github.com/ushineko/terrariabonker/internal/filelock"
 )
 
 /*
@@ -31,7 +32,12 @@ func lockPath() string {
 	if dir == "" {
 		dir = os.TempDir()
 	}
-	return filepath.Join(dir, fmt.Sprintf("terrariabonker-gui-%d.lock", os.Getuid()))
+	// Windows has no uid (Getuid is -1) and its temp directory is already
+	// per-user, so the name only carries one where there is one.
+	if uid := os.Getuid(); uid >= 0 {
+		return filepath.Join(dir, fmt.Sprintf("terrariabonker-gui-%d.lock", uid))
+	}
+	return filepath.Join(dir, "terrariabonker-gui.lock")
 }
 
 /*
@@ -49,7 +55,8 @@ func takeLock(path string) (release func(), holder string, ok bool) {
 		// that will not open at all.
 		return func() {}, "", true
 	}
-	if err := syscall.Flock(int(fh.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	unlock, err := filelock.TryLock(fh)
+	if err != nil {
 		held, _ := os.ReadFile(path) //nolint:gosec // the path this function just opened
 		_ = fh.Close()
 		return func() {}, strings.TrimSpace(string(held)), false
@@ -58,7 +65,7 @@ func takeLock(path string) (release func(), holder string, ok bool) {
 	if err := fh.Truncate(0); err == nil {
 		_, _ = fh.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
 	}
-	return func() { _ = fh.Close() }, "", true
+	return func() { unlock(); _ = fh.Close() }, "", true
 }
 
 // alreadyRunning is what the second panel is told. A sentence rather than a

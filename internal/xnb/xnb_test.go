@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/xnb"
 )
 
@@ -38,7 +39,7 @@ func contentDir(t *testing.T) string {
 	if err != nil {
 		t.Skip("no home directory to look in")
 	}
-	raw, err := os.ReadFile(filepath.Join(home, ".cache", "terrariabonker", "paths.json"))
+	raw, err := os.ReadFile(filepath.Join(memtest.CacheUnder(home), "paths.json"))
 	if err != nil {
 		t.Skip("the game's content directory has not been learned on this machine")
 	}

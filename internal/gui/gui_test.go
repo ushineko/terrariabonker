@@ -314,7 +314,7 @@ loaded, which is the state the window spends most of its time in.
 */
 func cliStatusReply(t *testing.T) string {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	memtest.IsolateHome(t, t.TempDir())
 
 	var stdout, stderr strings.Builder
 	app := cli.NewApp(cli.Options{

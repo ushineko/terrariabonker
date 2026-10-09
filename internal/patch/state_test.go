@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/patch"
 )
 
@@ -34,7 +35,7 @@ same file by name instead.
 func atHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	memtest.IsolateHome(t, home)
 	return home
 }
 

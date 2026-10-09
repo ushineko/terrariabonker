@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ushineko/terrariabonker/internal/paths"
 	"github.com/ushineko/terrariabonker/internal/version"
 )
 
@@ -35,11 +36,11 @@ const Scope = "all-v4"
 
 // CacheRoot is where every version's icons go.
 func CacheRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".cache", "terrariabonker", "sprites")
+	dir, ok := paths.CacheDir()
+	if !ok {
+		return filepath.Join(".cache", paths.App, "sprites")
 	}
-	return filepath.Join(home, ".cache", "terrariabonker", "sprites")
+	return filepath.Join(dir, "sprites")
 }
 
 // CacheDir is one game version's icons.
@@ -105,11 +106,11 @@ func IsCached(v string) bool {
 
 // PathsFile is where the learned content directory is remembered.
 func PathsFile() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".cache", "terrariabonker", "paths.json")
+	dir, ok := paths.CacheDir()
+	if !ok {
+		return filepath.Join(".cache", paths.App, "paths.json")
 	}
-	return filepath.Join(home, ".cache", "terrariabonker", "paths.json")
+	return filepath.Join(dir, "paths.json")
 }
 
 /*

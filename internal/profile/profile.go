@@ -20,16 +20,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"syscall"
+
+	"github.com/ushineko/terrariabonker/internal/filelock"
+	"github.com/ushineko/terrariabonker/internal/paths"
 )
 
 // Path is where the profile lives.
 func Path() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
+	dir, ok := paths.ConfigDir()
+	if !ok {
+		dir = filepath.Join(".", ".config", paths.App)
 	}
-	return filepath.Join(home, ".config", "terrariabonker", "profile.json")
+	return filepath.Join(dir, "profile.json")
 }
 
 /*
@@ -199,10 +201,11 @@ func Update(change func(*Profile) error) error {
 		return fmt.Errorf("open the profile lock: %w", err)
 	}
 	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	unlock, err := filelock.Lock(lock)
+	if err != nil {
 		return fmt.Errorf("take the profile lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
+	defer unlock()
 
 	p := Load()
 	if err := change(&p); err != nil {

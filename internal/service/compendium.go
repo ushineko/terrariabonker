@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/ushineko/terrariabonker/internal/content"
 	"github.com/ushineko/terrariabonker/internal/game"
+	"github.com/ushineko/terrariabonker/internal/paths"
 	"github.com/ushineko/terrariabonker/internal/proc"
 	"github.com/ushineko/terrariabonker/internal/sprites"
 )
@@ -191,15 +193,34 @@ func templateCache[T any](s *Service, kind string, refresh bool, wants []string,
 	return found
 }
 
-// cachePath is where one catalog's cache goes. The build key carries a "+",
-// which is not a character to put in a filename.
+// cachePath is where one catalog's cache goes.
 func cachePath(kind, build string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir, ok := paths.CacheDir()
+	if !ok {
 		return ""
 	}
-	return filepath.Join(home, ".cache", "terrariabonker",
-		kind+"-"+strings.ReplaceAll(build, "+", "-")+".json")
+	return filepath.Join(dir, kind+"-"+fileSafe(build)+".json")
+}
+
+/*
+fileSafe is a build key as part of a filename.
+
+The "+" between version and build id goes everywhere. Windows also refuses "?" --
+which is what an undetected half of a build key reads as -- and the rest of its
+reserved set, so those go only there: Linux allows them, and changing them there
+would rename an existing user's cache for nothing.
+*/
+func fileSafe(build string) string {
+	out := strings.ReplaceAll(build, "+", "-")
+	if runtime.GOOS == "windows" {
+		out = strings.Map(func(r rune) rune {
+			if strings.ContainsRune(`<>:"/\|?*`, r) {
+				return '_'
+			}
+			return r
+		}, out)
+	}
+	return out
 }
 
 /*

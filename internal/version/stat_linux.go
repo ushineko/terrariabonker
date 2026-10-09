@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+
+	"github.com/ushineko/terrariabonker/internal/proc"
 )
 
 // inodeOf is a file's inode number, and whether the system said what it was.
@@ -28,4 +30,16 @@ func stampOf(path string) (string, error) {
 	}
 	inode, _ := inodeOf(info)
 	return fmt.Sprintf("%d:%d:%d", inode, info.ModTime().UnixNano(), info.Size()), nil
+}
+
+// mappingIsCurrent reports whether the executable the process maps is still
+// the file at path: the mapping keeps the inode it was made from, and replacing
+// the file gives the path a new one.
+func mappingIsCurrent(pid int, path string, info os.FileInfo) bool {
+	inode, ok := inodeOf(info)
+	if !ok {
+		return false
+	}
+	mapped, ok := proc.MappedInode(pid, path)
+	return ok && mapped == inode
 }

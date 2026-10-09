@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"fyne.io/fyne/v2"
+
+	"github.com/ushineko/terrariabonker/internal/paths"
 )
 
 /*
@@ -36,12 +38,12 @@ const spriteVersion = "1.4.5.8"
 // newSprites points at the cache without reading it. Nothing is loaded until a
 // cell asks for an icon.
 func newSprites() *sprites {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir, ok := paths.CacheDir()
+	if !ok {
 		return &sprites{loaded: map[int]fyne.Resource{}}
 	}
 	return &sprites{
-		dir:    filepath.Join(home, ".cache", "terrariabonker", "sprites", spriteVersion),
+		dir:    filepath.Join(dir, "sprites", spriteVersion),
 		loaded: map[int]fyne.Resource{},
 	}
 }

@@ -133,7 +133,7 @@ sudo, which a test cannot do and must not want to.
 */
 func run(t *testing.T, mem *execMem, argv ...string) (int, string, string) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	memtest.IsolateHome(t, t.TempDir())
 
 	var stdout, stderr bytes.Buffer
 	app := cli.NewApp(cli.Options{

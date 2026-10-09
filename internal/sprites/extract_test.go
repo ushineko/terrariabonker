@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/sprites"
 )
 
@@ -26,7 +27,7 @@ by then.
 // gameContent is where the game's sprites are, or the test is skipped.
 func gameContent(t *testing.T) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(realHome, ".cache", "terrariabonker", "paths.json"))
+	raw, err := os.ReadFile(filepath.Join(memtest.CacheUnder(realHome), "paths.json"))
 	if err != nil {
 		t.Skip("the game's content directory has not been learned on this machine")
 	}

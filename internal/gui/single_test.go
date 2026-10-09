@@ -3,6 +3,7 @@ package gui
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -57,6 +58,12 @@ func TestTheRefusalNamesTheOtherPanel(t *testing.T) {
 // The lock belongs in the runtime directory, not the config directory: the CLI
 // creates that one under sudo and the unprivileged window cannot write there.
 func TestTheLockLivesWhereTheUnprivilegedPanelCanWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// No uid and no sudo: the per-user temp directory is the runtime directory.
+		t.Setenv("XDG_RUNTIME_DIR", "")
+		require.Equal(t, filepath.Join(os.TempDir(), "terrariabonker-gui.lock"), lockPath())
+		return
+	}
 	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1234")
 	require.Equal(t, "/run/user/1234/terrariabonker-gui-"+strconv.Itoa(os.Getuid())+".lock",
 		lockPath())
