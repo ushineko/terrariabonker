@@ -583,6 +583,27 @@ Slice 4 — player-stat writes on the CLR (done):
       unchanged; the maintainer saw 100/470 on the health bar. `set-hp max` put both
       back to 470.
 
+Slice 5 — item-field edits on the CLR (done):
+- [x] Write features `WriteItemFields` (in place: stack, damage, use speed, pick,
+      reach, auto-reuse; the item keeps its type) and `WriteItemTemplates` (a new type
+      or a modifier, which copy from the game's pristine template). The CLR entry has
+      the first. `set-stack`, `set-item`, `fast-mining` and `long-reach` gate on it;
+      `give` needs an entry that may make every write.
+- [x] `SetItem` refuses a type change or a modifier where templates cannot be
+      written, *before* writing anything: the template block is put down at mono's
+      `CopyLo`, and at another runtime's offsets it would overwrite the item's fields.
+- [x] Live on Windows: torches in slot 19 2578 → 2000 and the Terra Blade's damage
+      85 → 200, read in every copy before and after -- the two copies of
+      "terrariabonker" changed, the five other characters did not. The maintainer saw
+      both in-game; both were put back.
+- Open: `set-item` records the edit in the profile for auto-restore, and `restore`
+  is still refused under the CLR, so on Windows an edit is recorded and not yet
+  re-applied on the next launch. `restore` moves when its cheats and templates do.
+
+Next slices:
+- [ ] Item templates on the CLR (`WriteItemTemplates`): the template scan by the
+      CLR item MethodTable, and the copy span measured from the CLR table, then
+      `give`, type changes and modifiers.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

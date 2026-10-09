@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/profile"
 	"github.com/ushineko/terrariabonker/internal/service"
 )
@@ -28,7 +29,7 @@ func (a *App) setStackCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteItemFields, force)
 			if err != nil {
 				return err
 			}
@@ -80,7 +81,7 @@ func (a *App) setItemCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteItemFields, force)
 			if err != nil {
 				return err
 			}
@@ -210,7 +211,7 @@ func (a *App) fastMiningCmd() *cobra.Command {
 		Short: "speed up every pickaxe (persistent item edit)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteItemFields, force)
 			if err != nil {
 				return err
 			}
@@ -241,7 +242,7 @@ func (a *App) longReachCmd() *cobra.Command {
 		Short: "extend placement reach on all items (Item.tileBoost)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteItemFields, force)
 			if err != nil {
 				return err
 			}

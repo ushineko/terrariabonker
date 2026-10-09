@@ -78,8 +78,8 @@ Under .NET Framework, the stat writes run and land in the CLR's fields; a write
 whose path still uses mono's numbers is refused.
 
 set-max-hp writes both caps, and the CLR stores them where clrfields says:
-statLifeMax at statLife-8, statLifeMax2 at statLife-4. set-stack is an inventory
-write, which the CLR entry does not allow yet.
+statLifeMax at statLife-8, statLifeMax2 at statLife-4. give puts a new item in a
+slot from the game's pristine template, which the CLR entry does not allow yet.
 */
 func TestUnderTheCLRTheStatWritesRunAndOthersAreRefused(t *testing.T) {
 	const runtime, life = "netfx-4.8.9345.0", 0x10000800
@@ -98,8 +98,8 @@ func TestUnderTheCLRTheStatWritesRunAndOthersAreRefused(t *testing.T) {
 	}
 
 	before := mem.Hex()
-	code, _, errOut = runUnder(t, runtime, mem, "set-stack", "0", "99")
-	require.NotZero(t, code, "an inventory write ran under the CLR entry")
+	code, _, errOut = runUnder(t, runtime, mem, "give", "2")
+	require.NotZero(t, code, "a template write ran under the CLR entry")
 	require.Contains(t, errOut, runtime)
 	require.Equal(t, before, mem.Hex(), "the refused write changed something")
 }

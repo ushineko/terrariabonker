@@ -87,6 +87,13 @@ const (
 	ReadLocalPlayer Feature = "local-player"
 	// WritePlayerStats is writing life and mana: current values and caps.
 	WritePlayerStats Feature = "player-stats"
+	// WriteItemFields is editing an item's fields in place: stack, use speed,
+	// pick power, reach, damage, auto-reuse. The item keeps its type.
+	WriteItemFields Feature = "item-fields"
+	// WriteItemTemplates is putting a different item in a slot, or a modifier on
+	// one: both copy from the game's pristine template of that item type, which
+	// needs the template scan and the span of fields to copy.
+	WriteItemTemplates Feature = "item-templates"
 )
 
 /*
@@ -294,7 +301,7 @@ var clrEntry = Entry{
 	},
 	Enabled:       true,
 	Reads:         []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory},
-	WriteFeatures: []Feature{WritePlayerStats},
+	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields},
 	Writes:        false,
 	Provenance:    "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }

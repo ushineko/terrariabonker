@@ -154,3 +154,9 @@ func (s *Service) inventoryAt(life uint32) *inventory.Inventory {
 	entry, _, _ := s.Support()
 	return inventory.NewFor(entry, s.Mem, life)
 }
+
+// CanWrite reports whether the selected entry allows a kind of write.
+func (s *Service) CanWrite(f layout.Feature) bool {
+	entry, _, _ := s.Support()
+	return entry.CanWrite(f)
+}

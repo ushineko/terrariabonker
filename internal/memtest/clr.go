@@ -180,6 +180,10 @@ const (
 	CLRItemFavorited     = 0x10C
 	CLRItemConsumable    = 0x110
 	CLRItemBuffType      = 0x0DC
+	CLRItemUseAnim       = 0x05C
+	CLRItemUseTime       = 0x060
+	CLRItemPick          = 0x06C
+	CLRItemTileBoost     = 0x078
 	// CLRItemSize is room for one planted Item object, past its last field.
 	CLRItemSize = 0x140
 )
@@ -193,6 +197,8 @@ type CLRItem struct {
 	Favorited           bool
 	Consumable          bool
 	BuffType            int32
+	Pick, UseTime       int32
+	UseAnim, TileBoost  int32
 }
 
 // PlantCLRInventory writes a player's Item[] at arr and its items from items
@@ -216,6 +222,10 @@ func (m *FakeMem) PlantCLRInventory(life, arr, items uint32, planted []CLRItem) 
 			m.PokeBytes(obj+CLRItemConsumable, []byte{1})
 		}
 		m.PokeI32(obj+CLRItemBuffType, it.BuffType)
+		m.PokeI32(obj+CLRItemPick, it.Pick)
+		m.PokeI32(obj+CLRItemUseTime, it.UseTime)
+		m.PokeI32(obj+CLRItemUseAnim, it.UseAnim)
+		m.PokeI32(obj+CLRItemTileBoost, it.TileBoost)
 	}
 	m.PlantCLRArray(arr, CLRInventorySlots, elems)
 	var b [4]byte

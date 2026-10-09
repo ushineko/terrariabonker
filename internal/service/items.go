@@ -300,6 +300,18 @@ func (s *Service) SetItem(slot int, itemType int32, edit ItemEdit) error {
 		scan.
 	*/
 	changed := !haveCur || itemType != cur.Type
+	/*
+		A new type or a modifier copies from the pristine template, at the
+		template span's offsets -- numbers only an entry that writes templates has.
+		Refused before anything is written: a template block put down at another
+		runtime's offsets overwrites the item's fields with the wrong ones.
+	*/
+	if ((changed && itemType != 0) || edit.Prefix != nil) && !s.CanWrite(layout.WriteItemTemplates) {
+		_, _, runtime := s.Support()
+		return &Error{Message: fmt.Sprintf("Terraria is running on %s, where this version of "+
+			"terrariabonker can edit an item's fields but not yet change its type or "+
+			"modifier, so nothing was changed (spec 052)", runtime)}
+	}
 	var block []byte
 	// Type zero clears the slot, and there is no template for "empty".
 	if changed && itemType != 0 {
