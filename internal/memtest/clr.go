@@ -170,6 +170,10 @@ byte) 0x12E. favorited and consumable (bools) are at 0x10C and 0x110, buffType
 0xDC -- below favorited, where under mono it is above.
 */
 const (
+	// CLRItemMT stands in for the Item class's MethodTable, the word at +0 of
+	// every item object: what tells an item from any other four bytes holding an
+	// item type.
+	CLRItemMT            = 0x1E7E0000
 	CLRInventoryFromLife = -0x39C
 	CLRInventorySlots    = 59
 	CLRItemType          = 0x050
@@ -208,6 +212,7 @@ func (m *FakeMem) PlantCLRInventory(life, arr, items uint32, planted []CLRItem) 
 	for _, it := range planted {
 		obj := items + uint32(it.Slot)*CLRItemSize //nolint:gosec // a slot index
 		elems[it.Slot] = obj
+		m.PokeI32(obj, int32(CLRItemMT))
 		m.PokeI32(obj+CLRItemType, it.Type)
 		m.PokeI32(obj+CLRItemStack, it.Stack)
 		m.PokeI32(obj+CLRItemDamage, it.Damage)
@@ -231,4 +236,17 @@ func (m *FakeMem) PlantCLRInventory(life, arr, items uint32, planted []CLRItem) 
 	var b [4]byte
 	binary.LittleEndian.PutUint32(b[:], arr)
 	m.PokeBytes(shift(life, CLRInventoryFromLife), b[:])
+}
+
+/*
+PlantCLRTemplate writes a pristine item object of a type at addr: the Item
+MethodTable, the type, and the fields given -- the game's own master copy of
+that item, which a type change or a gift copies from. Fields are by CLR offset.
+*/
+func (m *FakeMem) PlantCLRTemplate(addr uint32, itemType int32, fields map[uint32]int32) {
+	m.PokeI32(addr, int32(CLRItemMT))
+	m.PokeI32(addr+CLRItemType, itemType)
+	for off, v := range fields {
+		m.PokeI32(addr+off, v)
+	}
 }

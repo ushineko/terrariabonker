@@ -105,3 +105,58 @@ func readClrfieldsDump(t *testing.T, path string) map[string]map[string]CLRField
 	require.NotEmpty(t, out["Player"], "the measurement has no Player section")
 	return out
 }
+
+/*
+The CLR copy span holds no reference, and ends where the object does.
+
+A type change copies [CopyLo, CopyHi) out of the game's pristine template over the
+slot's item. A reference inside that span would copy one object's pointer into
+another; a span past the end of the object would copy whatever follows it on the
+heap. So: every reference field in the measured Item layout ends at or before
+CopyLo, and CopyLo is exactly the end of the last one; every field starts before
+CopyHi; and CopyHi is the object's end as the runtime states it -- the Item
+MethodTable's BaseSize, 0x148 on the live game (2026-10-08), less the 4-byte sync
+block in front of the object pointer.
+*/
+func TestTheCLRCopySpanHoldsNoReference(t *testing.T) {
+	type fieldAt struct {
+		off int
+		et  int
+	}
+	var fields []fieldAt
+	f, err := os.Open("../../docs/clr-fields-1.4.5.8.txt") //nolint:gosec // a checked-in measurement
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	inItem := false
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "== Terraria.") {
+			inItem = strings.HasPrefix(line, "== Terraria.Item:")
+			continue
+		}
+		p := strings.Fields(line)
+		if !inItem || len(p) != 4 || p[0] != "inst" {
+			continue
+		}
+		off, err := strconv.ParseUint(strings.TrimPrefix(p[1], "0x"), 16, 32)
+		require.NoError(t, err)
+		et, err := strconv.ParseUint(strings.TrimPrefix(p[2], "et=0x"), 16, 8)
+		require.NoError(t, err)
+		fields = append(fields, fieldAt{int(off), int(et)})
+	}
+	require.NotEmpty(t, fields)
+
+	// CorElementType values that are references: string, class, var, generic
+	// instance (conservatively), array, object, szarray.
+	isRef := map[int]bool{0x0E: true, 0x12: true, 0x13: true, 0x14: true, 0x15: true, 0x1C: true, 0x1D: true}
+	lastRefEnd := 0
+	for _, fa := range fields {
+		if isRef[fa.et] {
+			lastRefEnd = max(lastRefEnd, fa.off+4)
+		}
+		require.Less(t, fa.off, clrEntry.Item.CopyHi, "a field starts past the copy span's end")
+	}
+	require.Equal(t, lastRefEnd, clrEntry.Item.CopyLo, "the span does not start right after the last reference")
+	require.Equal(t, 0x148-4, clrEntry.Item.CopyHi, "the span does not end with the object")
+}

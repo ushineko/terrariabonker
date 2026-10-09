@@ -108,6 +108,10 @@ type ItemFields struct {
 	FishingPole, Bait, Prefix                              int // bytes
 	AutoReuse, Accessory, Favorited, Consumable            int // bools
 	Melee, Magic, Ranged, Summon                           int // bools
+	// CopyLo and CopyHi bound the block copied out of a pristine template when a
+	// slot's item is changed: everything past the object header and the
+	// reference fields, to the end of the object.
+	CopyLo, CopyHi int
 }
 
 /*
@@ -247,6 +251,7 @@ var monoEntry = Entry{
 		AutoReuse: ItemAutoReuse, Accessory: ItemAccessory, Favorited: ItemFavorited,
 		Consumable: ItemConsumable, Melee: ItemMelee, Magic: ItemMagic, Ranged: ItemRanged,
 		Summon: ItemSummon,
+		CopyLo: CopyLo, CopyHi: CopyHi,
 	},
 	Reads:       []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer},
 	LocalPlayer: ByAnchor,
@@ -292,6 +297,10 @@ var clrEntry = Entry{
 		AutoReuse: 0x111, Accessory: 0x10E, Favorited: 0x10C,
 		Consumable: 0x110, Melee: 0x12F, Magic: 0x130, Ranged: 0x131,
 		Summon: 0x132,
+		// Past the five reference fields at 0x04..0x17; to the end of the object,
+		// BaseSize 0x148 less the sync block (the Item MethodTable on the live
+		// game, 2026-10-08). TestTheCLRCopySpanHoldsNoReference.
+		CopyLo: 0x018, CopyHi: 0x144,
 	},
 	LocalPlayer: ByStatics,
 	Statics: MainStatics{
@@ -301,7 +310,7 @@ var clrEntry = Entry{
 	},
 	Enabled:       true,
 	Reads:         []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory},
-	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields},
+	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields, WriteItemTemplates},
 	Writes:        false,
 	Provenance:    "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }

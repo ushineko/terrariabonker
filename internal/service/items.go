@@ -99,6 +99,7 @@ func (s *Service) scanForTemplate(itemType int32) (uint32, bool) {
 	if !ok {
 		return 0, false
 	}
+	entry, _, _ := s.Support()
 	want := uint32(itemType) //nolint:gosec // an item type, as its bits
 	for _, region := range s.Mem.Regions() {
 		buf := s.Mem.Read(region.Start, region.Size())
@@ -106,7 +107,7 @@ func (s *Service) scanForTemplate(itemType int32) (uint32, bool) {
 			if binary.LittleEndian.Uint32(buf[i:]) != want {
 				continue
 			}
-			off := i - layout.ItemType
+			off := i - entry.Item.Type
 			if off < 0 || off+4 > len(buf) {
 				continue
 			}
@@ -130,8 +131,10 @@ func (s *Service) TemplateBlock(itemType int32) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
-	block := s.Mem.Read(addr+layout.CopyLo, layout.CopyHi-layout.CopyLo)
-	if len(block) != layout.CopyHi-layout.CopyLo {
+	entry, _, _ := s.Support()
+	lo, hi := entry.Item.CopyLo, entry.Item.CopyHi
+	block := s.Mem.Read(addr+uint32(lo), hi-lo) //nolint:gosec // a field offset
+	if len(block) != hi-lo {
 		return nil, false
 	}
 	return block, true
@@ -152,9 +155,10 @@ func (s *Service) PrefixBaseStats(itemType int32) map[string]float64 {
 		return out
 	}
 	addr, haveAddr := s.TemplateAddr(itemType)
+	entry, _, _ := s.Support()
 
-	for _, f := range inventory.PrefixBaseFields {
-		if i := f.Off - layout.CopyLo; i >= 0 && i+4 <= len(block) {
+	for _, f := range inventory.PrefixBaseFieldsFor(entry.Item) {
+		if i := f.Off - entry.Item.CopyLo; i >= 0 && i+4 <= len(block) {
 			out[f.Key] = decode(block[i:], f.Float)
 			continue
 		}
@@ -223,10 +227,11 @@ otherwise a bare type -- which is a name with nothing behind it, but better than
 refusing.
 */
 func (s *Service) placeItem(invs []*inventory.Inventory, slot int, itemType int32, block []byte) {
+	entry, _, _ := s.Support()
 	for _, inv := range invs {
 		addr, ok := inv.ItemAddr(slot)
 		if ok && block != nil {
-			s.Mem.Write(addr+layout.CopyLo, block)
+			s.Mem.Write(addr+uint32(entry.Item.CopyLo), block) //nolint:gosec // a field offset
 			continue
 		}
 		inv.SetType(slot, itemType)

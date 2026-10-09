@@ -597,13 +597,31 @@ Slice 5 — item-field edits on the CLR (done):
       "terrariabonker" changed, the five other characters did not. The maintainer saw
       both in-game; both were put back.
 - Open: `set-item` records the edit in the profile for auto-restore, and `restore`
-  is still refused under the CLR, so on Windows an edit is recorded and not yet
-  re-applied on the next launch. `restore` moves when its cheats and templates do.
+  is still refused under the CLR -- it re-applies cheats as well as item edits -- so
+  on Windows an edit is recorded and not yet re-applied on the next launch. The item
+  half of `restore` now has everything it needs; the cheat half is phase 4.
+
+Slice 6 — item templates on the CLR (done):
+- [x] `ItemFields.CopyLo/CopyHi`, the span a type change copies from the pristine
+      template. CLR: 0x18..0x144 -- past the five reference fields at 0x04..0x17,
+      to the end of the object (the Item MethodTable's BaseSize 0x148 on the live
+      game, less the sync block). Tested against the measured layout: no reference
+      field in the span, which starts exactly after the last one. `Item` has no
+      `Entity` fields in this build, under either runtime (its own fields start at
+      the first word after the header).
+- [x] The template scan, block copy, placement and the modifier's base stats
+      (`inventory.PrefixBaseFieldsFor`) read the entry. The CLR entry writes
+      templates; `give` gates on it.
+- [x] Live on Windows: the scan found the game's pristine copies (low in the heap,
+      prefix 0, base stats), not the player's own items. `set-item 0 757 --prefix
+      81` made a Legendary Terra Blade, damage 85 → 98; `give 2 --stack 10` put 10
+      Dirt Blocks in the first empty slot, with a placeable block's real stats (auto-
+      reuse, use time 10). The maintainer confirmed both in-game; only the live
+      character's copies changed. Restoring the gift was refused by `--expect-type`
+      once the maintainer had moved the stack -- the guard working -- and it was
+      cleared from its new slot.
 
 Next slices:
-- [ ] Item templates on the CLR (`WriteItemTemplates`): the template scan by the
-      CLR item MethodTable, and the copy span measured from the CLR table, then
-      `give`, type changes and modifiers.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

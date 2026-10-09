@@ -622,34 +622,29 @@ func knownStat(stat string) bool {
 	return false
 }
 
-/*
-PrefixBaseFields is where each field a modifier scales lives, for reading an
-item's base stats out of a pristine template block.
-
-The same list the scaling uses, in the same order, so the two cannot describe
-different sets of fields.
-
-At mono's offsets: its one reader, the service's pristine-template scan, is still a
-mono-only reader (spec 052 phase 3 step 2).
-*/
-var PrefixBaseFields = func() []struct {
+// PrefixBaseField is one field a modifier scales: its key, offset and width.
+type PrefixBaseField struct {
 	Key   string
 	Off   int
 	Float bool
-} {
-	var out []struct {
-		Key   string
-		Off   int
-		Float bool
-	}
-	for _, entry := range prefixFieldsFor(layout.Mono().Item) {
-		for _, f := range entry.fields {
-			out = append(out, struct {
-				Key   string
-				Off   int
-				Float bool
-			}{Key: f.key, Off: f.off, Float: f.float})
+}
+
+/*
+PrefixBaseFieldsFor is where each field a modifier scales lives, at an entry's
+item offsets, for reading an item's base stats out of a pristine template block.
+
+The same list the scaling uses, in the same order, so the two cannot describe
+different sets of fields.
+*/
+func PrefixBaseFieldsFor(f layout.ItemFields) []PrefixBaseField {
+	var out []PrefixBaseField
+	for _, entry := range prefixFieldsFor(f) {
+		for _, pf := range entry.fields {
+			out = append(out, PrefixBaseField{Key: pf.key, Off: pf.off, Float: pf.float})
 		}
 	}
 	return out
-}()
+}
+
+// PrefixBaseFields is PrefixBaseFieldsFor at mono's offsets.
+var PrefixBaseFields = PrefixBaseFieldsFor(layout.Mono().Item)

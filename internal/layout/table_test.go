@@ -42,7 +42,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "bd0a77d9032f1263a1bbd7082c046309bc5e9df7be8f2b943c3659a6fac80521",
+	require.Equal(t, "72aad8292aabe9e9e33f53ef99f94a2acacd57433997b74b3fe136cae9be4ef7",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -209,7 +209,9 @@ func TestTheCLRItemFieldsAreTheTable(t *testing.T) {
 		"consumable": clr.Consumable, "melee": clr.Melee, "magic": clr.Magic,
 		"ranged": clr.Ranged, "summon": clr.Summon,
 	}
-	require.Len(t, byGameName, reflectFieldCount(ItemFields{}), "an ItemFields field is not checked here")
+	// Every ItemFields field but the copy span, which is not a game field and has
+	// its own test.
+	require.Len(t, byGameName, reflectFieldCount(ItemFields{})-2, "an ItemFields field is not checked here")
 	for name, got := range byGameName {
 		want, ok := at[name]
 		require.True(t, ok, "Item.%s is not in the CLR table", name)
