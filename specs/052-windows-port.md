@@ -1,6 +1,6 @@
 # Spec 052: Native Windows port
 
-**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete; phase 2 and phase 3 step 1 (the version table and its gate) done and checked live on both platforms. Phase 3 step 2 (the CLR read path) is under way: on Windows the live player's life and mana are read, the live copy picked by Main.player's statics; every write is still refused.
+**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete; phase 2 and phase 3 step 1 (the version table and its gate) done and checked live on both platforms. Phase 3 step 2 (the CLR read path) is under way: on Windows the live player's life, mana and inventory are read, the live copy picked by Main.player's statics; every write is still refused.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -525,8 +525,36 @@ Slice 2 — ground truth on the CLR (done):
 - Equivalent mutant: the `ByStatics` guard in `FindPlayerSlot` changes no answer for
   the mono entry, whose zero statics make the search find nothing anyway. Defensive,
   recorded rather than tested.
-- [ ] Slice 3 — inventory on the CLR (`ReadInventory`): `internal/inventory` and the
-      item fields through the entry.
+Slice 3 — inventory on the CLR (done):
+- [x] `layout.Entry.Item` (26 item fields; mono from its constants, CLR from
+      `CLRFields` by name, checked) and `Player.SelectedItemFromLife` (mono −0x694;
+      the CLR has no `selectedItem` field, so 0, "unmeasured").
+- [x] `inventory.NewFor(entry, …)`; `inventory.New` is the mono inventory, unchanged.
+      The passive-potion span is computed from the entry: under mono its four fields
+      lie between favorited and buffType, under the CLR between stack and
+      consumable. `SelectedSlot` says "cannot tell" without a measurement rather than
+      read statLife. The modifier field table became a function of the item fields;
+      `PrefixBaseFields`, read only by the still-mono template scan, stays at mono's.
+- [x] The service builds every inventory through the selected entry; the CLR entry
+      reads `ReadInventory`; `status` and `inventory` show items under the CLR.
+- [x] Live on Windows: the inventory of "terrariabonker" read through the CLR
+      offsets. Slots 0–3 match, field for field, what v0.42.0 read from the same
+      character under wine-mono on Linux the same day (757 dmg 85, 1265 dmg 34,
+      3473 dmg 105, 1294 dmg 39 useTime 5 pick 210) — two runtimes, two sets of
+      offsets, one answer.
+- Equivalent under today's table: gating `inventory` on `ReadPlayer` instead of
+  `ReadInventory` changes nothing while every entry that reads one reads the other.
+
+How the mono and CLR layouts relate (measured; useful when deriving the next
+readers): field sizes are identical (the same assembly), and **the 4-byte fields keep
+their order**, shifted by an offset that grows in steps wherever mono interleaved a
+byte field or a reference that the CLR moved elsewhere. Item: fishingPole/bait
+−0x10, type −0x1C, then useAnimation through healMana (eleven fields) all −0x24,
+scale/defense −0x30, rare/shoot/shootSpeed −0x40, mana −0x48, buffType −0x54,
+crit −0x64. Projectile: type/alpha −0x14, aiStyle/timeLeft/damage −0x18. Bools and
+bytes do not follow: the CLR packs them at the end of each class (Projectile.active
+0x078 → 0x102, Item.prefix 0x15C → 0x12E). A shift predicts a candidate; only
+`clrfields` settles it.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

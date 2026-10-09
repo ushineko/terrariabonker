@@ -87,6 +87,20 @@ const (
 )
 
 /*
+ItemFields is where an Item object keeps the fields this program reads and writes,
+object-relative. Byte-wide fields (the bools, prefix, fishing and bait power) are
+noted; everything else is a 4-byte int or float.
+*/
+type ItemFields struct {
+	Type, Stack, UseTime, UseAnim, Pick, TileBoost, Damage int
+	Rare, Defense, BuffType, Mana, Crit                    int
+	Knockback, Scale, ShootSpeed                           int // floats
+	FishingPole, Bait, Prefix                              int // bytes
+	AutoReuse, Accessory, Favorited, Consumable            int // bools
+	Melee, Magic, Ranged, Summon                           int // bools
+}
+
+/*
 PlayerFields is where a player's parts are, measured from statLife: the field a
 scan recognises, so everything else is reached from it.
 */
@@ -95,6 +109,9 @@ type PlayerFields struct {
 	NameFromLife int
 	// InventoryFromLife is Player.inventory, the Item[] pointer.
 	InventoryFromLife int
+	// SelectedItemFromLife is the hotbar index the player holds, or 0 when the
+	// entry has no measurement of it (statLife itself is never that field).
+	SelectedItemFromLife int
 }
 
 // LocalPlayerBy is how an entry tells which player copy is the live one.
@@ -160,6 +177,7 @@ type Entry struct {
 	Writes bool
 	Shapes Shapes
 	Player PlayerFields
+	Item   ItemFields
 	// LocalPlayer is how ReadLocalPlayer is done, and Statics its numbers when it
 	// is ByStatics.
 	LocalPlayer LocalPlayerBy
@@ -200,7 +218,17 @@ var monoEntry = Entry{
 		ArrLenOff: ArrLenOff, ArrDataOff: ArrDataOff,
 		LifeMaxFirst: false,
 	},
-	Player:      PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff},
+	Player: PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff, SelectedItemFromLife: SelectedItemOff},
+	Item: ItemFields{
+		Type: ItemType, Stack: ItemStack, UseTime: ItemUseTime, UseAnim: ItemUseAnim,
+		Pick: ItemPick, TileBoost: ItemTileBoost, Damage: ItemDamage, Rare: ItemRare,
+		Defense: ItemDefense, BuffType: ItemBuffType, Mana: ItemMana, Crit: ItemCrit,
+		Knockback: ItemKnockback, Scale: ItemScale, ShootSpeed: ItemShootSpeed,
+		FishingPole: ItemFishingPole, Bait: ItemBait, Prefix: ItemPrefix,
+		AutoReuse: ItemAutoReuse, Accessory: ItemAccessory, Favorited: ItemFavorited,
+		Consumable: ItemConsumable, Melee: ItemMelee, Magic: ItemMagic, Ranged: ItemRanged,
+		Summon: ItemSummon,
+	},
 	Reads:       []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer},
 	LocalPlayer: ByAnchor,
 	Writes:      true,
@@ -211,7 +239,8 @@ var monoEntry = Entry{
 /*
 clrEntry is .NET Framework on native Windows, measured in spec 052 phase 0.
 
-Enabled for reading the player and which copy is live, and never for writing yet: the CLR read path
+Enabled for reading the player, which copy is live and their inventory, and never
+for writing yet: the CLR read path
 lands one feature at a time (spec 052 phase 3 step 2), and every other reader still
 uses the mono constants. A reader not in Reads must not run under this entry.
 
@@ -229,7 +258,20 @@ var clrEntry = Entry{
 		ArrLenOff: 0x04, ArrDataOff: 0x08,
 		LifeMaxFirst: true,
 	},
-	Player:      PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C},
+	Player: PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C},
+	// Item: CLRFields["Item"], by name (TestTheCLRItemFieldsAreTheTable). No
+	// SelectedItemFromLife: the CLR has no selectedItem field, only a
+	// selectedItemState struct, and which word of it is the index is unmeasured.
+	Item: ItemFields{
+		Type: 0x050, Stack: 0x064, UseTime: 0x060, UseAnim: 0x05C,
+		Pick: 0x06C, TileBoost: 0x078, Damage: 0x088, Rare: 0x0B8,
+		Defense: 0x0A4, BuffType: 0x0DC, Mana: 0x0D4, Crit: 0x0EC,
+		Knockback: 0x08C, Scale: 0x09C, ShootSpeed: 0x0C0,
+		FishingPole: 0x048, Bait: 0x04C, Prefix: 0x12E,
+		AutoReuse: 0x111, Accessory: 0x10E, Favorited: 0x10C,
+		Consumable: 0x110, Melee: 0x12F, Magic: 0x130, Ranged: 0x131,
+		Summon: 0x132,
+	},
 	LocalPlayer: ByStatics,
 	Statics: MainStatics{
 		NPCFromPlayer: -0x54, ProjectileFromPlayer: -0x48,
@@ -237,7 +279,7 @@ var clrEntry = Entry{
 		PlayerActive: 0x70E, LifeInPlayer: 0x470,
 	},
 	Enabled:    true,
-	Reads:      []Feature{ReadPlayer, ReadLocalPlayer},
+	Reads:      []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory},
 	Writes:     false,
 	Provenance: "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }

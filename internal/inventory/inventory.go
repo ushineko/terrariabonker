@@ -68,14 +68,33 @@ func (s Slot) Empty() bool { return s.Type == 0 }
 // power above zero rather than a list of item types.
 func (s Slot) IsPickaxe() bool { return s.Pick > 0 }
 
-// Inventory is one player copy's inventory.
+/*
+Inventory is one player copy's inventory, read with one version-table entry's
+numbers: where the Item[] pointer and the held slot are from statLife, the
+array's shape, and where each Item field is.
+*/
 type Inventory struct {
 	Mem  Mem
 	Life uint32
+
+	f       layout.ItemFields
+	invOff  int    // Player.inventory from statLife
+	selOff  int    // Player.selectedItem from statLife; 0 when unmeasured
+	arrData uint32 // the first element of an szarray
 }
 
-// New is the inventory of the player whose statLife is at life.
-func New(mem Mem, life uint32) *Inventory { return &Inventory{Mem: mem, Life: life} }
+// New is the inventory of the player whose statLife is at life, with the mono
+// entry's numbers: what every caller got before the version table.
+func New(mem Mem, life uint32) *Inventory { return NewFor(layout.Mono(), mem, life) }
+
+// NewFor is the inventory with an entry's numbers.
+func NewFor(e layout.Entry, mem Mem, life uint32) *Inventory {
+	return &Inventory{
+		Mem: mem, Life: life, f: e.Item,
+		invOff: e.Player.InventoryFromLife, selOff: e.Player.SelectedItemFromLife,
+		arrData: uint32(e.Shapes.ArrDataOff), //nolint:gosec // a header offset
+	}
+}
 
 // at is the address of a player field, which is usually in front of statLife.
 func (inv *Inventory) at(off int) uint32 {
@@ -85,7 +104,7 @@ func (inv *Inventory) at(off int) uint32 {
 // ArrayAddr is where the Item[] is now. Re-read every time so it self-corrects
 // when the heap moves it.
 func (inv *Inventory) ArrayAddr() (uint32, bool) {
-	ptr, ok := inv.Mem.ReadU32(inv.at(layout.InventoryPtrOff))
+	ptr, ok := inv.Mem.ReadU32(inv.at(inv.invOff))
 	return ptr, ok && ptr != 0
 }
 
@@ -96,7 +115,7 @@ func (inv *Inventory) ItemAddr(index int) (uint32, bool) {
 	if !ok {
 		return 0, false
 	}
-	addr, ok := inv.Mem.ReadU32(arr + layout.ArrDataOff + uint32(index)*4) //nolint:gosec // a slot index
+	addr, ok := inv.Mem.ReadU32(arr + inv.arrData + uint32(index)*4) //nolint:gosec // a slot index
 	return addr, ok && addr != 0
 }
 
@@ -109,23 +128,23 @@ func (inv *Inventory) ReadSlot(index int) (Slot, bool) {
 	return Slot{
 		Index:     index,
 		ItemAddr:  addr,
-		Type:      inv.i32(addr, layout.ItemType),
-		Stack:     inv.i32(addr, layout.ItemStack),
-		UseTime:   inv.i32(addr, layout.ItemUseTime),
-		UseAnim:   inv.i32(addr, layout.ItemUseAnim),
-		Pick:      inv.i32(addr, layout.ItemPick),
-		TileBoost: inv.i32(addr, layout.ItemTileBoost),
-		Damage:    inv.i32(addr, layout.ItemDamage),
-		AutoReuse: int32(inv.u8(addr, layout.ItemAutoReuse)),
-		Rare:      inv.i32(addr, layout.ItemRare),
-		Defense:   inv.i32(addr, layout.ItemDefense),
-		Prefix:    int32(inv.u8(addr, layout.ItemPrefix)),
+		Type:      inv.i32(addr, inv.f.Type),
+		Stack:     inv.i32(addr, inv.f.Stack),
+		UseTime:   inv.i32(addr, inv.f.UseTime),
+		UseAnim:   inv.i32(addr, inv.f.UseAnim),
+		Pick:      inv.i32(addr, inv.f.Pick),
+		TileBoost: inv.i32(addr, inv.f.TileBoost),
+		Damage:    inv.i32(addr, inv.f.Damage),
+		AutoReuse: int32(inv.u8(addr, inv.f.AutoReuse)),
+		Rare:      inv.i32(addr, inv.f.Rare),
+		Defense:   inv.i32(addr, inv.f.Defense),
+		Prefix:    int32(inv.u8(addr, inv.f.Prefix)),
 		Flags: Flags{
-			Accessory: inv.u8(addr, layout.ItemAccessory) != 0,
-			Melee:     inv.u8(addr, layout.ItemMelee) != 0,
-			Magic:     inv.u8(addr, layout.ItemMagic) != 0,
-			Ranged:    inv.u8(addr, layout.ItemRanged) != 0,
-			Summon:    inv.u8(addr, layout.ItemSummon) != 0,
+			Accessory: inv.u8(addr, inv.f.Accessory) != 0,
+			Melee:     inv.u8(addr, inv.f.Melee) != 0,
+			Magic:     inv.u8(addr, inv.f.Magic) != 0,
+			Ranged:    inv.u8(addr, inv.f.Ranged) != 0,
+			Summon:    inv.u8(addr, inv.f.Summon) != 0,
 		},
 	}, true
 }
@@ -171,16 +190,20 @@ func (inv *Inventory) FindType(itemType int32) []int {
 }
 
 /*
-The span of an item that the passive-potion check reads.
+potionSpan is the span of an item the passive-potion check reads: from the lowest
+of its four fields to the end of the highest.
 
-The four fields it cares about are between favorited and buffType, so one read
-per item covers all of them. Four reads would be four syscalls per slot, and
-this runs on a timer several times a second.
+One read per item covers all four. Four reads would be four syscalls per slot,
+and this runs on a timer several times a second. Under mono the four lie between
+favorited and buffType; under the CLR between stack and consumable -- so the span
+is worked out from the entry, not assumed.
 */
-const (
-	potionLo = layout.ItemFavorited
-	potionHi = layout.ItemBuffType + 4
-)
+func (inv *Inventory) potionSpan() (lo, hi int) {
+	f := inv.f
+	lo = min(f.Favorited, f.Consumable, f.Stack, f.BuffType)
+	hi = max(f.Favorited+1, f.Consumable+1, f.Stack+4, f.BuffType+4)
+	return lo, hi
+}
 
 // Potion is a favorited consumable and the buff it grants.
 type Potion struct {
@@ -202,23 +225,24 @@ func (inv *Inventory) FavoritedPotions(minStack int32) []Potion {
 	if !ok {
 		return out
 	}
+	potionLo, potionHi := inv.potionSpan()
 	for i := range layout.InventorySlots {
-		addr, ok := inv.Mem.ReadU32(arr + layout.ArrDataOff + uint32(i)*4) //nolint:gosec // a slot index
+		addr, ok := inv.Mem.ReadU32(arr + inv.arrData + uint32(i)*4) //nolint:gosec // a slot index
 		if !ok || addr == 0 {
 			continue
 		}
-		w := inv.Mem.Read(addr+potionLo, potionHi-potionLo)
+		w := inv.Mem.Read(addr+uint32(potionLo), potionHi-potionLo) //nolint:gosec // a field offset
 		if len(w) < potionHi-potionLo {
 			continue
 		}
 		// The two byte gates first, because they are the cheap ones.
-		if w[layout.ItemFavorited-potionLo] == 0 || w[layout.ItemConsumable-potionLo] == 0 {
+		if w[inv.f.Favorited-potionLo] == 0 || w[inv.f.Consumable-potionLo] == 0 {
 			continue
 		}
-		if word(w, layout.ItemStack-potionLo) < minStack {
+		if word(w, inv.f.Stack-potionLo) < minStack {
 			continue
 		}
-		if buff := word(w, layout.ItemBuffType-potionLo); buff > 0 {
+		if buff := word(w, inv.f.BuffType-potionLo); buff > 0 {
 			out = append(out, Potion{Slot: i, Buff: buff})
 		}
 	}
@@ -262,23 +286,23 @@ func (inv *Inventory) FishingGear() Gear {
 		return out
 	}
 	for i := range layout.InventorySlots {
-		addr, ok := inv.Mem.ReadU32(arr + layout.ArrDataOff + uint32(i)*4) //nolint:gosec // a slot index
+		addr, ok := inv.Mem.ReadU32(arr + inv.arrData + uint32(i)*4) //nolint:gosec // a slot index
 		if !ok || addr == 0 {
 			continue
 		}
-		w := inv.Mem.Read(addr+layout.ItemFishingPole, 8)
+		w := inv.Mem.Read(addr+uint32(inv.f.FishingPole), 8) //nolint:gosec // a field offset
 		if len(w) < 8 {
 			continue
 		}
-		if inv.i32(addr, layout.ItemType) == 0 {
+		if inv.i32(addr, inv.f.Type) == 0 {
 			continue
 		}
-		pole, bait := w[0], w[layout.ItemBait-layout.ItemFishingPole]
+		pole, bait := w[0], w[inv.f.Bait-inv.f.FishingPole]
 		if pole != 0 {
 			out.Rods = append(out.Rods, Rod{Slot: i, Power: pole})
 		}
 		if bait != 0 {
-			out.Baits = append(out.Baits, Bait{Slot: i, Power: bait, Stack: inv.i32(addr, layout.ItemStack)})
+			out.Baits = append(out.Baits, Bait{Slot: i, Power: bait, Stack: inv.i32(addr, inv.f.Stack)})
 		}
 	}
 	return out
@@ -287,7 +311,12 @@ func (inv *Inventory) FishingGear() Gear {
 // SelectedSlot is the hotbar slot the player is holding, and reports false when
 // it reads as something that is not one.
 func (inv *Inventory) SelectedSlot() (int, bool) {
-	v, ok := inv.Mem.ReadI32(inv.at(layout.SelectedItemOff))
+	// An entry with no measurement of selectedItem says 0, which is statLife
+	// itself: read, a player on 9 life or less would be holding slot 9.
+	if inv.selOff == 0 {
+		return 0, false
+	}
+	v, ok := inv.Mem.ReadI32(inv.at(inv.selOff))
 	if !ok || v < 0 || v > 9 {
 		return 0, false
 	}
@@ -351,32 +380,32 @@ func (inv *Inventory) setByte(index, off int, value byte) bool {
 
 // SetStack writes how many of the item are in the slot.
 func (inv *Inventory) SetStack(index int, value int32) bool {
-	return inv.setI32(index, layout.ItemStack, value)
+	return inv.setI32(index, inv.f.Stack, value)
 }
 
 // SetType writes which item is in the slot.
 func (inv *Inventory) SetType(index int, value int32) bool {
-	return inv.setI32(index, layout.ItemType, value)
+	return inv.setI32(index, inv.f.Type, value)
 }
 
 // SetDamage writes the item's damage.
 func (inv *Inventory) SetDamage(index int, value int32) bool {
-	return inv.setI32(index, layout.ItemDamage, value)
+	return inv.setI32(index, inv.f.Damage, value)
 }
 
 // SetPick writes the item's pickaxe power.
 func (inv *Inventory) SetPick(index int, value int32) bool {
-	return inv.setI32(index, layout.ItemPick, value)
+	return inv.setI32(index, inv.f.Pick, value)
 }
 
 // SetDefense writes the defense the item grants.
 func (inv *Inventory) SetDefense(index int, value int32) bool {
-	return inv.setI32(index, layout.ItemDefense, value)
+	return inv.setI32(index, inv.f.Defense, value)
 }
 
 // SetTileBoost writes the item's extra placement reach, in tiles.
 func (inv *Inventory) SetTileBoost(index int, value int32) bool {
-	return inv.setI32(index, layout.ItemTileBoost, value)
+	return inv.setI32(index, inv.f.TileBoost, value)
 }
 
 // SetAutoReuse turns auto-swing on or off for the item in this slot.
@@ -385,7 +414,7 @@ func (inv *Inventory) SetAutoReuse(index int, on bool) bool {
 	if on {
 		v = 1
 	}
-	return inv.setByte(index, layout.ItemAutoReuse, v)
+	return inv.setByte(index, inv.f.AutoReuse, v)
 }
 
 /*
@@ -395,7 +424,7 @@ The byte alone is only the name. The bonuses live in the item's own fields --
 see ApplyPrefixStats, which the service calls with the item's base stats.
 */
 func (inv *Inventory) SetPrefix(index int, value int32) bool {
-	return inv.setByte(index, layout.ItemPrefix, byte(value&0xFF)) //nolint:gosec // a byte field
+	return inv.setByte(index, inv.f.Prefix, byte(value&0xFF)) //nolint:gosec // a byte field
 }
 
 /*
@@ -408,7 +437,7 @@ func (inv *Inventory) SetFishingPower(index int, value int32) bool {
 	if value < 0 || value > 255 {
 		return false
 	}
-	return inv.setByte(index, layout.ItemFishingPole, byte(value)) //nolint:gosec // range-checked above
+	return inv.setByte(index, inv.f.FishingPole, byte(value)) //nolint:gosec // range-checked above
 }
 
 /*
@@ -422,8 +451,8 @@ func (inv *Inventory) SetUseSpeed(index int, useTime, useAnim int32) bool {
 	if !ok {
 		return false
 	}
-	written := inv.Mem.WriteI32(addr+layout.ItemUseTime, useTime)
-	return inv.Mem.WriteI32(addr+layout.ItemUseAnim, useAnim) && written
+	written := inv.Mem.WriteI32(addr+uint32(inv.f.UseTime), useTime)        //nolint:gosec // a field offset
+	return inv.Mem.WriteI32(addr+uint32(inv.f.UseAnim), useAnim) && written //nolint:gosec // a field offset
 }
 
 /*
@@ -481,22 +510,31 @@ type prefixField struct {
 	float bool
 }
 
-// prefixFields is each modifier stat and the fields it scales. The order is the
-// Python's, which is the order the writes happen in.
-var prefixFields = []struct {
+// prefixStat is one modifier stat and the fields it scales.
+type prefixStat struct {
 	stat   string
 	fields []prefixField
-}{
-	{"damage", []prefixField{{"damage", layout.ItemDamage, false}}},
-	{"knockback", []prefixField{{"knockback", layout.ItemKnockback, true}}},
-	{"usetime", []prefixField{
-		{"useanim", layout.ItemUseAnim, false},
-		{"usetime", layout.ItemUseTime, false},
-	}},
-	{"scale", []prefixField{{"scale", layout.ItemScale, true}}},
-	{"shootspeed", []prefixField{{"shootspeed", layout.ItemShootSpeed, true}}},
-	{"mana", []prefixField{{"mana", layout.ItemMana, false}}},
-	{"crit", []prefixField{{"crit", layout.ItemCrit, false}}},
+}
+
+// prefixFields is each modifier stat and the fields it scales, at this
+// inventory's offsets.
+func (inv *Inventory) prefixFields() []prefixStat { return prefixFieldsFor(inv.f) }
+
+// prefixFieldsFor is each modifier stat and the fields it scales, at f's offsets.
+// The order is the Python's, which is the order the writes happen in.
+func prefixFieldsFor(f layout.ItemFields) []prefixStat {
+	return []prefixStat{
+		{"damage", []prefixField{{"damage", f.Damage, false}}},
+		{"knockback", []prefixField{{"knockback", f.Knockback, true}}},
+		{"usetime", []prefixField{
+			{"useanim", f.UseAnim, false},
+			{"usetime", f.UseTime, false},
+		}},
+		{"scale", []prefixField{{"scale", f.Scale, true}}},
+		{"shootspeed", []prefixField{{"shootspeed", f.ShootSpeed, true}}},
+		{"mana", []prefixField{{"mana", f.Mana, false}}},
+		{"crit", []prefixField{{"crit", f.Crit, false}}},
+	}
 }
 
 // additive is the bonuses the game adds to a field rather than multiplying into
@@ -541,7 +579,7 @@ func (inv *Inventory) ApplyPrefixStats(index int, mults, base map[string]float64
 			skipped[stat] = true
 		}
 	}
-	for _, entry := range prefixFields {
+	for _, entry := range inv.prefixFields() {
 		add := additive[entry.stat]
 		neutral := 1.0
 		if add {
@@ -576,7 +614,7 @@ func (inv *Inventory) ApplyPrefixStats(index int, mults, base map[string]float64
 
 // knownStat reports whether a modifier stat has a field to write.
 func knownStat(stat string) bool {
-	for _, entry := range prefixFields {
+	for _, entry := range prefixFieldsFor(layout.ItemFields{}) { // names only; offsets unused
 		if entry.stat == stat {
 			return true
 		}
@@ -590,6 +628,9 @@ item's base stats out of a pristine template block.
 
 The same list the scaling uses, in the same order, so the two cannot describe
 different sets of fields.
+
+At mono's offsets: its one reader, the service's pristine-template scan, is still a
+mono-only reader (spec 052 phase 3 step 2).
 */
 var PrefixBaseFields = func() []struct {
 	Key   string
@@ -601,7 +642,7 @@ var PrefixBaseFields = func() []struct {
 		Off   int
 		Float bool
 	}
-	for _, entry := range prefixFields {
+	for _, entry := range prefixFieldsFor(layout.Mono().Item) {
 		for _, f := range entry.fields {
 			out = append(out, struct {
 				Key   string

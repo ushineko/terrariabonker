@@ -305,28 +305,30 @@ func TestNoDecisionIsRecordedUnderAnUnsupportedRuntime(t *testing.T) {
 }
 
 /*
-Under the CLR entry the service finds a CLR player and reads life and mana, and
-reads nothing it has no numbers for.
+Under the CLR entry the service reads a CLR player and their inventory, with the
+CLR's numbers.
 
-The game is planted the CLR way: the caps in CLR order and the name at the CLR
-offset, which the mono locator does not find (internal/locate's own tests).
-Inventory is left out of the snapshot rather than read through mono offsets,
-and the inventory-count fallback for picking a copy is skipped for the same
-reason.
+The game is planted the CLR way: the caps in CLR order, the name and the Item[]
+at the CLR offsets, item fields where the CLR keeps them. Something readable is
+also planted where mono keeps the inventory pointer -- a full mono-shaped
+inventory, as real memory has other data there -- so a reader using mono's
+numbers would report items this player does not have. Only the two CLR items may
+appear, with their fields read correctly.
 */
-func TestTheCLREntryReadsTheCLRPlayerAndNothingMore(t *testing.T) {
-	const base, size = 0x10000000, 0x10000
+func TestTheCLREntryReadsTheCLRPlayerAndInventory(t *testing.T) {
+	const base, size = 0x10000000, 0x20000
 	mem := &execMem{memtest.New(base, size)}
 	mem.PlantCLRString(base+0x40, "terrariabonker")
 	mem.PlantCLRPlayer(base+0x800, []int32{400, 420, 390, 200, 200, 220}, base+0x40)
-	// Something readable where mono keeps the inventory pointer, as real memory
-	// has: read through mono's numbers it looks like a full inventory. A
-	// snapshot that read it would print items this player does not have.
 	plantInventory(mem.FakeMem, base+0x800, base+0x4000, base+0x5000, liveItemsImage)
+	mem.PlantCLRInventory(base+0x800, base+0xC000, base+0xD000, []memtest.CLRItem{
+		{Slot: 0, Type: 757, Stack: 1, Damage: 85, Prefix: 81, AutoReuse: true},
+		{Slot: 3, Type: 2, Stack: 250},
+	})
 	svc := service.New(mem, -1).WithRuntime("netfx-4.8.9345.0")
 
 	require.True(t, svc.CanRead(layout.ReadPlayer))
-	require.False(t, svc.CanRead(layout.ReadInventory))
+	require.True(t, svc.CanRead(layout.ReadInventory))
 	require.True(t, svc.CanRead(layout.ReadLocalPlayer), "the CLR entry finds the live copy through the statics")
 
 	snap := svc.Snapshot(true)
@@ -335,7 +337,22 @@ func TestTheCLREntryReadsTheCLRPlayerAndNothingMore(t *testing.T) {
 	require.Equal(t, "terrariabonker", snap.Player.Name)
 	require.EqualValues(t, 390, snap.Player.HP)
 	require.EqualValues(t, 400, snap.Player.MaxHP, "the permanent cap, which the CLR stores first")
-	require.Empty(t, snap.Inventory, "the inventory was read with another runtime's numbers")
+
+	var held []service.ItemSlot
+	for _, s := range snap.Inventory {
+		if s.Type != 0 {
+			held = append(held, s)
+		}
+	}
+	require.Len(t, held, 2, "items other than the two planted the CLR way were read: %+v", held)
+	require.Equal(t, 0, held[0].Slot)
+	require.EqualValues(t, 757, held[0].Type)
+	require.EqualValues(t, 85, held[0].Damage)
+	require.EqualValues(t, 81, held[0].Prefix)
+	require.NotZero(t, held[0].AutoReuse)
+	require.Equal(t, 3, held[1].Slot)
+	require.EqualValues(t, 2, held[1].Type)
+	require.EqualValues(t, 250, held[1].Stack)
 
 	// The same memory under the mono entry finds no one: the fail-safe.
 	require.Zero(t, service.New(mem, -1).WithRuntime("wine-mono-11.3.0").Snapshot(true).Copies)

@@ -236,7 +236,7 @@ func (s *Service) selectLive(blocks []locate.Block) locate.Block {
 		return best
 	}
 	for _, b := range blocks {
-		if n := inventory.New(s.Mem, b.LifeAddr).NonemptyCount(); n > most {
+		if n := s.inventoryAt(b.LifeAddr).NonemptyCount(); n > most {
 			best, most = b, n
 		}
 	}
@@ -271,7 +271,7 @@ func (s *Service) liveInventory() (*inventory.Inventory, error) {
 	if err != nil {
 		return nil, err
 	}
-	return inventory.New(s.Mem, live.LifeAddr), nil
+	return s.inventoryAt(live.LifeAddr), nil
 }
 
 /*
@@ -289,7 +289,7 @@ func (s *Service) allInventories() ([]*inventory.Inventory, error) {
 	}
 	out := make([]*inventory.Inventory, 0, len(blocks))
 	for _, b := range blocks {
-		out = append(out, inventory.New(s.Mem, b.LifeAddr))
+		out = append(out, s.inventoryAt(b.LifeAddr))
 	}
 	return out, nil
 }
@@ -349,7 +349,7 @@ func (s *Service) Snapshot(withInventory bool) Snapshot {
 		Mana: live.StatMana, MaxMana: live.StatManaMax,
 	}
 	if withInventory && s.CanRead(layout.ReadInventory) {
-		out.Inventory = toSlots(inventory.New(s.Mem, live.LifeAddr).Slots())
+		out.Inventory = toSlots(s.inventoryAt(live.LifeAddr).Slots())
 	}
 	return out
 }

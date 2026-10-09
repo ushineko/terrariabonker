@@ -33,34 +33,42 @@ func runUnder(t *testing.T, runtime string, mem *execMem, argv ...string) (int, 
 	return code, stdout.String(), stderr.String()
 }
 
-// clrGame is a game with one player planted the CLR way.
+// clrGame is a game with one player and two items planted the CLR way.
 func clrGame() *execMem {
-	const base, size = 0x10000000, 0x4000
+	const base, size = 0x10000000, 0x20000
 	mem := &execMem{memtest.New(base, size)}
 	mem.PlantCLRString(base+0x40, "terrariabonker")
 	mem.PlantCLRPlayer(base+0x800, []int32{400, 420, 390, 200, 200, 220}, base+0x40)
+	mem.PlantCLRInventory(base+0x800, base+0xC000, base+0xD000, []memtest.CLRItem{
+		{Slot: 0, Type: 757, Stack: 1, Damage: 85, AutoReuse: true},
+		{Slot: 3, Type: 2, Stack: 250},
+	})
 	return mem
 }
 
 /*
-Under .NET Framework, status reads the player, and reads the entry cannot do are
-refused by name rather than run with another runtime's numbers.
+Under .NET Framework, status and inventory read the player and their items with
+the CLR's numbers, and reads the entry cannot do are refused by name rather than
+run with another runtime's numbers.
 
-status shows life and mana and no inventory; inventory and the item catalog say
-which runtime and what cannot be read. A write is refused by the build gate,
+The item catalog walks many structures (NPCs, templates) the CLR entry has no
+readers for yet, so it is still refused. A write is refused by the build gate,
 which internal/service tests.
 */
-func TestUnderTheCLROnlyThePlayerIsRead(t *testing.T) {
+func TestUnderTheCLRThePlayerAndInventoryAreRead(t *testing.T) {
 	const runtime = "netfx-4.8.9345.0"
 
 	code, out, errOut := runUnder(t, runtime, clrGame(), "status")
 	require.Zero(t, code, errOut)
 	require.Contains(t, out, `"terrariabonker": HP 390/400  Mana 200/200`)
-	require.NotContains(t, out, "slot", "status printed inventory read with mono offsets")
+	require.Contains(t, out, "slot  0: type=757   stack=1 dmg=85 auto")
+	require.Contains(t, out, "slot  3: type=2     stack=250")
 
-	for _, argv := range [][]string{{"inventory"}, {"compendium"}} {
-		code, _, errOut := runUnder(t, runtime, clrGame(), argv...)
-		require.NotZero(t, code, "%v ran under the CLR entry", argv)
-		require.Contains(t, errOut, runtime, "%v", argv)
-	}
+	code, out, errOut = runUnder(t, runtime, clrGame(), "inventory")
+	require.Zero(t, code, errOut)
+	require.Contains(t, out, "type=757")
+
+	code, _, errOut = runUnder(t, runtime, clrGame(), "compendium")
+	require.NotZero(t, code, "the catalog ran under the CLR entry")
+	require.Contains(t, errOut, runtime)
 }

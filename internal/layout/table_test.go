@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,7 +40,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "233168c14e01921a12090552218174ddf1905915f23daf0de8adffb2de03c868",
+	require.Equal(t, "c306c0e4693ef59a8956fa2c1d9c0ee5bf64d77052085e98c19d80e2f8826be7",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -121,9 +122,9 @@ func TestTheConfirmedRuntimeIsALedgerNotAGate(t *testing.T) {
 /*
 What each entry may read and whether it may write.
 
-The CLR entry reads the player and nothing else, and writes nothing: its
-inventory and every other reader still use the mono constants, and a write with
-a wrong number lands in a live save. The zero entry -- what an unsupported
+The CLR entry reads the player, which copy is live and the inventory, and writes
+nothing: every other reader still uses the mono constants, and a write with a
+wrong number lands in a live save. The zero entry -- what an unsupported
 runtime gets -- can do neither.
 */
 func TestReadsAndWritesAreSeparate(t *testing.T) {
@@ -132,7 +133,8 @@ func TestReadsAndWritesAreSeparate(t *testing.T) {
 	require.True(t, monoEntry.Writes)
 
 	require.True(t, clrEntry.CanRead(ReadPlayer))
-	require.False(t, clrEntry.CanRead(ReadInventory), "the CLR inventory reader does not exist yet")
+	require.True(t, clrEntry.CanRead(ReadInventory))
+	require.True(t, clrEntry.CanRead(ReadLocalPlayer))
 	require.False(t, clrEntry.Writes, "the CLR entry may write before its write paths exist")
 
 	var none Entry
@@ -155,7 +157,7 @@ func TestTheCLRPlayerFieldsAreTheTable(t *testing.T) {
 
 // The mono player fields are the mono constants they always were.
 func TestTheMonoPlayerFieldsAreTheConstants(t *testing.T) {
-	require.Equal(t, PlayerFields{NameFromLife: -0x6C0, InventoryFromLife: -0x664}, monoEntry.Player)
+	require.Equal(t, PlayerFields{NameFromLife: -0x6C0, InventoryFromLife: -0x664, SelectedItemFromLife: -0x694}, monoEntry.Player)
 }
 
 /*
@@ -181,3 +183,38 @@ func TestTheCLRStaticsAreTheTable(t *testing.T) {
 	require.Equal(t, [3]uint32{256, 201, 1001}, [3]uint32{s.PlayerLen, s.NPCLen, s.ProjectileLen})
 	require.Equal(t, ByAnchor, monoEntry.LocalPlayer)
 }
+
+/*
+The CLR item fields are the CLR table's, by name, and the mono ones are the
+mono constants. Each struct field is mapped to the name the game declares it
+under, and a field missing from the map fails rather than going unchecked.
+*/
+func TestTheCLRItemFieldsAreTheTable(t *testing.T) {
+	at := map[string]int{}
+	for _, f := range CLRFields["Item"] {
+		at[f.Name] = int(f.Offset)
+	}
+	clr := clrEntry.Item
+	byGameName := map[string]int{
+		"type": clr.Type, "stack": clr.Stack, "useTime": clr.UseTime, "useAnimation": clr.UseAnim,
+		"pick": clr.Pick, "tileBoost": clr.TileBoost, "damage": clr.Damage, "rare": clr.Rare,
+		"defense": clr.Defense, "buffType": clr.BuffType, "mana": clr.Mana, "crit": clr.Crit,
+		"knockBack": clr.Knockback, "scale": clr.Scale, "shootSpeed": clr.ShootSpeed,
+		"fishingPole": clr.FishingPole, "bait": clr.Bait, "prefix": clr.Prefix,
+		"autoReuse": clr.AutoReuse, "accessory": clr.Accessory, "favorited": clr.Favorited,
+		"consumable": clr.Consumable, "melee": clr.Melee, "magic": clr.Magic,
+		"ranged": clr.Ranged, "summon": clr.Summon,
+	}
+	require.Len(t, byGameName, reflectFieldCount(ItemFields{}), "an ItemFields field is not checked here")
+	for name, got := range byGameName {
+		want, ok := at[name]
+		require.True(t, ok, "Item.%s is not in the CLR table", name)
+		require.Equal(t, want, got, "Item.%s", name)
+	}
+	require.Zero(t, clrEntry.Player.SelectedItemFromLife, "the CLR selected-item field is unmeasured")
+	require.Equal(t, SelectedItemOff, monoEntry.Player.SelectedItemFromLife)
+	require.Equal(t, ItemType, monoEntry.Item.Type)
+	require.Equal(t, ItemSummon, monoEntry.Item.Summon)
+}
+
+func reflectFieldCount(v any) int { return reflect.TypeOf(v).NumField() }

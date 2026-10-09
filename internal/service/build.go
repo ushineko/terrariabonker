@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 
+	"github.com/ushineko/terrariabonker/internal/inventory"
 	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/locate"
 	"github.com/ushineko/terrariabonker/internal/version"
@@ -128,4 +129,11 @@ func (s *Service) locator() locate.Locator {
 func (s *Service) WithRuntime(runtime string) *Service {
 	s.runtime = runtime
 	return s
+}
+
+// inventoryAt is the inventory of the player copy whose statLife is at life, read
+// with the selected entry's numbers.
+func (s *Service) inventoryAt(life uint32) *inventory.Inventory {
+	entry, _, _ := s.Support()
+	return inventory.NewFor(entry, s.Mem, life)
 }

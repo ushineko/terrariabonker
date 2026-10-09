@@ -161,3 +161,64 @@ func (w CLRWorld) Elements(live uint32) []uint32 {
 	elems[0] = live
 	return elems
 }
+
+/*
+A player's inventory, the CLR way (cmd/clrfields, 1.4.5.8): Player.inventory is
+0x39C below statLife (0x0D4 against 0x470), an Item[] of 59. In an Item object,
+type is at 0x50, damage 0x88, stack 0x64, autoReuse (a bool) 0x111 and prefix (a
+byte) 0x12E. favorited and consumable (bools) are at 0x10C and 0x110, buffType
+0xDC -- below favorited, where under mono it is above.
+*/
+const (
+	CLRInventoryFromLife = -0x39C
+	CLRInventorySlots    = 59
+	CLRItemType          = 0x050
+	CLRItemStack         = 0x064
+	CLRItemDamage        = 0x088
+	CLRItemAutoReuse     = 0x111
+	CLRItemPrefix        = 0x12E
+	CLRItemFavorited     = 0x10C
+	CLRItemConsumable    = 0x110
+	CLRItemBuffType      = 0x0DC
+	// CLRItemSize is room for one planted Item object, past its last field.
+	CLRItemSize = 0x140
+)
+
+// CLRItem is one planted inventory item.
+type CLRItem struct {
+	Slot                int
+	Type, Stack, Damage int32
+	Prefix              byte
+	AutoReuse           bool
+	Favorited           bool
+	Consumable          bool
+	BuffType            int32
+}
+
+// PlantCLRInventory writes a player's Item[] at arr and its items from items
+// onward, one CLRItemSize apart by slot, and points the player at it.
+func (m *FakeMem) PlantCLRInventory(life, arr, items uint32, planted []CLRItem) {
+	elems := make([]uint32, CLRInventorySlots)
+	for _, it := range planted {
+		obj := items + uint32(it.Slot)*CLRItemSize //nolint:gosec // a slot index
+		elems[it.Slot] = obj
+		m.PokeI32(obj+CLRItemType, it.Type)
+		m.PokeI32(obj+CLRItemStack, it.Stack)
+		m.PokeI32(obj+CLRItemDamage, it.Damage)
+		m.PokeBytes(obj+CLRItemPrefix, []byte{it.Prefix})
+		if it.AutoReuse {
+			m.PokeBytes(obj+CLRItemAutoReuse, []byte{1})
+		}
+		if it.Favorited {
+			m.PokeBytes(obj+CLRItemFavorited, []byte{1})
+		}
+		if it.Consumable {
+			m.PokeBytes(obj+CLRItemConsumable, []byte{1})
+		}
+		m.PokeI32(obj+CLRItemBuffType, it.BuffType)
+	}
+	m.PlantCLRArray(arr, CLRInventorySlots, elems)
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], arr)
+	m.PokeBytes(shift(life, CLRInventoryFromLife), b[:])
+}
