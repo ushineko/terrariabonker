@@ -36,12 +36,33 @@ var (
 	}
 )
 
+/*
+clrGetRanges is GetRanges from its entry to its exit 0xF1 in, the code between
+stood in for by nops; clrSmartCursor is SmartCursorLookup from the endY store
+through the in-reach test.
+*/
+var (
+	clrGetRanges = append(append([]byte{
+		0x55, 0x8B, 0xEC, 0x57, 0x56, 0x53, 0x83, 0xEC, 0x08, 0x8B, 0xF1, 0x8B, 0xFA,
+		0xA1, 0, 0, 0, 0, 0x0F, 0xAF, 0x06, 0x89, 0x07,
+		0xA1, 0, 0, 0, 0, 0x0F, 0xAF, 0x06, 0x8B, 0x55, 0x08, 0x89, 0x02},
+		bytes.Repeat([]byte{0x90}, 0xF1-36)...),
+		0x8D, 0x65, 0xF4, 0x5B, 0x5E, 0x5F, 0x5D, 0xC2, 0x04, 0x00)
+	clrSmartCursor = []byte{
+		0x89, 0x43, 0x20, 0x83, 0x7D, 0xC4, 0x00, 0x74, 0x28,
+		0x8B, 0x43, 0x0C, 0x3B, 0x43, 0x14, 0x7C, 0x20, 0x8B, 0x43, 0x0C, 0x3B, 0x43, 0x18, 0x7F, 0x18,
+		0x8B, 0x43, 0x10, 0x3B, 0x43, 0x1C, 0x7C, 0x10, 0x8B, 0x43, 0x10, 0x3B, 0x43, 0x20, 0x7F, 0x08,
+	}
+)
+
 const (
 	clrGrab   = clrCode + 0x300
 	clrSpawn  = clrCode + 0x380
 	clrDropA  = clrCode + 0x400
 	clrDropB  = clrCode + 0x480
-	clrHookTo = clrCode + 0x500
+	clrRanges = clrCode + 0x500
+	clrSmart  = clrCode + 0x600
+	clrHookTo = clrCode + 0x700
 )
 
 // clrStubbed is the CLR coder with the three hooks' code planted, and memory
@@ -54,6 +75,8 @@ func clrStubbed() *execMem {
 	mem.PokeBytes(clrSpawn, clrSpawnRateTail)
 	mem.PokeBytes(clrDropA, clrTryDrop(0x0C))
 	mem.PokeBytes(clrDropB, clrTryDrop(0x10))
+	mem.PokeBytes(clrRanges, clrGetRanges)
+	mem.PokeBytes(clrSmart, clrSmartCursor)
 	return mem
 }
 
@@ -78,7 +101,8 @@ into every twin. Turning them off puts every site back.
 func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 	const runtime = "netfx-4.8.9345.0"
 	mem := clrStubbed()
-	for _, on := range [][]string{{"pickup", "5"}, {"spawn_rate", "0"}, {"loot", "50"}} {
+	for _, on := range [][]string{{"pickup", "5"}, {"spawn_rate", "0"}, {"loot", "50"},
+		{"tool_reach", "30"}, {"smart_cursor", "20"}} {
 		code, _, errOut := runUnder(t, runtime, mem, "patch", "enable", on[0], "--value", on[1])
 		require.Zero(t, code, errOut)
 	}
@@ -99,7 +123,17 @@ func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 		require.Equal(t, drop+11, home)
 	}
 
-	for _, off := range []string{"pickup", "spawn_rate", "loot"} {
+	body, home = stubAt(t, mem, clrRanges+0xF1, 20)
+	require.Equal(t, []byte{0xC7, 0x07, 30, 0, 0, 0, 0x8B, 0x45, 0x08, 0xC7, 0x00, 30, 0, 0, 0,
+		0x8D, 0x65, 0xF4, 0x5B, 0x5E}, body, "x through edi, y through [ebp+8], then the epilogue")
+	require.Equal(t, uint32(clrRanges+0xF1+5), home)
+
+	smart := patchBody(t, "smart_cursor", 20)
+	body, home = stubAt(t, mem, clrSmart, len(smart))
+	require.Equal(t, smart, body)
+	require.Equal(t, uint32(clrSmart+7), home, "back to the jz after the displaced compare")
+
+	for _, off := range []string{"pickup", "spawn_rate", "loot", "tool_reach", "smart_cursor"} {
 		code, _, errOut := runUnder(t, runtime, mem, "patch", "disable", off)
 		require.Zero(t, code, errOut)
 	}
@@ -107,4 +141,29 @@ func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 	require.Equal(t, clrSpawnRateTail, mem.Read(clrSpawn, len(clrSpawnRateTail)))
 	require.Equal(t, clrTryDrop(0x0C), mem.Read(clrDropA, len(clrTryDrop(0x0C))))
 	require.Equal(t, clrTryDrop(0x10), mem.Read(clrDropB, len(clrTryDrop(0x10))))
+	require.Equal(t, clrGetRanges, mem.Read(clrRanges, len(clrGetRanges)))
+	require.Equal(t, clrSmartCursor, mem.Read(clrSmart, len(clrSmartCursor)))
+}
+
+/*
+patchBody is the smart-cursor stub as the CLR set builds it, from the parts this
+test can state: the displaced store first, the CLR compare last, and between them
+the two axis clamps on ebx -- each mov eax,[ebx+start]; add eax,[ebx+end]; sar;
+mov ecx,[ebx+target]... with n in both immediates.
+*/
+func patchBody(t *testing.T, _ string, n int32) []byte {
+	t.Helper()
+	imm := binary.LittleEndian.AppendUint32(nil, uint32(n)) //nolint:gosec // a small value
+	axis := func(target, start, end byte) []byte {
+		out := []byte{0x8B, 0x43, start, 0x03, 0x43, end, 0xD1, 0xF8, 0x8B, 0x4B, target,
+			0x3B, 0xC1, 0x7E, 0x01, 0x91, 0x2D}
+		out = append(out, imm...)
+		out = append(append(out, 0x81, 0xC1), imm...)
+		return append(out, 0x3B, 0x43, start, 0x7E, 0x03, 0x89, 0x43, start,
+			0x3B, 0x4B, end, 0x7D, 0x03, 0x89, 0x4B, end)
+	}
+	out := []byte{0x89, 0x43, 0x20}
+	out = append(out, axis(0x0C, 0x14, 0x18)...)
+	out = append(out, axis(0x10, 0x1C, 0x20)...)
+	return append(out, 0x83, 0x7D, 0xC4, 0x00)
 }

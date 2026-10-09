@@ -174,16 +174,38 @@ SmartCursorUsageInfo, and eax and ecx are dead because the following code reload
 both. The displaced `test ebx,ebx` is reproduced *last*, so the conditional jump
 after the jump home sees the flags it expects.
 */
-func ShrinkSmartCursor(n int32) []byte {
+func ShrinkSmartCursor(n int32) []byte { return monoSmartCursor.shrink(n) }
+
+/*
+smartCursorBox is where one runtime's SmartCursorLookup keeps the search box at
+the hook: the register holding the SmartCursorUsageInfo, the byte offsets of the
+cursor and the box's four edges in it, and the displaced instructions, reproduced
+before and after the clamp. The clamp itself is the same under every runtime.
+*/
+type smartCursorBox struct {
+	reg                                          byte // ModRM r/m of the register: esi 6, ebx 3
+	targetX, targetY, startX, endX, startY, endY byte
+	first, last                                  []byte
+}
+
+// monoSmartCursor is mono's: the usage info in esi, the box at 0x30..0x3C.
+var monoSmartCursor = smartCursorBox{
+	reg: 6, targetX: 0x28, targetY: 0x2C, startX: 0x30, endX: 0x34, startY: 0x38, endY: 0x3C,
+	first: []byte{0x89, 0x46, 0x3C}, // mov [esi+3C],eax -- the displaced store
+	last:  []byte{0x85, 0xDB},       // test ebx,ebx -- displaced, last, for the flags
+}
+
+func (b smartCursorBox) shrink(n int32) []byte {
 	n = max32(n, 1)
+	eax, ecx := 0x40|b.reg, 0x48|b.reg // [reg+disp8] with eax or ecx
 
 	// axis is one dimension of the box: the cursor field, and the pair of box
 	// fields it is clamped against.
 	axis := func(target, start, end byte) []byte {
-		out := []byte{0x8B, 0x46, start} // mov eax,[esi+start]
-		out = append(out, 0x03, 0x46, end)
+		out := []byte{0x8B, eax, start} // mov eax,[reg+start]
+		out = append(out, 0x03, eax, end)
 		out = append(out, 0xD1, 0xF8) // sar eax,1 -- the player tile
-		out = append(out, 0x8B, 0x4E, target)
+		out = append(out, 0x8B, ecx, target)
 		out = append(out, 0x3B, 0xC1) // cmp eax,ecx
 		out = append(out, 0x7E, 0x01) // jle +1
 		out = append(out, 0x91)       // xchg eax,ecx -- eax is the lower
@@ -191,18 +213,18 @@ func ShrinkSmartCursor(n int32) []byte {
 		out = append(out, i32(n)...)
 		out = append(out, 0x81, 0xC1) // add ecx,n
 		out = append(out, i32(n)...)
-		out = append(out, 0x3B, 0x46, start)
+		out = append(out, 0x3B, eax, start)
 		out = append(out, 0x7E, 0x03) // keep the start when it is already tighter
-		out = append(out, 0x89, 0x46, start)
-		out = append(out, 0x3B, 0x4E, end)
+		out = append(out, 0x89, eax, start)
+		out = append(out, 0x3B, ecx, end)
 		out = append(out, 0x7D, 0x03) // keep the end when it is already tighter
-		return append(out, 0x89, 0x4E, end)
+		return append(out, 0x89, ecx, end)
 	}
 
-	out := []byte{0x89, 0x46, 0x3C} // the displaced store, reproduced first
-	out = append(out, axis(0x28, 0x30, 0x34)...)
-	out = append(out, axis(0x2C, 0x38, 0x3C)...)
-	return append(out, 0x85, 0xDB) // test ebx,ebx -- displaced, last, for the flags
+	out := append([]byte{}, b.first...)
+	out = append(out, axis(b.targetX, b.startX, b.endX)...)
+	out = append(out, axis(b.targetY, b.startY, b.endY)...)
+	return append(out, b.last...)
 }
 
 // Injections is every cheat that needs a stub.

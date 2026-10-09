@@ -704,9 +704,19 @@ Slice 9 — the CLR injection set; pickup, spawn rate and the drop floor:
       disabled, and every site (the four twins included) read back as its original
       instruction.
 
+Slice 10 — tool reach and the smart cursor clamp on the CLR:
+- [x] tool_reach: `GetRanges`, reached through `GetTileRegion`'s direct call; hooked
+      at its exit, x through edi and y through its stack argument
+      (`ForceXYOutOnStack`).
+- [x] smart_cursor: `SmartCursorLookup`, found as the one caller passing
+      `SmartCursorUsageInfo`'s four box fields to `GetTileRegion`; hooked after the
+      world-edge clamps. The clamp body is one builder over register and offsets
+      (`smartCursorBox`); mono's output is pinned by digest, unchanged.
+- [x] Live on Windows (2026-10-09): both confirmed in play by the maintainer;
+      disabled, and both sites read back as their original instructions.
+
 Next slices:
-- [ ] The remaining stubs under the CLR: tool_reach, smart_cursor, vanity_accs and
-      inventory_accs; then teleport, auto_use and ore_extract, which call into the
+- [ ] The remaining stubs under the CLR: vanity_accs and inventory_accs; then teleport, auto_use and ore_extract, which call into the
       game or carry state the mono code builds from mono-only locators.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.

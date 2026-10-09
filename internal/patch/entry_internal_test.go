@@ -121,3 +121,23 @@ func TestASiteHoldsItsOriginalOrItsPatch(t *testing.T) {
 	require.False(t, holds(mining, []byte{0x90, 0x90, 0x90, 0x90, 0x90, 0x90}))
 	require.False(t, holds(mining, mining.Orig[:4]), "short read")
 }
+
+/*
+Mono's smart-cursor body is what it was before it was generalised over register
+and offsets (digest of its output for eight values, recorded 2026-10-09 from the
+code as it stood), and the CLR's differs from it only in register, offsets and
+displaced bytes: two bytes longer for every value, with the CLR's at each end.
+*/
+func TestTheSmartCursorBodies(t *testing.T) {
+	var s string
+	for _, n := range []int32{-1, 0, 1, 3, 20, 127, 128, 100000} {
+		s += fmt.Sprintf("% X\n", ShrinkSmartCursor(n))
+		require.Len(t, netfxSmartCursor.shrink(n), len(ShrinkSmartCursor(n))+2, "%d", n)
+	}
+	sum := sha256.Sum256([]byte(s))
+	require.Equal(t, "f4a7a5fead82514d40c4a9d39ee6bedcd929d40664f1a8e31dc84a39a16b2001", hex.EncodeToString(sum[:]))
+	clr := netfxSmartCursor.shrink(4)
+	require.Equal(t, []byte{0x89, 0x43, 0x20, 0x8B, 0x43, 0x14, 0x03, 0x43, 0x18}, clr[:9],
+		"the store, then mov eax,[ebx+14]; add eax,[ebx+18]")
+	require.Equal(t, []byte{0x83, 0x7D, 0xC4, 0x00}, clr[len(clr)-4:])
+}

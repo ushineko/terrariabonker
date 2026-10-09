@@ -23,9 +23,10 @@ each cheat is applied.
 /*
 netfxInjectionAnchors are the patterns the CLR set's stubs resolve through.
 
-Ledger: on 2026-10-09 pickup (x10), the drop floor (100%) and the spawn cap (30)
-were each confirmed in play on the maintainer's Windows game, then disabled and
-every site read back as its original bytes.
+Ledger: on 2026-10-09 pickup (x10), the drop floor (100%), the spawn cap (30),
+tool reach (30) and the smart cursor clamp (20) were each confirmed in play on
+the maintainer's Windows game, then disabled and every site read back as its
+original bytes.
 */
 var netfxInjectionAnchors = map[string]Anchor{
 	/*
@@ -49,6 +50,28 @@ var netfxInjectionAnchors = map[string]Anchor{
 		"85 C0 75 38 DB 06 D9 5D D8 D9 45 D8 D8 0D ?? ?? ?? ?? DD 5D D0 " +
 			"F2 0F 10 45 D0 F2 0F 2C C0 89 06 DB 07 D9 5D D8 D9 45 D8 D8 0D ?? ?? ?? ?? " +
 			"DD 5D D0 F2 0F 10 45 D0 F2 0F 2C C0 89 07 ?? ?? ?? ?? ?? 5F 5D C2 08 00"),
+		Verified: netfxVerified},
+	/*
+		TileReachCheckSettings.GetRanges(out x, out y), from its entry: the
+		tileRangeX and tileRangeY statics times the multiplier into both outputs.
+		The hook is its exit, 0xF1 in: `lea esp,[ebp-0C]; pop ebx; pop esi`, where
+		edi still holds &x and [ebp+8] is &y. One jump reaches the exit, at its
+		first byte.
+	*/
+	"getranges": {Pattern: MustParse(
+		"55 8B EC 57 56 53 83 EC 08 8B F1 8B FA A1 ?? ?? ?? ?? 0F AF 06 89 07 " +
+			"A1 ?? ?? ?? ?? 0F AF 06 8B 55 08 89 02"),
+		Verified: netfxVerified},
+	/*
+		SmartCursorHelper.SmartCursorLookup, just after the box GetTileRegion
+		filled has been clamped to the world: `mov [ebx+20],eax` (endY) and `cmp
+		dword [ebp-3C],0`, the hook, wildcarded; then the in-reach test of the
+		cursor against the four edges. The usage info is in ebx. No jump lands
+		inside the hook but at its first byte.
+	*/
+	"smart_cursor": {Pattern: MustParse(
+		"?? ?? ?? ?? ?? ?? ?? 74 28 8B 43 0C 3B 43 14 7C 20 8B 43 0C 3B 43 18 7F 18 " +
+			"8B 43 10 3B 43 1C 7C 10 8B 43 10 3B 43 20 7F 08"),
 		Verified: netfxVerified},
 	/*
 		CommonDrop.TryDroppingItem and its three twins, from the prologue:
@@ -81,12 +104,47 @@ var netfxInjections = map[string]Injection{
 		Overwrite: []byte{0x8D, 0x65, 0xF4, 0x5B, 0x5E},
 		MakeBody:  ForceSpawn, RerunOverwrite: true, Arena: true,
 	},
+	// Both outputs forced through edi and [ebp+8], then the epilogue.
+	"tool_reach": {
+		Name: "tool_reach", Anchor: "getranges", InjectOff: 0xF1,
+		Overwrite: []byte{0x8D, 0x65, 0xF4, 0x5B, 0x5E},
+		MakeBody:  ForceXYOutOnStack, RerunOverwrite: true, Arena: true,
+	},
+	// mono's clamp, on the CLR's register and offsets.
+	"smart_cursor": {
+		Name: "smart_cursor", Anchor: "smart_cursor", InjectOff: 0,
+		Overwrite: []byte{0x89, 0x43, 0x20, 0x83, 0x7D, 0xC4, 0x00},
+		MakeBody:  netfxSmartCursor.shrink, RerunOverwrite: false, Arena: true,
+	},
 	// The denominator load is reproduced with a cap; all four twins.
 	"loot": {
 		Name: "loot", Anchor: "trydrop", InjectOff: 6,
 		Overwrite: []byte{0x8B, 0xF1, 0x8B, 0x56, 0x0C},
 		MakeBody:  CapDropDenomEDX, RerunOverwrite: false, Multi: true, Arena: true,
 	},
+}
+
+/*
+ForceXYOutOnStack is `mov dword [edi],N; mov eax,[ebp+8]; mov dword [eax],N`:
+GetRanges' two outputs as the CLR leaves them at its exit, x through edi and y
+through its stack argument. eax is free there; the method returns nothing.
+*/
+func ForceXYOutOnStack(n int32) []byte {
+	out := append([]byte{0xC7, 0x07}, i32(n)...)
+	out = append(out, 0x8B, 0x45, 0x08)
+	return append(append(out, 0xC7, 0x00), i32(n)...)
+}
+
+/*
+netfxSmartCursor is the CLR's box: the usage info in ebx, the cursor at
+0x0C/0x10 and the box at 0x14..0x20 (CLRFields of SmartCursorUsageInfo); the
+displaced endY store first, and the `cmp [ebp-3C],0` whose flags the jz after the
+hook reads, last.
+*/
+var netfxSmartCursor = smartCursorBox{
+	reg: 3, targetX: 0x0C, targetY: 0x10, startX: 0x14, endX: 0x18, startY: 0x1C, endY: 0x20,
+	first: []byte{0x89, 0x43, 0x20},
+	last:  []byte{0x83, 0x7D, 0xC4, 0x00},
 }
 
 /*
