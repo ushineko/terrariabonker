@@ -167,7 +167,7 @@ func (s *Service) blocksValid(blocks []locate.Block) bool {
 			return false
 		}
 	}
-	live, ok := s.resolveLive()
+	live, ok := s.resolveLive(blocks)
 	if !ok {
 		return false
 	}
@@ -179,11 +179,30 @@ func (s *Service) blocksValid(blocks []locate.Block) bool {
 	return false
 }
 
-// resolveLive is ground truth through a kept anchor, re-finding the anchor when
-// it stops resolving.
-func (s *Service) resolveLive() (locate.Block, bool) {
+/*
+resolveLive is ground truth through a kept anchor, re-finding the anchor when
+it stops resolving.
+
+The anchor is whatever the entry finds the live player by: get_LocalPlayer's JIT
+code under mono, Main.player's static slot under the CLR. The CLR one is found
+from the copies a scan found, which is why they are passed in.
+*/
+func (s *Service) resolveLive(blocks []locate.Block) (locate.Block, bool) {
 	if !s.CanRead(layout.ReadLocalPlayer) {
 		return locate.Block{}, false
+	}
+	if entry, _, _ := s.Support(); entry.LocalPlayer == layout.ByStatics {
+		loc := s.locator()
+		if s.found {
+			if blk, ok := loc.LiveAt(s.Mem, s.anchor); ok {
+				return blk, true
+			}
+		}
+		s.anchor, s.found = loc.FindPlayerSlot(s.Mem, blocks)
+		if !s.found {
+			return locate.Block{}, false
+		}
+		return loc.LiveAt(s.Mem, s.anchor)
 	}
 	if s.found {
 		if blk, ok := locate.LocalPlayerAt(s.Mem, s.anchor); ok {
@@ -206,7 +225,7 @@ fallback to that -- unreliable, because a frozen snapshot can hold more items
 than the live player, which is why it is last and why the resolver exists.
 */
 func (s *Service) selectLive(blocks []locate.Block) locate.Block {
-	if live, ok := s.resolveLive(); ok {
+	if live, ok := s.resolveLive(blocks); ok {
 		return live
 	}
 	if live, ok := locate.PickLive(s.Mem, blocks, liveSamples, liveGap); ok {

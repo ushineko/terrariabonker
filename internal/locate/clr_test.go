@@ -105,3 +105,9 @@ func TestTheCLRPrefilterReadsThePermanentCap(t *testing.T) {
 	require.Len(t, got, 1)
 	require.EqualValues(t, 520, got[0].StatLifeMax2)
 }
+
+func monoEntry(t *testing.T) layout.Entry {
+	t.Helper()
+	e, _ := layout.Select("1.4.5.8+24893155", "wine-mono-11.3.0")
+	return e
+}

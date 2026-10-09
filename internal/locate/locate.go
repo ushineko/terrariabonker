@@ -59,6 +59,9 @@ type Locator struct {
 	nameFromLife     int
 	lifeMaxFirst     bool
 	strLen, strChars int
+	arrLen, arrData  int
+	localPlayer      layout.LocalPlayerBy
+	statics          layout.MainStatics
 }
 
 // With is a Locator for an entry.
@@ -68,6 +71,10 @@ func With(e layout.Entry) Locator {
 		lifeMaxFirst: e.Shapes.LifeMaxFirst,
 		strLen:       e.Shapes.StringLenOff,
 		strChars:     e.Shapes.StringCharsOff,
+		arrLen:       e.Shapes.ArrLenOff,
+		arrData:      e.Shapes.ArrDataOff,
+		localPlayer:  e.LocalPlayer,
+		statics:      e.Statics,
 	}
 }
 

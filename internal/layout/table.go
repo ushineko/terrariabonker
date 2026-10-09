@@ -97,6 +97,38 @@ type PlayerFields struct {
 	InventoryFromLife int
 }
 
+// LocalPlayerBy is how an entry tells which player copy is the live one.
+type LocalPlayerBy string
+
+// The two ways.
+const (
+	// ByAnchor is mono's: get_LocalPlayer's JIT code leads to Main.player and
+	// Main.myPlayer (locate.FindLocalPlayerAnchor).
+	ByAnchor LocalPlayerBy = "anchor"
+	// ByStatics is the CLR's: Main's reference statics block, recognised by the
+	// three arrays it points to, and the active element of Main.player.
+	ByStatics LocalPlayerBy = "statics"
+)
+
+/*
+MainStatics is how to recognise Main's reference statics block and read the live
+player through it, under an entry that finds it ByStatics.
+
+The block is recognised by identity rather than located by an address: the slot
+that holds Main.player also has Main.npc and Main.projectile beside it at fixed
+distances, and those three arrays have the game's own lengths. Offsets are
+relative to the Main.player slot.
+*/
+type MainStatics struct {
+	NPCFromPlayer, ProjectileFromPlayer int
+	PlayerLen, NPCLen, ProjectileLen    uint32
+	// PlayerActive is Player.active, a bool, object-relative. In single-player
+	// the other slots hold inactive placeholder players.
+	PlayerActive int
+	// LifeInPlayer is Player.statLife, object-relative.
+	LifeInPlayer int
+}
+
 /*
 Entry is one supported combination: a runtime family, the builds and runtime
 versions its numbers were derived or confirmed on, what it can read, and whether
@@ -128,6 +160,10 @@ type Entry struct {
 	Writes bool
 	Shapes Shapes
 	Player PlayerFields
+	// LocalPlayer is how ReadLocalPlayer is done, and Statics its numbers when it
+	// is ByStatics.
+	LocalPlayer LocalPlayerBy
+	Statics     MainStatics
 	// Provenance is where the numbers came from.
 	Provenance string
 }
@@ -164,17 +200,18 @@ var monoEntry = Entry{
 		ArrLenOff: ArrLenOff, ArrDataOff: ArrDataOff,
 		LifeMaxFirst: false,
 	},
-	Player:     PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff},
-	Reads:      []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer},
-	Writes:     true,
-	Enabled:    true,
-	Provenance: "Cheat Engine mono dissector and cmd/monofields, 1.4.5.7 and 1.4.5.8",
+	Player:      PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff},
+	Reads:       []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer},
+	LocalPlayer: ByAnchor,
+	Writes:      true,
+	Enabled:     true,
+	Provenance:  "Cheat Engine mono dissector and cmd/monofields, 1.4.5.7 and 1.4.5.8",
 }
 
 /*
 clrEntry is .NET Framework on native Windows, measured in spec 052 phase 0.
 
-Enabled for reading the player only, and never for writing yet: the CLR read path
+Enabled for reading the player and which copy is live, and never for writing yet: the CLR read path
 lands one feature at a time (spec 052 phase 3 step 2), and every other reader still
 uses the mono constants. A reader not in Reads must not run under this entry.
 
@@ -192,9 +229,15 @@ var clrEntry = Entry{
 		ArrLenOff: 0x04, ArrDataOff: 0x08,
 		LifeMaxFirst: true,
 	},
-	Player:     PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C},
+	Player:      PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C},
+	LocalPlayer: ByStatics,
+	Statics: MainStatics{
+		NPCFromPlayer: -0x54, ProjectileFromPlayer: -0x48,
+		PlayerLen: 256, NPCLen: 201, ProjectileLen: 1001,
+		PlayerActive: 0x70E, LifeInPlayer: 0x470,
+	},
 	Enabled:    true,
-	Reads:      []Feature{ReadPlayer},
+	Reads:      []Feature{ReadPlayer, ReadLocalPlayer},
 	Writes:     false,
 	Provenance: "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }

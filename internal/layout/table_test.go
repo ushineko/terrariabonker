@@ -39,7 +39,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "e5acf858f43c7034fdb2575ae21965c51418cc02146af7c96338d2ce7f86171f",
+	require.Equal(t, "233168c14e01921a12090552218174ddf1905915f23daf0de8adffb2de03c868",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -156,4 +156,28 @@ func TestTheCLRPlayerFieldsAreTheTable(t *testing.T) {
 // The mono player fields are the mono constants they always were.
 func TestTheMonoPlayerFieldsAreTheConstants(t *testing.T) {
 	require.Equal(t, PlayerFields{NameFromLife: -0x6C0, InventoryFromLife: -0x664}, monoEntry.Player)
+}
+
+/*
+The CLR statics numbers are the CLR table's own differences, and the array
+lengths are what spec 052 phase 0 measured on the live game: the Main.player
+array that held the live player had 256 slots, and the one block that also
+reached an NPC[] and a Projectile[] reached 201 and 1001.
+*/
+func TestTheCLRStaticsAreTheTable(t *testing.T) {
+	main, player := map[string]int{}, map[string]int{}
+	for _, f := range CLRFields["Main"] {
+		main[f.Name] = int(f.Offset)
+	}
+	for _, f := range CLRFields["Player"] {
+		player[f.Name] = int(f.Offset)
+	}
+	s := clrEntry.Statics
+	require.Equal(t, ByStatics, clrEntry.LocalPlayer)
+	require.Equal(t, main["npc"]-main["player"], s.NPCFromPlayer)
+	require.Equal(t, main["projectile"]-main["player"], s.ProjectileFromPlayer)
+	require.Equal(t, player["active"], s.PlayerActive)
+	require.Equal(t, player["statLife"], s.LifeInPlayer)
+	require.Equal(t, [3]uint32{256, 201, 1001}, [3]uint32{s.PlayerLen, s.NPCLen, s.ProjectileLen})
+	require.Equal(t, ByAnchor, monoEntry.LocalPlayer)
 }

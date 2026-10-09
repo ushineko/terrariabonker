@@ -52,7 +52,7 @@ func TestTheCLRTableIsFrozen(t *testing.T) {
 		fmt.Fprintf(&b, "%s:%#v\n", c, CLRFields[c])
 	}
 	sum := sha256.Sum256([]byte(b.String()))
-	require.Equal(t, "8102fbab739b0fb1e837dd286c73b8b90e5563c4f06d287026e91cd08a0f5357", hex.EncodeToString(sum[:]), "the CLR table changed:\n%s", b.String())
+	require.Equal(t, "ed275d4126d09034e0d942154d7effb910792899f04ab18632f85f5f968a5822", hex.EncodeToString(sum[:]), "the CLR table changed:\n%s", b.String())
 }
 
 /*

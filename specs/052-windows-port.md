@@ -1,6 +1,6 @@
 # Spec 052: Native Windows port
 
-**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete; phase 2 and phase 3 step 1 (the version table and its gate) done and checked live on both platforms. Phase 3 step 2 (the CLR read path) is under way: on Windows the player's life and mana are read; every write is still refused.
+**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete; phase 2 and phase 3 step 1 (the version table and its gate) done and checked live on both platforms. Phase 3 step 2 (the CLR read path) is under way: on Windows the live player's life and mana are read, the live copy picked by Main.player's statics; every write is still refused.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -505,10 +505,26 @@ Slice 1 — the player (done):
       guess (the first found) until slice 2's ground truth.
 
 Next slices:
-- [ ] Slice 2 — ground truth on the CLR (`ReadLocalPlayer`): Main's reference
-      statics block found by identity (the `Player[256]`, `NPC[201]` and
-      `Projectile[1001]` it points to at the measured offsets), and the live player
-      as the active element of `Main.player`.
+Slice 2 — ground truth on the CLR (done):
+- [x] `layout.Entry.LocalPlayer` says how an entry finds the live copy: `ByAnchor`
+      (mono's get_LocalPlayer JIT code) or `ByStatics` (the CLR). The CLR entry's
+      `MainStatics` are differences of `CLRFields` (NPC and projectile slots −0x54
+      and −0x48 from Main.player's; `Player.active` 0x70E, now pinned in the table)
+      and the measured array lengths 256 / 201 / 1001.
+- [x] `Locator.FindPlayerSlot`: from the copies a scan found, the `Player[]` that
+      holds one, then the one static slot that holds it with an `NPC[201]` and a
+      `Projectile[1001]` beside it. None or several is no answer.
+      `Locator.LiveAt`: re-validates the slot on every call, then the array's one
+      active element; two active is no answer. The service keeps the slot, not the
+      players, and re-reads through it.
+- [x] Live on Windows: seven copies, two of them "terrariabonker" (the live player
+      and the selection-screen copy); one Main.player slot found; the active element
+      is the copy at 0x5769DD54, the live one. Finding the slot took 8.5 s; a range
+      prefilter in the scan brought it to 3.0 s with the same answer. Reads through
+      the kept slot after that are effectively free.
+- Equivalent mutant: the `ByStatics` guard in `FindPlayerSlot` changes no answer for
+  the mono entry, whose zero statics make the search find nothing anyway. Defensive,
+  recorded rather than tested.
 - [ ] Slice 3 — inventory on the CLR (`ReadInventory`): `internal/inventory` and the
       item fields through the entry.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes

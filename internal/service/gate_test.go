@@ -327,7 +327,7 @@ func TestTheCLREntryReadsTheCLRPlayerAndNothingMore(t *testing.T) {
 
 	require.True(t, svc.CanRead(layout.ReadPlayer))
 	require.False(t, svc.CanRead(layout.ReadInventory))
-	require.False(t, svc.CanRead(layout.ReadLocalPlayer))
+	require.True(t, svc.CanRead(layout.ReadLocalPlayer), "the CLR entry finds the live copy through the statics")
 
 	snap := svc.Snapshot(true)
 	require.Equal(t, 1, snap.Copies)
@@ -339,4 +339,24 @@ func TestTheCLREntryReadsTheCLRPlayerAndNothingMore(t *testing.T) {
 
 	// The same memory under the mono entry finds no one: the fail-safe.
 	require.Zero(t, service.New(mem, -1).WithRuntime("wine-mono-11.3.0").Snapshot(true).Copies)
+}
+
+/*
+Under the CLR entry the snapshot reports the live player, not the copy a scan
+finds first.
+
+memtest's CLR world puts a load-time snapshot of the character at a lower
+address than the live player. They are given different life here, so which one
+was reported is visible: the live player is the one Main.player holds.
+*/
+func TestTheCLRSnapshotIsTheLivePlayer(t *testing.T) {
+	w := memtest.PlantCLRWorld(0x10000000)
+	w.Mem.PokeI32(w.Live+memtest.CLRLifeInPlayer, 333)
+	w.Mem.PokeI32(w.Snap+memtest.CLRLifeInPlayer, 222)
+	svc := service.New(&execMem{w.Mem}, -1).WithRuntime("netfx-4.8.9345.0")
+
+	snap := svc.Snapshot(false)
+	require.Equal(t, 2, snap.Copies)
+	require.NotNil(t, snap.Player)
+	require.EqualValues(t, 333, snap.Player.HP, "the load-time snapshot was reported as the player")
 }

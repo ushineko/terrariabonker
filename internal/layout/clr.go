@@ -128,6 +128,7 @@ var CLRFields = map[string][]CLRField{
 		{"tileSpeed", 0x051c, false},
 		{"blockRange", 0x0570, false},
 		{"itemAnimation", 0x068c, false},
+		{"active", 0x070e, false},
 	},
 	"Main": {
 		{"worldName", 0x05f8, true},
