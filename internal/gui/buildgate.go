@@ -89,10 +89,11 @@ func (u *ui) checkBuild(build string) {
 // applyBuildDecision acts on a finished probe: nothing to do, a decision this
 // machine already made, or a question.
 func (u *ui) applyBuildDecision(r *client.BuildCheck) {
-	// A runtime with no numbers is not a build to accept or degrade: there is
-	// nothing to accept. Every cheat is marked unusable, the CLI's sentence says
-	// why, and the gate asks nothing -- the CLI refuses every write on its own.
-	if r.Support == client.SupportUnsupported {
+	// A runtime with no numbers, or one that can only be read so far, is not a
+	// build to accept or degrade: there is nothing to accept. Every cheat is
+	// marked unusable, the CLI's sentence says why, and the gate asks nothing --
+	// the CLI refuses every write on its own.
+	if r.Support == client.SupportUnsupported || r.ReadOnly {
 		names := make([]string, 0, len(r.Cheats))
 		for name := range r.Cheats {
 			names = append(names, name)

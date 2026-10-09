@@ -30,7 +30,7 @@ func (a *App) compendiumCmd() *cobra.Command {
 		Short: "dump the full item/NPC catalog as JSON (for the GUI tab)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(false, false)
+			got, err := a.gameReadingAll()
 			if err != nil {
 				return err
 			}

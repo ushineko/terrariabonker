@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ushineko/terrariabonker/internal/builds"
-	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/profile"
 	"github.com/ushineko/terrariabonker/internal/trainer"
@@ -265,8 +264,12 @@ func (a *App) buildCheckCmd() *cobra.Command {
 				untouched, and this is the only thing on screen that would show
 				it changed.
 			*/
-			printf(cmd, "  runtime: %s (%s)", orUnknown(report.Runtime), report.Support)
-			if report.Support == string(layout.Unsupported) {
+			support := report.Support
+			if report.ReadOnly {
+				support += ", read-only"
+			}
+			printf(cmd, "  runtime: %s (%s)", orUnknown(report.Runtime), support)
+			if report.ReadOnly {
 				printf(cmd, "  %s", report.Message)
 			}
 			printf(cmd, "  recognised: %t  known-good: %t  decision: %s",

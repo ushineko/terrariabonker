@@ -27,6 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/proc"
 	"github.com/ushineko/terrariabonker/internal/service"
@@ -267,4 +268,43 @@ func forceFlag(cmd *cobra.Command, into *bool) {
 // jsonFlag is the machine-readable switch.
 func jsonFlag(cmd *cobra.Command, into *bool) {
 	cmd.Flags().BoolVar(into, "json", false, "machine-readable output")
+}
+
+/*
+gameReading attaches for a read of one feature, and refuses under an entry whose
+numbers cannot read it.
+
+Reads were never gated, because a read with moved offsets finds no player. Under
+another runtime's entry it can find the player -- that is what the entry is for --
+and then read everything else about them with the wrong numbers, which prints
+confident garbage. So a read says what it reads.
+*/
+func (a *App) gameReading(f layout.Feature) (*Game, error) {
+	got, err := a.game(false, false)
+	if err != nil {
+		return nil, err
+	}
+	if !got.Svc.CanRead(f) {
+		_, _, runtime := got.Svc.Support()
+		return nil, &service.Error{Message: fmt.Sprintf("Terraria is running on %s, and this version "+
+			"of terrariabonker cannot read the %s under it yet (spec 052)", runtime, f)}
+	}
+	return got, nil
+}
+
+/*
+gameReadingAll attaches for a read that walks more than one feature's numbers --
+the item catalog, a vein -- and so needs an entry with every reader: one that may
+also write.
+*/
+func (a *App) gameReadingAll() (*Game, error) {
+	got, err := a.game(false, false)
+	if err != nil {
+		return nil, err
+	}
+	if entry, _, runtime := got.Svc.Support(); !entry.Writes {
+		return nil, &service.Error{Message: fmt.Sprintf("Terraria is running on %s, which this "+
+			"version of terrariabonker can only partly read so far (spec 052)", runtime)}
+	}
+	return got, nil
 }

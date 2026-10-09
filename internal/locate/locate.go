@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/proc"
 )
 
@@ -37,18 +38,59 @@ type Mem interface {
 }
 
 /*
-Where a player's parts sit relative to the field a scan can recognise.
-
-NameOffset is negative because statLife is what is found first: it is the value
-worth looking for, and the name is reached backwards from it. BlockLen is the
-six integers the game keeps together, and the block starts two words before
-statLife.
+The life and mana block: six integers the game keeps together, starting two words
+before statLife under both runtimes. Which of the first two is the boosted cap
+differs by runtime (layout.Shapes.LifeMaxFirst), and where the name is differs
+by runtime too (layout.PlayerFields) -- so those come from the entry a Locator
+is built with, not from here.
 */
 const (
-	NameOffset = -0x6C0
 	BlockLen   = 6
 	blockStart = -8
 )
+
+/*
+Locator finds players with one version-table entry's numbers.
+
+The package-level FindPlayers, ReadBlock and ReadMonoString are this with the
+mono entry: what every caller got before the table, unchanged.
+*/
+type Locator struct {
+	nameFromLife     int
+	lifeMaxFirst     bool
+	strLen, strChars int
+}
+
+// With is a Locator for an entry.
+func With(e layout.Entry) Locator {
+	return Locator{
+		nameFromLife: e.Player.NameFromLife,
+		lifeMaxFirst: e.Shapes.LifeMaxFirst,
+		strLen:       e.Shapes.StringLenOff,
+		strChars:     e.Shapes.StringCharsOff,
+	}
+}
+
+// mono is the Locator the package-level functions use.
+var mono = With(layout.Mono())
+
+// FindPlayers is the mono Locator's FindPlayers.
+func FindPlayers(mem Mem) []Block { return mono.FindPlayers(mem) }
+
+// ReadBlock is the mono Locator's ReadBlock.
+func ReadBlock(mem Mem, lifeAddr uint32) (Block, bool) { return mono.ReadBlock(mem, lifeAddr) }
+
+// ReadMonoString is the mono Locator's ReadString.
+func ReadMonoString(mem Mem, ptr uint32) (string, bool) { return mono.ReadString(mem, ptr) }
+
+// inGameOrder puts six raw words into the order ValidBlock and Block expect --
+// statLifeMax2 first -- whichever order this runtime stores them in.
+func (l Locator) inGameOrder(raw []int32) []int32 {
+	if l.lifeMaxFirst {
+		raw[0], raw[1] = raw[1], raw[0]
+	}
+	return raw
+}
 
 /*
 BoostHeadroom is how far equipment and buffs may lift a cap above its permanent
@@ -107,23 +149,24 @@ func ValidBlock(v []int32) bool {
 }
 
 /*
-ReadMonoString decodes a 32-bit mono String, or reports that it is not one.
+ReadString decodes a 32-bit System.String with this runtime's shape, or reports
+that it is not one.
 
 Only a name-plausible length of printable ASCII is accepted, and that is what
 makes this a validator rather than a coincidence sink: any four bytes of heap
 can be read as a pointer, but very little of it points at something shaped like
 a player's name.
 */
-func ReadMonoString(mem Mem, ptr uint32) (string, bool) {
-	header := mem.Read(ptr, 12)
-	if len(header) < 12 {
+func (l Locator) ReadString(mem Mem, ptr uint32) (string, bool) {
+	header := mem.Read(ptr, l.strChars)
+	if len(header) < l.strChars {
 		return "", false
 	}
-	length := int32(binary.LittleEndian.Uint32(header[8:12])) //nolint:gosec // a signed field
+	length := int32(binary.LittleEndian.Uint32(header[l.strLen:])) //nolint:gosec // a signed field
 	if length < 1 || length > 64 {
 		return "", false
 	}
-	raw := mem.Read(ptr+12, int(length)*2)
+	raw := mem.Read(ptr+uint32(l.strChars), int(length)*2) //nolint:gosec // a header size
 	if len(raw) < int(length)*2 {
 		return "", false
 	}
@@ -147,7 +190,13 @@ Typically the live one plus an inert load-time snapshot or two that share the
 character's name. A caller that writes or freezes can act on all of them: the
 snapshots ignore what is written to them.
 */
-func FindPlayers(mem Mem) []Block {
+func (l Locator) FindPlayers(mem Mem) []Block {
+	// The permanent life cap is the second word of the block under mono and the
+	// first under the CLR; the prefilter reads whichever it is.
+	capAt := 1
+	if l.lifeMaxFirst {
+		capAt = 0
+	}
 	var found []Block
 	for _, region := range mem.Regions() {
 		start := region.Start
@@ -160,20 +209,20 @@ func FindPlayers(mem Mem) []Block {
 			// statLife sits at block index 2, so prefilter on the cap and the
 			// current value before unpacking the rest: this loop runs over
 			// every word of about 1.6 GB.
-			lifeMax := word(buf, i+1)
+			lifeMax := word(buf, i+capAt)
 			life := word(buf, i+2)
 			if lifeMax < 100 || lifeMax > 500 || life < 1 || life > lifeMax {
 				continue
 			}
-			fields := []int32{
-				word(buf, i), lifeMax, life,
+			fields := l.inGameOrder([]int32{
+				word(buf, i), word(buf, i+1), life,
 				word(buf, i+3), word(buf, i+4), word(buf, i+5),
-			}
+			})
 			if !ValidBlock(fields) {
 				continue
 			}
 			lifeAddr := start + uint32(i+2)*4 //nolint:gosec // an offset inside a 32-bit region
-			block, ok := blockAt(mem, lifeAddr, fields)
+			block, ok := l.blockAt(mem, lifeAddr, fields)
 			if !ok {
 				continue
 			}
@@ -195,7 +244,7 @@ there is not one there.
 For a caller that already knows where a player is -- a cached address being
 re-checked -- rather than one scanning for it.
 */
-func ReadBlock(mem Mem, lifeAddr uint32) (Block, bool) {
+func (l Locator) ReadBlock(mem Mem, lifeAddr uint32) (Block, bool) {
 	raw := mem.Read(uint32(int(lifeAddr)+blockStart), BlockLen*4) //nolint:gosec // a 32-bit address
 	if len(raw) < BlockLen*4 {
 		return Block{}, false
@@ -204,20 +253,21 @@ func ReadBlock(mem Mem, lifeAddr uint32) (Block, bool) {
 	for i := range fields {
 		fields[i] = word(raw, i)
 	}
+	fields = l.inGameOrder(fields)
 	if !ValidBlock(fields) {
 		return Block{}, false
 	}
-	return blockAt(mem, lifeAddr, fields)
+	return l.blockAt(mem, lifeAddr, fields)
 }
 
 // blockAt names a validated block by reading the string its name pointer leads
 // to. A block with no readable name is not a player.
-func blockAt(mem Mem, lifeAddr uint32, fields []int32) (Block, bool) {
-	ptr := mem.Read(uint32(int(lifeAddr)+NameOffset), 4) //nolint:gosec // a 32-bit address
+func (l Locator) blockAt(mem Mem, lifeAddr uint32, fields []int32) (Block, bool) {
+	ptr := mem.Read(uint32(int(lifeAddr)+l.nameFromLife), 4) //nolint:gosec // a 32-bit address
 	if len(ptr) < 4 {
 		return Block{}, false
 	}
-	name, ok := ReadMonoString(mem, binary.LittleEndian.Uint32(ptr))
+	name, ok := l.ReadString(mem, binary.LittleEndian.Uint32(ptr))
 	if !ok {
 		return Block{}, false
 	}

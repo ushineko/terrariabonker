@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ushineko/terrariabonker/internal/layout"
+	"github.com/ushineko/terrariabonker/internal/locate"
 	"github.com/ushineko/terrariabonker/internal/version"
 )
 
@@ -62,13 +63,13 @@ Only an outright incompatible build is refused, and only when not forced. An
 unknown one is allowed through: it means the version could not be read, which
 happens during startup and is not evidence of anything.
 
-A runtime the version table has no enabled entry for is refused whether forced
-or not. Forcing is for a build whose offsets *might* still fit; numbers derived
+An entry that may not write -- no entry covers the runtime, or its write paths
+do not exist yet -- is refused whether forced or not. Forcing is for a build whose offsets *might* still fit; numbers derived
 under one runtime are measured not to fit another, so there is nothing to force.
 */
 func (s *Service) RequireCompatible(force bool) error {
-	if _, support, runtime := s.Support(); support == layout.Unsupported {
-		return &Error{Message: unsupportedRuntime(runtime)}
+	if entry, support, runtime := s.Support(); !entry.Writes {
+		return &Error{Message: noWrites(support, runtime)}
 	}
 	level, msg := s.Compatibility()
 	if level == version.Incompatible && !force {
@@ -93,9 +94,38 @@ func (s *Service) Support() (layout.Entry, layout.Support, string) {
 	return entry, support, s.runtime
 }
 
-// unsupportedRuntime is what a refusal on an unsupported runtime says.
-func unsupportedRuntime(runtime string) string {
-	return fmt.Sprintf("Terraria is running on %s, and this version of terrariabonker has no "+
-		"memory layout for that runtime, so nothing was changed. The same game under a "+
-		"different .NET runtime lays its memory out differently (spec 052)", runtime)
+/*
+noWrites is what a refusal says when the selected entry may not write: either no
+entry covers the runtime, or one does and its write paths do not exist yet.
+*/
+func noWrites(support layout.Support, runtime string) string {
+	if support == layout.Unsupported {
+		return fmt.Sprintf("Terraria is running on %s, and this version of terrariabonker has no "+
+			"memory layout for that runtime, so nothing was changed. The same game under a "+
+			"different .NET runtime lays its memory out differently (spec 052)", runtime)
+	}
+	return fmt.Sprintf("Terraria is running on %s, which this version of terrariabonker can only "+
+		"read so far, so nothing was changed (spec 052)", runtime)
+}
+
+// CanRead reports whether the selected entry's numbers can read a feature. A
+// reader of that feature asks first: under an entry that cannot read it, the
+// numbers it would use are another runtime's.
+func (s *Service) CanRead(f layout.Feature) bool {
+	entry, _, _ := s.Support()
+	return entry.CanRead(f)
+}
+
+// locator is the player locator for the selected entry.
+func (s *Service) locator() locate.Locator {
+	entry, _, _ := s.Support()
+	return locate.With(entry)
+}
+
+// WithRuntime sets the runtime instead of detecting it, for a caller that
+// already knows it: a front end that read it once, or a test whose pid is not a
+// game. Detection is skipped from then on.
+func (s *Service) WithRuntime(runtime string) *Service {
+	s.runtime = runtime
+	return s
 }

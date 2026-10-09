@@ -70,10 +70,43 @@ type Shapes struct {
 	LifeMaxFirst bool
 }
 
+// Feature is a part of the game an entry's numbers can read.
+type Feature string
+
+// The features an entry declares. A reader of one checks the entry first.
+const (
+	// ReadPlayer is finding the player and reading life and mana.
+	ReadPlayer Feature = "player"
+	// ReadInventory is reading the player's item slots.
+	ReadInventory Feature = "inventory"
+	// ReadLocalPlayer is ground truth for which player copy is live: Main.player
+	// [Main.myPlayer], reached through the statics. Under mono it is found from
+	// get_LocalPlayer's JIT code (locate.FindLocalPlayerAnchor), a mono byte
+	// pattern.
+	ReadLocalPlayer Feature = "local-player"
+)
+
+/*
+PlayerFields is where a player's parts are, measured from statLife: the field a
+scan recognises, so everything else is reached from it.
+*/
+type PlayerFields struct {
+	// NameFromLife is Player.name, a String pointer.
+	NameFromLife int
+	// InventoryFromLife is Player.inventory, the Item[] pointer.
+	InventoryFromLife int
+}
+
 /*
 Entry is one supported combination: a runtime family, the builds and runtime
-versions its numbers were derived or confirmed on, and whether memory work is
-enabled for it.
+versions its numbers were derived or confirmed on, what it can read, and whether
+it may write.
+
+Reads and Writes are separate because they become true at different times. An
+entry's reads land one feature at a time, and each is harmless if wrong -- a
+locator that validates by name finds nothing. A write with a wrong number lands
+in the wrong field of a live save, so Writes stays false until every write path
+takes its numbers from the entry.
 */
 type Entry struct {
 	Name   string
@@ -86,10 +119,15 @@ type Entry struct {
 	// Confirmed is a ledger, not a gate: runtime versions the numbers were checked
 	// against a live game under, with what was checked. Select does not read it.
 	Confirmed []string
-	// Enabled is whether this program reads and writes game memory under the
-	// entry. An entry can exist before its read path does.
+	// Enabled is whether Select may choose the entry at all. An entry can be
+	// measured before any reader uses it.
 	Enabled bool
-	Shapes  Shapes
+	// Reads is the features this entry's numbers can read.
+	Reads []Feature
+	// Writes is whether this program may write game memory under the entry.
+	Writes bool
+	Shapes Shapes
+	Player PlayerFields
 	// Provenance is where the numbers came from.
 	Provenance string
 }
@@ -126,6 +164,9 @@ var monoEntry = Entry{
 		ArrLenOff: ArrLenOff, ArrDataOff: ArrDataOff,
 		LifeMaxFirst: false,
 	},
+	Player:     PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff},
+	Reads:      []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer},
+	Writes:     true,
 	Enabled:    true,
 	Provenance: "Cheat Engine mono dissector and cmd/monofields, 1.4.5.7 and 1.4.5.8",
 }
@@ -133,8 +174,12 @@ var monoEntry = Entry{
 /*
 clrEntry is .NET Framework on native Windows, measured in spec 052 phase 0.
 
-Disabled: its shapes and offsets are measured, and nothing reads memory with them
-yet. Enabling it is the end of the CLR read path, not the start.
+Enabled for reading the player only, and never for writing yet: the CLR read path
+lands one feature at a time (spec 052 phase 3 step 2), and every other reader still
+uses the mono constants. A reader not in Reads must not run under this entry.
+
+The player fields are differences of CLRFields: name 0x08C and inventory 0x0D4,
+less statLife 0x470. TestTheCLRPlayerFieldsAreTheTable checks that.
 */
 var clrEntry = Entry{
 	Name:     "netfx-4.8.1",
@@ -147,7 +192,10 @@ var clrEntry = Entry{
 		ArrLenOff: 0x04, ArrDataOff: 0x08,
 		LifeMaxFirst: true,
 	},
-	Enabled:    false,
+	Player:     PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C},
+	Enabled:    true,
+	Reads:      []Feature{ReadPlayer},
+	Writes:     false,
 	Provenance: "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }
 
@@ -169,8 +217,10 @@ const (
 	// are known not to fit, so memory work is refused.
 	Unsupported Support = "unsupported"
 	// RuntimeUnknown: the runtime could not be detected. Not evidence of
-	// anything -- the same rule as an unreadable game version -- so it is let
-	// through as today.
+	// anything -- the same rule as an unreadable game version -- so the mono
+	// entry is used, which is what happened before the table existed. On Windows
+	// the runtime is never undetected while the CLR is loaded: version reports
+	// netfx-unknown, which is the NetFx family.
 	RuntimeUnknown Support = "unknown"
 )
 
@@ -178,13 +228,19 @@ const (
 Select is the entry for a running build and runtime, and how well it fits.
 
 The entry returned for Candidate is the family's first enabled one, which is
-the nearest the table has. For Unsupported and RuntimeUnknown it is the zero
-Entry.
+the nearest the table has. For RuntimeUnknown it is the mono entry. For
+Unsupported it is the zero Entry, which can read nothing and write nothing.
 */
 func Select(build, runtime string) (Entry, Support) {
+	if runtime == "" {
+		return monoEntry, RuntimeUnknown
+	}
+	// A runtime that was detected and is not one this table knows is not
+	// "unknown": something is running the game, and no numbers here were derived
+	// for it.
 	rt, ok := ParseRuntime(runtime)
 	if !ok {
-		return Entry{}, RuntimeUnknown
+		return Entry{}, Unsupported
 	}
 	var nearest *Entry
 	for i := range Entries {
@@ -205,7 +261,10 @@ func Select(build, runtime string) (Entry, Support) {
 	return *nearest, Candidate
 }
 
-func has(list []string, want string) bool {
+// CanRead reports whether the entry's numbers can read a feature.
+func (e Entry) CanRead(f Feature) bool { return e.Enabled && has(e.Reads, f) }
+
+func has[T comparable](list []T, want T) bool {
 	for _, s := range list {
 		if s == want {
 			return true
@@ -213,3 +272,7 @@ func has(list []string, want string) bool {
 	}
 	return false
 }
+
+// Mono is the wine-mono entry: the numbers every reader used before the table,
+// and still the ones a reader uses when not handed an entry.
+func Mono() Entry { return monoEntry }

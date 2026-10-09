@@ -41,7 +41,7 @@ func (a *App) veinCmd() *cobra.Command {
 		Short: "dry run: what a vein miner would take from a tile (reads only)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			got, err := a.game(false, false)
+			got, err := a.gameReadingAll()
 			if err != nil {
 				return err
 			}

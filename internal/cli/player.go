@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/service"
 	"github.com/ushineko/terrariabonker/internal/version"
 )
@@ -41,7 +42,7 @@ func (a *App) statusCmd() *cobra.Command {
 		Short: "find the player and show HP/mana",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(false, false)
+			got, err := a.gameReading(layout.ReadPlayer)
 			if err != nil {
 				return err
 			}
@@ -160,7 +161,7 @@ func (a *App) inventoryCmd() *cobra.Command {
 		Short:   "list inventory slots",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(false, false)
+			got, err := a.gameReading(layout.ReadInventory)
 			if err != nil {
 				return err
 			}

@@ -435,6 +435,8 @@ type BuildCheck struct {
 	// Support is the version table's answer for this build and runtime: supported,
 	// candidate, unsupported or unknown.
 	Support string `json:"support"`
+	// ReadOnly is whether the CLI may not write under this runtime yet.
+	ReadOnly bool `json:"read_only"`
 	// Message is the CLI's own sentence about how this build compares with the
 	// one the patterns were derived on. Shown as it stands rather than restated
 	// here, so the known-good build is spelled in one place.

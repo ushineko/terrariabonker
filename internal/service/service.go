@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ushineko/terrariabonker/internal/inventory"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/locate"
 	"github.com/ushineko/terrariabonker/internal/player"
 	"github.com/ushineko/terrariabonker/internal/proc"
@@ -138,7 +139,7 @@ func (s *Service) Players() ([]locate.Block, error) {
 	if s.blocks != nil && s.blocksValid(s.blocks) {
 		return s.blocks, nil
 	}
-	blocks := locate.FindPlayers(s.Mem)
+	blocks := s.locator().FindPlayers(s.Mem)
 	if len(blocks) == 0 {
 		s.blocks = nil
 		return nil, ErrNoPlayer
@@ -161,7 +162,7 @@ to a corpse is silent.
 */
 func (s *Service) blocksValid(blocks []locate.Block) bool {
 	for _, b := range blocks {
-		fresh, ok := locate.ReadBlock(s.Mem, b.LifeAddr)
+		fresh, ok := s.locator().ReadBlock(s.Mem, b.LifeAddr)
 		if !ok || fresh.Name != b.Name {
 			return false
 		}
@@ -181,6 +182,9 @@ func (s *Service) blocksValid(blocks []locate.Block) bool {
 // resolveLive is ground truth through a kept anchor, re-finding the anchor when
 // it stops resolving.
 func (s *Service) resolveLive() (locate.Block, bool) {
+	if !s.CanRead(layout.ReadLocalPlayer) {
+		return locate.Block{}, false
+	}
 	if s.found {
 		if blk, ok := locate.LocalPlayerAt(s.Mem, s.anchor); ok {
 			return blk, true
@@ -209,6 +213,9 @@ func (s *Service) selectLive(blocks []locate.Block) locate.Block {
 		return live
 	}
 	best, most := blocks[0], -1
+	if !s.CanRead(layout.ReadInventory) {
+		return best
+	}
 	for _, b := range blocks {
 		if n := inventory.New(s.Mem, b.LifeAddr).NonemptyCount(); n > most {
 			best, most = b, n
@@ -322,7 +329,7 @@ func (s *Service) Snapshot(withInventory bool) Snapshot {
 		Name: live.Name, HP: live.StatLife, MaxHP: live.StatLifeMax,
 		Mana: live.StatMana, MaxMana: live.StatManaMax,
 	}
-	if withInventory {
+	if withInventory && s.CanRead(layout.ReadInventory) {
 		out.Inventory = toSlots(inventory.New(s.Mem, live.LifeAddr).Slots())
 	}
 	return out

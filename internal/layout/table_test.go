@@ -39,7 +39,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "95ce8a446a7a1f923dfce02f6e4971ea0984dc360c3f8d3c26a6bc1cc1a03271",
+	require.Equal(t, "e5acf858f43c7034fdb2575ae21965c51418cc02146af7c96338d2ce7f86171f",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -56,15 +56,14 @@ func TestSelect(t *testing.T) {
 		{"mono, another version", build, "wine-mono-10.4.1", Supported, "wine-mono"},
 		{"mono, older known build", "1.4.5.7+24825745", "wine-mono-11.2.0", Supported, "wine-mono"},
 		{"mono, a game update", "1.4.5.9+25000000", "wine-mono-11.3.0", Candidate, "wine-mono"},
-		// Windows: the CLR entry is measured but not enabled, so there is
-		// nothing enabled for the family -- and the mono numbers are never
-		// offered in its place.
-		{"netfx, measured version", build, "netfx-4.8.9345.0", Unsupported, ""},
-		{"netfx, version unreadable", build, "netfx-unknown", Unsupported, ""},
-		// Undetected is not evidence: let through, as an unreadable game
-		// version is.
-		{"nothing detected", build, "", RuntimeUnknown, ""},
-		{"a family nobody has seen", build, "coreclr-9.0.0", RuntimeUnknown, ""},
+		// Windows: the CLR entry, never the mono one in its place. Whether it
+		// may write is a separate question (TestReadsAndWritesAreSeparate).
+		{"netfx, measured version", build, "netfx-4.8.9345.0", Supported, "netfx-4.8.1"},
+		{"netfx, version unreadable", build, "netfx-unknown", Candidate, "netfx-4.8.1"},
+		// Undetected is not evidence: the mono numbers, as before the table.
+		{"nothing detected", build, "", RuntimeUnknown, "wine-mono"},
+		// Detected and unknown is not undetected: nothing here fits it.
+		{"a family nobody has seen", build, "coreclr-9.0.0", Unsupported, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -117,4 +116,44 @@ func TestTheConfirmedRuntimeIsALedgerNotAGate(t *testing.T) {
 	require.Nil(t, monoEntry.Versions)
 	_, got := Select("1.4.5.8+24893155", "wine-mono-10.4.1")
 	require.Equal(t, Supported, got, "an unconfirmed wine-mono stopped matching")
+}
+
+/*
+What each entry may read and whether it may write.
+
+The CLR entry reads the player and nothing else, and writes nothing: its
+inventory and every other reader still use the mono constants, and a write with
+a wrong number lands in a live save. The zero entry -- what an unsupported
+runtime gets -- can do neither.
+*/
+func TestReadsAndWritesAreSeparate(t *testing.T) {
+	require.True(t, monoEntry.CanRead(ReadPlayer))
+	require.True(t, monoEntry.CanRead(ReadInventory))
+	require.True(t, monoEntry.Writes)
+
+	require.True(t, clrEntry.CanRead(ReadPlayer))
+	require.False(t, clrEntry.CanRead(ReadInventory), "the CLR inventory reader does not exist yet")
+	require.False(t, clrEntry.Writes, "the CLR entry may write before its write paths exist")
+
+	var none Entry
+	require.False(t, none.CanRead(ReadPlayer))
+	require.False(t, none.Writes)
+}
+
+/*
+The CLR player fields are the CLR table's own differences, not a second
+spelling of them: name and inventory, less statLife.
+*/
+func TestTheCLRPlayerFieldsAreTheTable(t *testing.T) {
+	at := map[string]int{}
+	for _, f := range CLRFields["Player"] {
+		at[f.Name] = int(f.Offset)
+	}
+	require.Equal(t, at["name"]-at["statLife"], clrEntry.Player.NameFromLife)
+	require.Equal(t, at["inventory"]-at["statLife"], clrEntry.Player.InventoryFromLife)
+}
+
+// The mono player fields are the mono constants they always were.
+func TestTheMonoPlayerFieldsAreTheConstants(t *testing.T) {
+	require.Equal(t, PlayerFields{NameFromLife: -0x6C0, InventoryFromLife: -0x664}, monoEntry.Player)
 }

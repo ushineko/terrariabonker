@@ -1,6 +1,6 @@
 # Spec 052: Native Windows port
 
-**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete; phase 2 and phase 3 step 1 (the version table and its gate) done and checked live on both platforms. Next: phase 3 step 2, the CLR read path. The gate now refuses memory writes under .NET Framework, so a Windows build fails safe; it still reads nothing useful until step 2.
+**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete; phase 2 and phase 3 step 1 (the version table and its gate) done and checked live on both platforms. Phase 3 step 2 (the CLR read path) is under way: on Windows the player's life and mana are read; every write is still refused.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -472,14 +472,62 @@ Phase 3, step 1 (the version table and the gate)
       maintainer then confirmed the cheats still work in play under it. This branch's `build-check` there reported
       `support: supported`, `runtime_entry: wine-mono`, known and recognised unchanged.
 
-Phase 3, step 2 (the CLR read path) — next
-- [ ] Every reader takes its offsets and shapes from the selected entry instead of the
-      package-level mono constants; characterization tests pinned before the change and
-      re-run as mutations after it (AGENTS.md, "Refactors are pinned before they start").
-- [ ] The CLR entry's read path: player locate (CLR life-block order, name at
-      statLife − 0x3E4), inventory, player stats, NPC and projectile reads, Main's two
-      static blocks located without a live player to start from.
-- [ ] `clrEntry.Enabled` set only once that read path is confirmed against the live game.
+Phase 3, step 2 (the CLR read path) — in progress, one feature at a time
+
+The CLR entry cannot simply be "enabled" when its read path works: enabling it
+would open the write gate for every command, including ones whose packages still
+use mono offsets. So an entry declares what it can read (`Reads`, a list of
+features) separately from whether it may write (`Writes`). A reader checks its
+feature; a write checks `Writes`. The CLR entry's reads grow slice by slice, and
+`Writes` stays false until every write path takes its numbers from the entry.
+
+Slice 1 — the player (done):
+- [x] `layout.Entry` gains `Reads`, `Writes` and `Player` (name and inventory
+      offsets from statLife). Mono: every feature, writes. CLR: `ReadPlayer` only,
+      no writes; its player fields checked equal to `CLRFields`' own differences.
+- [x] `locate.With(entry)`: a locator with the entry's name offset, string shape and
+      life-block order. The package-level `FindPlayers`/`ReadBlock`/`ReadMonoString`
+      are the mono locator, so every existing call and test is unchanged; the
+      duplicate `locate.NameOffset` (a second spelling of `layout.NamePtrOff`) is gone.
+- [x] The service finds players with the entry's locator, skips the mono ground-truth
+      anchor (`ReadLocalPlayer`) and the inventory-count fallback where the entry
+      cannot read them, and leaves inventory out of a snapshot it cannot read.
+- [x] Reads are gated per command: `status` needs `ReadPlayer`, `inventory`
+      `ReadInventory`; `compendium` and `vein`, which walk many structures, need an
+      entry that may write. `build-check`, `accept-build`, `version` and the raw
+      `read ADDR` need none. The window's worker runs the same commands.
+- [x] An undetected runtime selects the mono entry (the legacy behaviour); a
+      detected runtime of an unknown family is unsupported.
+- [x] Live on Windows: `status` reads "terrariabonker", HP 470/470, mana 200/200
+      through the CLR path; `inventory` refuses naming the runtime; `build-check`
+      says `supported, read-only`. Seven copies are found — the seven characters on
+      the selection screen — and with the game paused, which copy is live is a
+      guess (the first found) until slice 2's ground truth.
+
+Next slices:
+- [ ] Slice 2 — ground truth on the CLR (`ReadLocalPlayer`): Main's reference
+      statics block found by identity (the `Player[256]`, `NPC[201]` and
+      `Projectile[1001]` it points to at the measured offsets), and the live player
+      as the active element of `Main.player`.
+- [ ] Slice 3 — inventory on the CLR (`ReadInventory`): `internal/inventory` and the
+      item fields through the entry.
+- [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
+      (phase 4), each with characterization tests pinned first.
+
+Findings from slice 1:
+- **A buffed player can be missed by the scan, on both runtimes (pre-existing).**
+  `FindPlayers` prefilters with `life > lifeMax` on the *permanent* cap, before
+  `ValidBlock`, which accepts life up to the boosted cap. A player whose current
+  life is above their permanent cap is skipped. `TestFindPlayers` pins this — its
+  420-of-400 copy is planted and expected not to be found. Not changed here: it is
+  Linux behaviour and needs its own decision.
+- Equivalent mutant: removing the CLR guard in front of the mono ground-truth
+  anchor changes no answer, because the mono byte pattern does not occur in CLR
+  memory. The guard saves an executable-memory scan; it is defensive, not
+  load-bearing.
+- With several indistinguishable copies and no ground truth, which copy the
+  service picks is arbitrary (the first found). Not pinned by a test, since pinning
+  it would make an arbitrary choice look like a contract.
 
 Phases 4 and 5 get their criteria when phase 3 is complete.
 

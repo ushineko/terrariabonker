@@ -153,6 +153,18 @@ func TestAnUnsupportedRuntimeAsksNothingAndDisablesEveryCheat(t *testing.T) {
 	require.True(t, u.gated("mining"))
 }
 
+// A runtime that can only be read so far is treated the same: nothing to accept,
+// every cheat unusable.
+func TestAReadOnlyRuntimeAsksNothingAndDisablesEveryCheat(t *testing.T) {
+	u := testUI(t)
+	r := probe(false, []string{"reach"})
+	r.Support, r.ReadOnly = "supported", true
+	r.Message = "Terraria is running on netfx-4.8.9345.0, which this version can only read so far"
+	u.applyBuildDecision(r)
+	require.False(t, u.gate.open)
+	require.True(t, u.gated("reach"))
+}
+
 // The dialog grows with the list of dead cheats, and stops growing before it
 // runs off the screen.
 func TestTheGateDialogGrowsWithWhatItHasToList(t *testing.T) {

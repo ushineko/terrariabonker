@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/builds"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/profile"
@@ -234,14 +235,21 @@ wine-mono are measured not to fit .NET Framework -- not one field offset is
 shared -- so there is nothing for force to be right about (spec 052).
 */
 func TestAnUnsupportedRuntimeIsRefusedEvenWhenForced(t *testing.T) {
-	_, _, svc := gateFixture(t)
-	service.WatchRuntime(t, "netfx-4.8.9345.0")
-
-	for _, force := range []bool{false, true} {
-		err := svc.RequireCompatible(force)
-		require.Error(t, err, "force=%t", force)
-		require.Contains(t, err.Error(), "netfx-4.8.9345.0")
-		require.Contains(t, err.Error(), "nothing was changed")
+	// netfx: an entry exists and reads the player, but may not write yet.
+	// coreclr: no entry at all. Both refuse, for different stated reasons.
+	for runtime, why := range map[string]string{
+		"netfx-4.8.9345.0": "can only read so far",
+		"coreclr-9.0.0":    "has no memory layout for that runtime",
+	} {
+		_, _, svc := gateFixture(t)
+		service.WatchRuntime(t, runtime)
+		for _, force := range []bool{false, true} {
+			err := svc.RequireCompatible(force)
+			require.Error(t, err, "%s force=%t", runtime, force)
+			require.Contains(t, err.Error(), runtime)
+			require.Contains(t, err.Error(), why)
+			require.Contains(t, err.Error(), "nothing was changed")
+		}
 	}
 }
 
@@ -277,7 +285,8 @@ func TestAnAcceptedBuildIsNotRecognisedUnderAnUnsupportedRuntime(t *testing.T) {
 	// fresh service, because a service keeps the runtime it first read.
 	service.WatchRuntime(t, "netfx-4.8.9345.0")
 	after := service.New(mem, -1).BuildCheck(patch.NewPatcher(mem, -1))
-	require.Equal(t, "unsupported", after.Support)
+	require.True(t, after.ReadOnly, "the CLR entry reported as writable")
+	require.False(t, before.ReadOnly)
 	require.False(t, after.Recognised, "an accepted build is recognised under a runtime with no numbers")
 	require.False(t, after.Known)
 	require.Contains(t, after.Message, "netfx-4.8.9345.0")
@@ -293,4 +302,41 @@ func TestNoDecisionIsRecordedUnderAnUnsupportedRuntime(t *testing.T) {
 	require.Error(t, err)
 	_, statErr := os.Stat(filepath.Join(memtest.ConfigUnder(home), "accepted-builds.json"))
 	require.True(t, os.IsNotExist(statErr), "a decision file was written anyway")
+}
+
+/*
+Under the CLR entry the service finds a CLR player and reads life and mana, and
+reads nothing it has no numbers for.
+
+The game is planted the CLR way: the caps in CLR order and the name at the CLR
+offset, which the mono locator does not find (internal/locate's own tests).
+Inventory is left out of the snapshot rather than read through mono offsets,
+and the inventory-count fallback for picking a copy is skipped for the same
+reason.
+*/
+func TestTheCLREntryReadsTheCLRPlayerAndNothingMore(t *testing.T) {
+	const base, size = 0x10000000, 0x10000
+	mem := &execMem{memtest.New(base, size)}
+	mem.PlantCLRString(base+0x40, "terrariabonker")
+	mem.PlantCLRPlayer(base+0x800, []int32{400, 420, 390, 200, 200, 220}, base+0x40)
+	// Something readable where mono keeps the inventory pointer, as real memory
+	// has: read through mono's numbers it looks like a full inventory. A
+	// snapshot that read it would print items this player does not have.
+	plantInventory(mem.FakeMem, base+0x800, base+0x4000, base+0x5000, liveItemsImage)
+	svc := service.New(mem, -1).WithRuntime("netfx-4.8.9345.0")
+
+	require.True(t, svc.CanRead(layout.ReadPlayer))
+	require.False(t, svc.CanRead(layout.ReadInventory))
+	require.False(t, svc.CanRead(layout.ReadLocalPlayer))
+
+	snap := svc.Snapshot(true)
+	require.Equal(t, 1, snap.Copies)
+	require.NotNil(t, snap.Player)
+	require.Equal(t, "terrariabonker", snap.Player.Name)
+	require.EqualValues(t, 390, snap.Player.HP)
+	require.EqualValues(t, 400, snap.Player.MaxHP, "the permanent cap, which the CLR stores first")
+	require.Empty(t, snap.Inventory, "the inventory was read with another runtime's numbers")
+
+	// The same memory under the mono entry finds no one: the fail-safe.
+	require.Zero(t, service.New(mem, -1).WithRuntime("wine-mono-11.3.0").Snapshot(true).Copies)
 }

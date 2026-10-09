@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ushineko/terrariabonker/internal/builds"
-	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/profile"
 	"github.com/ushineko/terrariabonker/internal/version"
@@ -38,10 +37,13 @@ type BuildReport struct {
 	Runtime string `json:"runtime"`
 	// Support is the version table's answer for this build and runtime (layout.Select),
 	// and RuntimeEntry the entry it chose. Additive: older readers ignore them.
-	Support      string        `json:"support"`
-	RuntimeEntry string        `json:"runtime_entry"`
-	Level        version.Level `json:"level"`
-	Message      string        `json:"message"`
+	Support      string `json:"support"`
+	RuntimeEntry string `json:"runtime_entry"`
+	// ReadOnly is whether the selected entry may not write. Additive, and false
+	// when absent, so an older CLI reads as writable as it always did.
+	ReadOnly bool          `json:"read_only"`
+	Level    version.Level `json:"level"`
+	Message  string        `json:"message"`
 	// Known is whether this project verified an anchor against this build;
 	// VerifiedEverywhere is whether it verified all of them.
 	Known              bool `json:"known"`
@@ -98,7 +100,7 @@ func (s *Service) BuildCheck(p *patch.Patcher) BuildReport {
 
 	report := BuildReport{
 		Build: key, Version: info.Version, BuildID: info.BuildID,
-		Runtime: runtime, Support: string(support), RuntimeEntry: entry.Name,
+		Runtime: runtime, Support: string(support), RuntimeEntry: entry.Name, ReadOnly: !entry.Writes,
 		Level: info.Level, Message: info.Message,
 		Known: verified, VerifiedEverywhere: everywhere,
 		Decision: decided.Decision, Recognised: verified || hasDecision,
@@ -106,13 +108,13 @@ func (s *Service) BuildCheck(p *patch.Patcher) BuildReport {
 	}
 	/*
 		The anchor ledger and this machine's decisions are keyed by build, and say
-		nothing about a runtime no entry covers: the build matching is not the
-		numbers fitting. Reported as what it is, so neither the CLI nor the window
-		calls it known-good.
+		nothing about whether the selected entry may write: the build matching is
+		not the numbers fitting. Reported as what it is, so neither the CLI nor the
+		window calls a read-only or unsupported runtime known-good.
 	*/
-	if support == layout.Unsupported {
+	if !entry.Writes {
 		report.Known, report.VerifiedEverywhere, report.Recognised = false, false, false
-		report.Message = unsupportedRuntime(runtime)
+		report.Message = noWrites(support, runtime)
 	}
 	return report
 }
@@ -137,9 +139,9 @@ type Accepted struct {
 // AcceptBuild records this machine's decision about the running build.
 func (s *Service) AcceptBuild(how string, failed []string) (Accepted, error) {
 	key := s.BuildKey()
-	_, support, runtime := s.Support()
-	if support == layout.Unsupported {
-		return Accepted{}, &Error{Message: unsupportedRuntime(runtime)}
+	entry, support, runtime := s.Support()
+	if !entry.Writes {
+		return Accepted{}, &Error{Message: noWrites(support, runtime)}
 	}
 	if err := builds.Remember(key, how, failed, runtime); err != nil {
 		return Accepted{}, &Error{Message: err.Error()}
