@@ -47,7 +47,7 @@ var monoEntry = Entry{
 		Summon: ItemSummon,
 		CopyLo: CopyLo, CopyHi: CopyHi,
 	},
-	Reads:        []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer, ReadTiles},
+	Reads:        []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer, ReadTiles, ReadProjectiles},
 	LocalPlayer:  ByAnchor,
 	Writes:       true,
 	Enabled:      true,
@@ -57,6 +57,9 @@ var monoEntry = Entry{
 	Injections:   "mono",
 	Tiles: TileShape{TypeOff: 0x08, HeaderOff: 0x0E, ActiveBit: 0x20,
 		Record: 24, DataOff: ArrDataOff, Resolver: "mono"},
+	Projectiles: ProjectileShape{AIOff: ProjectileAI, LocalAIOff: ProjectileLocalAI,
+		ActiveOff: ProjectileActive, BobberOff: ProjectileBobber,
+		Len: ProjectileArrayLen, Resolver: "mono"},
 	Provenance: "Cheat Engine mono dissector and cmd/monofields, 1.4.5.7 and 1.4.5.8",
 }
 

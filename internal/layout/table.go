@@ -93,6 +93,10 @@ const (
 	// ReadTiles is reading the world tile map: ids and the active bit, for the
 	// vein finder. A wrong layout reads wrong ids, never a write, so it is a read.
 	ReadTiles Feature = "tiles"
+	// ReadProjectiles is finding the projectile array and reading a fishing
+	// bobber's state out of it (auto-catch). Read-only; a wrong layout reports no
+	// bobber rather than acting.
+	ReadProjectiles Feature = "projectiles"
 	// WriteItemTemplates is putting a different item in a slot, or a modifier on
 	// one: both copy from the game's pristine template of that item type, which
 	// needs the template scan and the span of fields to copy.
@@ -189,6 +193,21 @@ type TileShape struct {
 }
 
 /*
+ProjectileShape is how one runtime lays a Projectile out and finds the projectile
+array: the object-relative offsets of the two float-array references the bite
+condition reads (ai, localAI) and the two one-byte flags (active, bobber), how
+many projectiles the game keeps, and which resolver (projectile package) finds
+the array. The szarray offsets (length, first element) are the entry's Shapes.
+Only these numbers and the resolver differ between runtimes.
+*/
+type ProjectileShape struct {
+	AIOff, LocalAIOff    int    // -> float[3] field references, object-relative
+	ActiveOff, BobberOff int    // one-byte bools, object-relative
+	Len                  int    // how many projectiles the array holds
+	Resolver             string // "mono" | "clr": how the array is found
+}
+
+/*
 Entry is one supported combination: a runtime family, the builds and runtime
 versions its numbers were derived or confirmed on, what it can read, and whether
 it may write.
@@ -239,6 +258,8 @@ type Entry struct {
 	Injections string
 	// Tiles is how the world tiles are laid out and found.
 	Tiles TileShape
+	// Projectiles is how projectiles are laid out and the array found.
+	Projectiles ProjectileShape
 	// Provenance is where the numbers came from.
 	Provenance string
 }

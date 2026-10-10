@@ -93,7 +93,7 @@ type Service struct {
 
 	// The projectile array, located once; the editor that holds overrides on
 	// what is in flight; and auto-catch's two pieces of state.
-	projArr    uint32
+	projView   *projectile.View
 	projEditor *projectile.Editor
 	lastReel   time.Time
 	seenCast   bool
@@ -126,7 +126,7 @@ func (s *Service) Invalidate() {
 	s.blocks, s.anchor, s.found, s.build = nil, 0, false, nil
 	s.mainBase, s.haveBase = 0, false
 	s.templateAddrs = nil
-	s.projArr, s.projEditor = 0, nil
+	s.projView, s.projEditor = nil, nil
 	s.bankPlaced = nil
 }
 

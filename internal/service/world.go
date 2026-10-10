@@ -73,6 +73,23 @@ func (s *Service) tileBase(entry layout.Entry) (uint32, bool) {
 }
 
 /*
+projectileBase is the base the entry's projectile resolver reads. Under mono it
+is Main's static block; under the CLR the projectile array is a reference static,
+so the base is its slot -- Main.player's slot plus the entry's projectile offset,
+the same shape as tileBase.
+*/
+func (s *Service) projectileBase(entry layout.Entry) (uint32, bool) {
+	if entry.Statics.ProjectileFromPlayer == 0 {
+		return s.StaticBase()
+	}
+	slot, ok := s.mainPlayerSlot()
+	if !ok {
+		return 0, false
+	}
+	return uint32(int(slot) + entry.Statics.ProjectileFromPlayer), true //nolint:gosec // a slot near the player's
+}
+
+/*
 mainPlayerSlot is Main.player's static slot, for an entry that finds the statics
 by identity (the CLR). Resolving the live player leaves the slot in the kept
 anchor.

@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "af3fb4941729cb8125ab8b1dce6f29ec73cca16cab691b272d5b13238e33f215",
+	require.Equal(t, "79a5b0ded60c48fe27663767fabdfb17ca5fbdb8a60c2fa9bda9f51790969f38",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -188,6 +188,31 @@ func TestTheCLRStaticsAreTheTable(t *testing.T) {
 	require.Equal(t, player["statLife"], s.LifeInPlayer)
 	require.Equal(t, [3]uint32{256, 201, 1001}, [3]uint32{s.PlayerLen, s.NPCLen, s.ProjectileLen})
 	require.Equal(t, ByAnchor, monoEntry.LocalPlayer)
+}
+
+/*
+The CLR projectile shape is the CLR table's own offsets, by name, and the mono
+shape is the mono constants. The bite condition reads ai, localAI, active and
+bobber, so each is checked against the class it is declared on; the array holds
+1001 projectiles under both.
+*/
+func TestTheCLRProjectileShapeIsTheTable(t *testing.T) {
+	at := map[string]int{}
+	for _, f := range CLRFields["Projectile"] {
+		at[f.Name] = int(f.Offset)
+	}
+	clr := clrEntry.Projectiles
+	require.Equal(t, at["ai"], clr.AIOff)
+	require.Equal(t, at["localAI"], clr.LocalAIOff)
+	require.Equal(t, at["active"], clr.ActiveOff)
+	require.Equal(t, at["bobber"], clr.BobberOff)
+	require.Equal(t, 1001, clr.Len)
+	require.Equal(t, "clr", clr.Resolver)
+
+	mono := monoEntry.Projectiles
+	require.Equal(t, ProjectileShape{AIOff: ProjectileAI, LocalAIOff: ProjectileLocalAI,
+		ActiveOff: ProjectileActive, BobberOff: ProjectileBobber,
+		Len: ProjectileArrayLen, Resolver: "mono"}, mono)
 }
 
 /*

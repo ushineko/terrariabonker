@@ -49,21 +49,39 @@ const (
 	BiteGrace = 500 * time.Millisecond
 )
 
-// ProjectileArray is the game's projectile array, located once and kept.
+/*
+projectiles is a view of the game's projectile array under the running entry,
+located once and kept.
+
+The view carries the entry's projectile layout, so every reader works whichever
+runtime the game is on: under mono the array is found in Main's static block,
+under the CLR it is Main.projectile's reference static.
+*/
+func (s *Service) projectiles() (*projectile.View, error) {
+	if s.projView != nil {
+		return s.projView, nil
+	}
+	entry, _, _ := s.Support()
+	base, ok := s.projectileBase(entry)
+	if !ok {
+		return nil, &Error{Message: "could not locate Main.projectile"}
+	}
+	v, ok := projectile.Locate(s.Mem, entry, base)
+	if !ok {
+		return nil, &Error{Message: "could not locate Main.projectile"}
+	}
+	s.projView = v
+	return v, nil
+}
+
+// ProjectileArray is the game's projectile array address, for the projectile
+// editor's sweep, which reads the array its own way.
 func (s *Service) ProjectileArray() (uint32, error) {
-	if s.projArr != 0 {
-		return s.projArr, nil
+	v, err := s.projectiles()
+	if err != nil {
+		return 0, err
 	}
-	base, ok := s.StaticBase()
-	if !ok {
-		return 0, &Error{Message: "could not locate Main.projectile"}
-	}
-	arr, ok := projectile.Array(s.Mem, base)
-	if !ok {
-		return 0, &Error{Message: "could not locate Main.projectile"}
-	}
-	s.projArr = arr
-	return arr, nil
+	return v.Arr(), nil
 }
 
 // CatchEvent is one thing a round did.
@@ -82,7 +100,7 @@ later, so the bite still reads as live immediately afterwards -- without the wai
 the same fish is armed for again and again, which is the polling behaviour the
 stub exists to replace.
 */
-func (s *Service) takeBite(p *patch.Patcher, arr uint32, bite projectile.Bobber, end time.Time) (CatchEvent, bool) {
+func (s *Service) takeBite(p *patch.Patcher, v *projectile.View, bite projectile.Bobber, end time.Time) (CatchEvent, bool) {
 	auto := p.AutoUse()
 	if !auto.Arm() {
 		return CatchEvent{}, false
@@ -92,7 +110,7 @@ func (s *Service) takeBite(p *patch.Patcher, arr uint32, bite projectile.Bobber,
 	}
 	s.lastReel = time.Now()
 	for {
-		if _, biting := projectile.FindBite(s.Mem, arr); !biting {
+		if _, biting := v.FindBite(); !biting {
 			break
 		}
 		if !time.Now().Before(end.Add(BiteGrace)) {
@@ -137,14 +155,14 @@ something that is not a rod, and a cheat that keeps arming then swings that thin
 once a tick. One stray press is a bug; a stream of them is a different program.
 The player's next real cast reopens the gate.
 */
-func (s *Service) tryRecast(p *patch.Patcher, arr uint32) (CatchEvent, bool) {
+func (s *Service) tryRecast(p *patch.Patcher, v *projectile.View) (CatchEvent, bool) {
 	if !p.AutoUse().Arm() {
 		return CatchEvent{}, false
 	}
 	yes, no := true, false
 	deadline := time.Now().Add(CastConfirm)
 	for time.Now().Before(deadline) {
-		if len(projectile.FindBobbers(s.Mem, arr)) > 0 {
+		if len(v.FindBobbers()) > 0 {
 			return CatchEvent{What: "cast", Confirmed: &yes}, true
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -173,7 +191,7 @@ func (s *Service) CatchTick(p *patch.Patcher, recast bool, budget time.Duration)
 	if !p.IsEnabled("auto_use") {
 		return nil, &Error{Message: "the auto-use cheat is not enabled"}
 	}
-	arr, err := s.ProjectileArray()
+	v, err := s.projectiles()
 	if err != nil {
 		return nil, err
 	}
@@ -181,18 +199,18 @@ func (s *Service) CatchTick(p *patch.Patcher, recast bool, budget time.Duration)
 	end := time.Now().Add(budget)
 
 	for time.Now().Before(end) {
-		bobbers := projectile.FindBobbers(s.Mem, arr)
+		bobbers := v.FindBobbers()
 		if !s.seenCast && len(bobbers) > 0 {
 			s.seenCast = true // they have cast; a recast may follow
 		}
-		if bite, biting := projectile.FindBite(s.Mem, arr); biting {
-			if event, ok := s.takeBite(p, arr, bite, end); ok {
+		if bite, biting := v.FindBite(); biting {
+			if event, ok := s.takeBite(p, v, bite, end); ok {
 				events = append(events, event)
 			}
 			break
 		}
 		if recast && s.seenCast && len(bobbers) == 0 && s.readyToRecast() {
-			if event, ok := s.tryRecast(p, arr); ok {
+			if event, ok := s.tryRecast(p, v); ok {
 				events = append(events, event)
 			}
 			break
@@ -211,8 +229,8 @@ The gate is deliberately reset: switching off and on again is the player saying
 casting before they touched the rod.
 */
 func (s *Service) CatchStop(p *patch.Patcher) map[string]any {
-	had := s.projArr != 0
-	s.projArr, s.seenCast = 0, false
+	had := s.projView != nil
+	s.projView, s.seenCast = nil, false
 	if p.IsEnabled("auto_use") {
 		// A press promised but not yet landed is not wanted.
 		p.AutoUse().Disarm()

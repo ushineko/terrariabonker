@@ -50,7 +50,7 @@ var clrEntry = Entry{
 		PlayerActive: 0x70E, LifeInPlayer: 0x470, TileFromPlayer: -0x68,
 	},
 	Enabled: true,
-	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory, ReadTiles},
+	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory, ReadTiles, ReadProjectiles},
 	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields, WriteItemTemplates,
 		CheatFeature("mining"), CheatFeature("reach"),
 		CheatFeature("max_minions"), CheatFeature("fast_place"), CheatFeature("pylons"),
@@ -67,6 +67,12 @@ var clrEntry = Entry{
 	// dims inline. Measured live 2026-10-09 (clr-tile-layout).
 	Tiles: TileShape{TypeOff: 0x04, HeaderOff: 0x08, ActiveBit: 0x20,
 		Record: 24, DataOff: 0x18, Resolver: "clr"},
+	// Projectile is a reference type: ai at +0x40, localAI at +0x44 (float[]
+	// references), active at +0x102 and bobber at +0x104 (one-byte bools); the
+	// Projectile[] array is Main.projectile's reference static, a slot off
+	// Main.player's (Statics.ProjectileFromPlayer). Measured 2026-10-08 (CLRFields).
+	Projectiles: ProjectileShape{AIOff: 0x40, LocalAIOff: 0x44,
+		ActiveOff: 0x102, BobberOff: 0x104, Len: 1001, Resolver: "clr"},
 	Provenance: "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }
 

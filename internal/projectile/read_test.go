@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/projectile"
 )
@@ -25,11 +26,11 @@ So the fixture plants one of each case and this reads them back.
 func TestReadingBobbers(t *testing.T) {
 	mem := plant()
 
-	found, ok := projectile.Array(mem, mainBase)
+	v, ok := projectile.Locate(mem, layout.Mono(), mainBase)
 	require.True(t, ok, "the projectile array was not found")
-	require.EqualValues(t, arr, found, "a different array was found")
+	require.EqualValues(t, arr, v.Arr(), "a different array was found")
 
-	got := projectile.FindBobbers(mem, found)
+	got := v.FindBobbers()
 	require.Len(t, got, 4, "a different number of live bobbers was found")
 
 	bySlot := map[int]projectile.Bobber{}
@@ -73,10 +74,10 @@ the cheat missing.
 */
 func TestFindBite(t *testing.T) {
 	mem := plant()
-	found, ok := projectile.Array(mem, mainBase)
+	v, ok := projectile.Locate(mem, layout.Mono(), mainBase)
 	require.True(t, ok)
 
-	bite, biting := projectile.FindBite(mem, found)
+	bite, biting := v.FindBite()
 	require.True(t, biting, "no bite was found in a game with two on the line")
 	require.Contains(t, []int{7, 9}, bite.Slot, "a bobber that is not biting was chosen")
 	require.True(t, bite.Biting())
@@ -86,18 +87,18 @@ func TestFindBite(t *testing.T) {
 // reason.
 func TestReadingOneSlot(t *testing.T) {
 	mem := plant()
-	found, ok := projectile.Array(mem, mainBase)
+	v, ok := projectile.Locate(mem, layout.Mono(), mainBase)
 	require.True(t, ok)
 
-	_, live := projectile.Read(mem, found, 7)
+	_, live := v.Read(7)
 	require.True(t, live, "a live bobber did not read")
 
-	_, gone := projectile.Read(mem, found, 13)
+	_, gone := v.Read(13)
 	require.False(t, gone, "a finished bobber read as a live one")
 }
 
 // An array that is not there is reported rather than read from zero.
 func TestNoArrayInAnEmptyGame(t *testing.T) {
-	_, ok := projectile.Array(memtest.New(base, size), mainBase)
+	_, ok := projectile.Locate(memtest.New(base, size), layout.Mono(), mainBase)
 	require.False(t, ok, "an array was found in empty memory")
 }

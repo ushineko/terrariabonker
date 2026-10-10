@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/projectile"
 )
@@ -153,14 +154,15 @@ unrelated allocation.
 */
 func TestADecoyArrayIsRejected(t *testing.T) {
 	mem := plant()
-	require.False(t, projectile.IsArray(mem, decoy), "a decoy was taken for the projectiles")
-	require.False(t, projectile.IsArray(mem, sparse),
+	mono := layout.Mono()
+	require.False(t, projectile.IsArray(mem, mono, decoy), "a decoy was taken for the projectiles")
+	require.False(t, projectile.IsArray(mem, mono, sparse),
 		"an array with most of its slots empty was taken for the projectiles")
-	require.True(t, projectile.IsArray(mem, arr), "the real array was rejected")
+	require.True(t, projectile.IsArray(mem, mono, arr), "the real array was rejected")
 }
 
-// With nothing plausible anywhere, neither finds an array.
+// With nothing plausible anywhere, nothing is located.
 func TestNoArrayAtAll(t *testing.T) {
-	_, ok := projectile.Array(memtest.New(base, size), mainBase)
+	_, ok := projectile.Locate(memtest.New(base, size), layout.Mono(), mainBase)
 	require.False(t, ok, "an array was found in empty memory")
 }
