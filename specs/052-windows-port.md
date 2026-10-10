@@ -773,10 +773,21 @@ Slice 13 — inventory accessories on the CLR:
       confirmed by the maintainer; disabled, and the loop read back as its original
       bytes.
 
+Slice 14 — the ore extractor on the CLR; all fifteen cheats done:
+- [x] Read side (earlier): `internal/tiles` entry-aware; CLR Tile[,] layout; the vein
+      dry-run works on Windows.
+- [x] Write side: a drain at `Player.GrabItems`' entry (once per frame) breaks the
+      queued vein with `WorldGen.KillTile(x,y,false,false,false)` -- static, x in ecx,
+      y in edx. `KillTile` (not `PickTile`, whose CLR param order is ambiguous) is what
+      vein-mining mods use; it drops the item, which the following GrabItems collects.
+- [x] Live on Windows (2026-10-09): one hand-mined gold block, then the drain took the
+      rest -- 20 tiles plus an adjacent pocket, 23 gold, correct counts, stable;
+      disabled and the prologue read back.
+
+Done: all fifteen cheats work under .NET Framework.
+
 Next slices:
-- [ ] auto_use (paired with auto-fishing, not yet ported); then ore_extract, the last
-      cheat -- highest arena-call frequency, wants the delegate-thunk design
-      (see [[clr-ore-extract-approach]]).
+- [ ] auto_use (paired with auto-fishing, which needs its own reads ported first).
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

@@ -34,6 +34,15 @@ var (
 		0x80, 0x3D, 0, 0, 0, 0, 0x00, 0x74, 0x08,
 		0x8D, 0x65, 0xFC, 0x5E, 0x5D, 0xC2, 0x08, 0x00, 0x8D, 0x45, 0x08,
 	}
+	clrGrabItemsEntry = []byte{
+		0x55, 0x8B, 0xEC, 0x57, 0x56, 0x53, 0x83, 0xEC, 0x68, 0x8B, 0xF1, 0x8D, 0x7D, 0xC8,
+		0xB9, 0x09, 0x00, 0x00, 0x00, 0x33, 0xC0, 0xF3, 0xAB, 0x8B, 0xCE, 0x89, 0x55, 0xF0,
+	}
+	clrKillTileEntry = []byte{
+		0x55, 0x8B, 0xEC, 0x57, 0x56, 0x53, 0x81, 0xEC, 0x90, 0x00, 0x00, 0x00, 0x8B, 0xF1,
+		0x8D, 0x7D, 0x84, 0xB9, 0x19, 0x00, 0x00, 0x00, 0x33, 0xC0, 0xF3, 0xAB, 0x8B, 0xCE,
+		0x89, 0x4D, 0xF0, 0x89, 0x55, 0xEC,
+	}
 	clrInventoryScan = []byte{
 		0x8B, 0x86, 0xD4, 0x00, 0x00, 0x00, 0x3B, 0x58, 0x04, 0x0F, 0x83, 0, 0, 0, 0,
 		0x8B, 0x44, 0x98, 0x08, 0x8B, 0x78, 0x50, 0x8B, 0xCE, 0x8B, 0xD7, 0xE8, 0, 0, 0, 0,
@@ -99,21 +108,23 @@ var (
 )
 
 const (
-	clrGrab     = clrCode + 0x300
-	clrSpawn    = clrCode + 0x380
-	clrDropA    = clrCode + 0x400
-	clrDropB    = clrCode + 0x480
-	clrRanges   = clrCode + 0x500
-	clrSmart    = clrCode + 0x600
-	clrEffects  = clrCode + 0x700
-	clrBenefits = clrCode + 0x780
-	clrTrigger  = clrCode + 0x800
-	clrTpEntry  = clrCode + 0x880 // Player.Teleport entry; its anchor sits 0x21 in
-	clrInvScan  = clrCode + 0x900
-	clrApplyFn  = clrCode + 0xA00
-	clrPrefixFn = clrCode + 0xA80
-	clrArmorFn  = clrCode + 0xB00
-	clrHookTo   = clrCode + 0xB80
+	clrGrab      = clrCode + 0x300
+	clrSpawn     = clrCode + 0x380
+	clrDropA     = clrCode + 0x400
+	clrDropB     = clrCode + 0x480
+	clrRanges    = clrCode + 0x500
+	clrSmart     = clrCode + 0x600
+	clrEffects   = clrCode + 0x700
+	clrBenefits  = clrCode + 0x780
+	clrTrigger   = clrCode + 0x800
+	clrTpEntry   = clrCode + 0x880 // Player.Teleport entry; its anchor sits 0x21 in
+	clrInvScan   = clrCode + 0x900
+	clrApplyFn   = clrCode + 0xA00
+	clrPrefixFn  = clrCode + 0xA80
+	clrArmorFn   = clrCode + 0xB00
+	clrGrabEntry = clrCode + 0xB80
+	clrKillTile  = clrCode + 0xC00
+	clrHookTo    = clrCode + 0xC80
 )
 
 // clrStubbed is the CLR coder with the three hooks' code planted, and memory
@@ -136,6 +147,8 @@ func clrStubbed() *execMem {
 	mem.PokeBytes(clrApplyFn, clrApplyFuncEntry)
 	mem.PokeBytes(clrPrefixFn, clrGrantPrefixEntry)
 	mem.PokeBytes(clrArmorFn, clrGrantArmorEntry)
+	mem.PokeBytes(clrGrabEntry, clrGrabItemsEntry)
+	mem.PokeBytes(clrKillTile, clrKillTileEntry)
 	return mem
 }
 
@@ -211,6 +224,35 @@ func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 	require.Equal(t, clrSmartCursor, mem.Read(clrSmart, len(clrSmartCursor)))
 	require.Equal(t, clrEffectsLoop, mem.Read(clrEffects, len(clrEffectsLoop)))
 	require.Equal(t, clrBenefitLoop, mem.Read(clrBenefits, len(clrBenefitLoop)))
+}
+
+/*
+Under .NET Framework the ore extractor hooks GrabItems' entry and its drain stub
+calls WorldGen.KillTile (entry resolved by its own anchor). Disabling restores the
+hooked prologue.
+*/
+func TestUnderTheCLROreExtractorIsInstalled(t *testing.T) {
+	const runtime = "netfx-4.8.9345.0"
+	mem := clrStubbed()
+	code, _, errOut := runUnder(t, runtime, mem, "patch", "enable", "ore_extract")
+	require.Zero(t, code, errOut)
+
+	jmp := mem.Read(clrGrabEntry, 5)
+	require.Equal(t, byte(0xE9), jmp[0], "no jump at GrabItems' entry")
+	stub := clrGrabEntry + 5 + binary.LittleEndian.Uint32(jmp[1:])
+	body := mem.Read(stub, 96)
+	// the per-tile call: push 0 x3 (fail, effectOnly, noItem), x in ecx, y in edx,
+	// then mov eax, KillTile; call eax.
+	setup := []byte{0x6A, 0x00, 0x6A, 0x00, 0x6A, 0x00, 0x8B, 0x0E, 0x8B, 0x56, 0x04, 0xB8}
+	at := bytes.Index(body, setup)
+	require.GreaterOrEqual(t, at, 0, "the drain does not set up a KillTile call")
+	tgt := at + len(setup)
+	require.EqualValues(t, clrKillTile, binary.LittleEndian.Uint32(body[tgt:]), "the drain does not call KillTile's entry")
+	require.Equal(t, []byte{0xFF, 0xD0}, body[tgt+4:tgt+6], "no call eax after the target")
+
+	code, _, errOut = runUnder(t, runtime, mem, "patch", "disable", "ore_extract")
+	require.Zero(t, code, errOut)
+	require.Equal(t, clrGrabItemsEntry, mem.Read(clrGrabEntry, len(clrGrabItemsEntry)))
 }
 
 /*

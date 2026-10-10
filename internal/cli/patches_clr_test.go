@@ -165,9 +165,9 @@ func TestUnderTheCLRACheatWithoutASiteIsRefused(t *testing.T) {
 
 	code, out, errOut := runUnder(t, runtime, mem, "patch", "status")
 	require.Zero(t, code, errOut)
-	require.Contains(t, out, "ore_extract has no code site under netfx-4.8.1 yet")
+	require.Contains(t, out, "auto_use has no code site under netfx-4.8.1 yet")
 
-	code, _, errOut = runUnder(t, runtime, mem, "patch", "enable", "ore_extract")
+	code, _, errOut = runUnder(t, runtime, mem, "patch", "enable", "auto_use")
 	require.NotZero(t, code)
 	require.Contains(t, errOut, "nothing was changed")
 	require.Equal(t, before, mem.Read(clrBase, 0x20000), "the game was written to")

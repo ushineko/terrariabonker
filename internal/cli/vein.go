@@ -165,7 +165,7 @@ func (a *App) extractCmd() *cobra.Command {
 		Short: "mine the vein at a tile (WRITES to the world)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.CheatFeature("ore_extract"), force)
 			if err != nil {
 				return err
 			}

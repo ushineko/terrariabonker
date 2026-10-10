@@ -28,8 +28,8 @@ each cheat is applied.
 netfxInjectionAnchors are the patterns the CLR set's stubs resolve through.
 
 Ledger: on 2026-10-09 pickup (x10), the drop floor (100%), the spawn cap (30),
-tool reach (30), the smart cursor clamp (20), the vanity accessory slots, map-ping teleport and inventory accessories were
-each confirmed in play on the maintainer's Windows game, then disabled and
+tool reach (30), the smart cursor clamp (20), the vanity accessory slots, map-ping teleport, inventory accessories and
+the ore extractor were each confirmed in play on the maintainer's Windows game, then disabled and
 every site read back as its original bytes.
 */
 var netfxInjectionAnchors = map[string]Anchor{
@@ -158,6 +158,24 @@ var netfxInjectionAnchors = map[string]Anchor{
 	"grant_armor": {Pattern: MustParse(
 		"55 8B EC 57 56 53 8B F1 8B FA 8B 5F 50 8B CE 8B D3 E8 ?? ?? ?? ?? 8B CE 8B D3 E8"),
 		Verified: netfxVerified},
+	/*
+		Player.GrabItems' entry: a once-per-frame method (Player.Update calls it),
+		where the ore drain runs. The five displaced prologue bytes (push ebp; mov
+		ebp,esp; push edi; push esi) are wildcarded; the sub esp,0x68 and the
+		rep-stosd of 9 make it unique. KillTile does not re-enter GrabItems, so
+		draining here is safe.
+	*/
+	"grabitems_entry": {Pattern: MustParse(
+		"?? ?? ?? ?? ?? 53 83 EC 68 8B F1 8D 7D C8 B9 09 00 00 00 33 C0 F3 AB 8B CE 89 55 F0"),
+		Verified: netfxVerified},
+	/*
+		WorldGen.KillTile(int x, int y, bool fail, bool effectOnly, bool noItem),
+		at its entry: a static method, x in ecx and y in edx, the three bools on
+		the stack. The drain calls it per queued tile to break the vein.
+	*/
+	"kill_tile": {Pattern: MustParse(
+		"55 8B EC 57 56 53 81 EC 90 00 00 00 8B F1 8D 7D 84 B9 19 00 00 00 33 C0 F3 AB 8B CE 89 4D F0 89 55 EC"),
+		Verified: netfxVerified},
 	"trydrop": {Pattern: MustParse(
 		"55 8B EC 57 56 53 ?? ?? ?? ?? ?? 8B 4D ?? 39 09 E8 ?? ?? ?? ?? " +
 			"3B 46 18 7D 30 8B 7D 08 8B 5E 08 8B 56 10 8B 46 14"),
@@ -237,6 +255,21 @@ var netfxInjections = map[string]Injection{
 		},
 		RerunOverwrite: false, Arena: true,
 	},
+	/*
+		Ore extractor: a once-per-frame drain at GrabItems' entry that breaks every
+		tile the unprivileged side queued, by calling WorldGen.KillTile. Like mono's
+		it calls a managed method from the arena, but only while a vein is armed
+		(just after the player mines an ore), a handful of frames of KillTile calls
+		whose only objects are the permanently-rooted world tiles.
+	*/
+	"ore_extract": {
+		Name: "ore_extract", Anchor: "grabitems_entry", InjectOff: 0,
+		Overwrite: []byte{0x55, 0x8B, 0xEC, 0x57, 0x56},
+		BuildBody: func(b *Builder, inj Injection) ([]byte, error) {
+			return OreExtractBodyCLR(b, inj.Overwrite)
+		},
+		RerunOverwrite: false, Arena: true,
+	},
 	// The denominator load is reproduced with a cap; all four twins.
 	"loot": {
 		Name: "loot", Anchor: "trydrop", InjectOff: 6,
@@ -289,6 +322,65 @@ func TeleportCallBody(playerObj, teleport uint32, overwrite []byte) ([]byte, err
 	out = append(out, 0xFF, 0xD0) // call eax
 	out = append(out, 0x8B, 0xE3) // mov esp,ebx
 	out = append(out, 0x61)       // popad
+	return append(out, overwrite...), nil
+}
+
+/*
+OreExtractBodyCLR drains the ore queue once per frame, calling WorldGen.KillTile
+for each queued tile. The queue is a count at the arena's OreQueueOff followed by
+(x, y) int pairs; the count is consumed before the work so a batch is mined once,
+not every frame. KillTile is static: x in ecx, y in edx, three false bools pushed
+(break the tile, really remove it, spawn the drop). esp is saved in ebx and
+restored after each call so the stub is right whichever way KillTile cleans the
+stack. The five displaced prologue bytes follow.
+*/
+func OreExtractBodyCLR(b *Builder, overwrite []byte) ([]byte, error) {
+	res := b.Scanner.Resolve("kill_tile", "")
+	if !res.Available {
+		return nil, fmt.Errorf("%s", res.Reason)
+	}
+	kill := res.Sites[0]
+	queue := b.Arena + OreQueueOff
+
+	loop := []byte{0x6A, 0x00, 0x6A, 0x00, 0x6A, 0x00} // push 0 x3: fail, effectOnly, noItem
+	loop = append(loop, 0x8B, 0x0E)                    // mov ecx,[esi]   -- x
+	loop = append(loop, 0x8B, 0x56, 0x04)              // mov edx,[esi+4] -- y
+	loop = append(loop, 0xB8)                          // mov eax, kill
+	loop = append(loop, u32(kill)...)
+	loop = append(loop, 0xFF, 0xD0)       // call eax
+	loop = append(loop, 0x8B, 0xE3)       // mov esp,ebx
+	loop = append(loop, 0x83, 0xC6, 0x08) // add esi,8 -- next pair
+	loop = append(loop, 0x4F)             // dec edi
+	back := 256 - (len(loop) + 2)
+	if back < 128 {
+		return nil, fmt.Errorf("the extractor loop is %d bytes, too far to jump back", len(loop)+2)
+	}
+	loop = append(loop, 0x75, byte(back)) //nolint:gosec // checked above
+
+	setup := []byte{0xC7, 0x05} // mov dword [queue],0 -- consume the count
+	setup = append(setup, u32(queue)...)
+	setup = append(setup, 0x00, 0x00, 0x00, 0x00)
+	setup = append(setup, 0x3D) // cmp eax, OreMaxBatch
+	setup = append(setup, i32(int32(OreMaxBatch))...)
+	setup = append(setup, 0x76, 0x05) // jbe +5
+	setup = append(setup, 0xB8)       // mov eax, OreMaxBatch (clamp)
+	setup = append(setup, i32(int32(OreMaxBatch))...)
+	setup = append(setup, 0xBE) // mov esi, queue+4 -- first pair
+	setup = append(setup, u32(queue+4)...)
+	setup = append(setup, 0x8B, 0xF8) // mov edi,eax -- the count, the loop counter
+	setup = append(setup, 0x8B, 0xDC) // mov ebx,esp
+
+	skip := len(setup) + len(loop)
+	if skip >= 128 {
+		return nil, fmt.Errorf("the extractor stub is %d bytes, too far to skip", skip)
+	}
+	out := []byte{0x60, 0xA1} // pushad; mov eax,[queue] -- the count
+	out = append(out, u32(queue)...)
+	out = append(out, 0x85, 0xC0)       // test eax,eax
+	out = append(out, 0x74, byte(skip)) //nolint:gosec // checked above
+	out = append(out, setup...)
+	out = append(out, loop...)
+	out = append(out, 0x61) // popad -- where the skip lands
 	return append(out, overwrite...), nil
 }
 
