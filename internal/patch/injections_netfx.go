@@ -28,8 +28,8 @@ each cheat is applied.
 netfxInjectionAnchors are the patterns the CLR set's stubs resolve through.
 
 Ledger: on 2026-10-09 pickup (x10), the drop floor (100%), the spawn cap (30),
-tool reach (30), the smart cursor clamp (20), the vanity accessory slots and
-map-ping teleport were each confirmed in play on the maintainer's Windows game, then disabled and
+tool reach (30), the smart cursor clamp (20), the vanity accessory slots, map-ping teleport and inventory accessories were
+each confirmed in play on the maintainer's Windows game, then disabled and
 every site read back as its original bytes.
 */
 var netfxInjectionAnchors = map[string]Anchor{
@@ -131,6 +131,33 @@ var netfxInjectionAnchors = map[string]Anchor{
 	"player_teleport": {Pattern: MustParse(
 		"C7 83 A4 06 00 00 64 00 00 00 C7 83 54 03 00 00 04 00 00 00"),
 		Verified: netfxVerified},
+	/*
+		UpdateEquips' first loop, which walks all 58 inventory slots every frame
+		(vanilla uses it for info and mechanical accessories -- why a Depth Meter
+		works from the bag). Matched from the Player.inventory read (esi+0xD4)
+		through the bounds check and the element load, to where the Item is in eax.
+		The seven bytes the stub displaces are wildcarded so a cold re-resolve
+		matches with the hook in.
+	*/
+	"inventory_scan": {Pattern: MustParse(
+		"8B 86 D4 00 00 00 3B 58 04 0F 83 ?? ?? ?? ?? 8B 44 98 08 " +
+			"?? ?? ?? ?? ?? ?? ?? E8"),
+		Verified: netfxVerified},
+	/*
+		Entries of the three methods an equipped accessory goes through, each at
+		its prologue (offset 0): ApplyEquipFunctional (the effects),
+		GrantPrefixBenefits (modifier benefits) and GrantArmorBenefits (per-item
+		extras). The inventory stub calls these for each accessory in the bag.
+	*/
+	"apply_func": {Pattern: MustParse(
+		"55 8B EC 57 56 53 81 EC 08 01 00 00 33 C0 89 85 1C FF FF FF"),
+		Verified: netfxVerified},
+	"grant_prefix": {Pattern: MustParse(
+		"55 8B EC 80 BA 2E 01 00 00 3E 75 06 FF 81 64 04 00 00 80 BA 2E 01 00 00 3F"),
+		Verified: netfxVerified},
+	"grant_armor": {Pattern: MustParse(
+		"55 8B EC 57 56 53 8B F1 8B FA 8B 5F 50 8B CE 8B D3 E8 ?? ?? ?? ?? 8B CE 8B D3 E8"),
+		Verified: netfxVerified},
 	"trydrop": {Pattern: MustParse(
 		"55 8B EC 57 56 53 ?? ?? ?? ?? ?? 8B 4D ?? 39 09 E8 ?? ?? ?? ?? " +
 			"3B 46 18 7D 30 8B 7D 08 8B 5E 08 8B 56 10 8B 46 14"),
@@ -194,6 +221,22 @@ var netfxInjections = map[string]Injection{
 			{Anchor: "equip_benefits", Off: 32, Orig: []byte{0x0A}, Patched: []byte{0x14}},
 		},
 	},
+	/*
+		Accessories work from the inventory: the stub runs the three accessory
+		methods for each inventory item that is an accessory, the same ones an
+		equipped slot goes through. Like mono's, it calls managed code from the
+		arena -- per inventory item per frame -- so it carries the GC risk the
+		research describes; the objects it touches are rooted in the inventory
+		array, so in practice the redundant roots usually cover the gap.
+	*/
+	"inventory_accs": {
+		Name: "inventory_accs", Anchor: "inventory_scan", InjectOff: 19,
+		Overwrite: []byte{0x8B, 0x78, 0x50, 0x8B, 0xCE, 0x8B, 0xD7},
+		BuildBody: func(b *Builder, inj Injection) ([]byte, error) {
+			return InvAccsBodyCLR(b, inj.Overwrite)
+		},
+		RerunOverwrite: false, Arena: true,
+	},
 	// The denominator load is reproduced with a cap; all four twins.
 	"loot": {
 		Name: "loot", Anchor: "trydrop", InjectOff: 6,
@@ -246,6 +289,63 @@ func TeleportCallBody(playerObj, teleport uint32, overwrite []byte) ([]byte, err
 	out = append(out, 0xFF, 0xD0) // call eax
 	out = append(out, 0x8B, 0xE3) // mov esp,ebx
 	out = append(out, 0x61)       // popad
+	return append(out, overwrite...), nil
+}
+
+/*
+InvAccsBodyCLR calls GrantPrefixBenefits, GrantArmorBenefits and
+ApplyEquipFunctional for each inventory item that is an accessory (Item.accessory
++0x10E), the same path an equipped accessory takes. At the hook eax is the Item
+and esi the player. The accessory flag gates the calls, because the loop runs
+58 items a frame and the methods are large.
+
+GrantPrefixBenefits and GrantArmorBenefits take the player in ecx and the item in
+edx; ApplyEquipFunctional takes the player in ecx, the slot in edx (0 here -- the
+slot only indexes a ten-bool hide array) and the item on the stack. esp is saved
+in ebx and restored after each call so the stub is right whichever way the callee
+cleans the stack. The three displaced bytes that follow are reproduced last.
+*/
+func InvAccsBodyCLR(b *Builder, overwrite []byte) ([]byte, error) {
+	entry := func(anchor string) (uint32, error) {
+		res := b.Scanner.Resolve(anchor, "")
+		if !res.Available {
+			return 0, fmt.Errorf("%s", res.Reason)
+		}
+		return res.Sites[0], nil
+	}
+	prefixFn, err := entry("grant_prefix")
+	if err != nil {
+		return nil, err
+	}
+	armorFn, err := entry("grant_armor")
+	if err != nil {
+		return nil, err
+	}
+	applyFn, err := entry("apply_func")
+	if err != nil {
+		return nil, err
+	}
+
+	call := func(target uint32) []byte {
+		out := append([]byte{0xB8}, u32(target)...) // mov eax, target
+		return append(out, 0xFF, 0xD0, 0x8B, 0xE3)  // call eax; mov esp,ebx
+	}
+
+	guarded := []byte{0x8B, 0xCE, 0x8B, 0xD7} // mov ecx,esi; mov edx,edi (player, item)
+	guarded = append(guarded, call(prefixFn)...)
+	guarded = append(guarded, 0x8B, 0xCE, 0x8B, 0xD7)
+	guarded = append(guarded, call(armorFn)...)
+	guarded = append(guarded, 0x57, 0x8B, 0xCE, 0x33, 0xD2) // push edi; mov ecx,esi; xor edx,edx
+	guarded = append(guarded, call(applyFn)...)
+	if len(guarded) > 127 {
+		return nil, fmt.Errorf("the inventory-accessory stub is %d bytes, too far to skip", len(guarded))
+	}
+
+	out := []byte{0x60, 0x8B, 0xDC, 0x8B, 0xF8}                 // pushad; mov ebx,esp; mov edi,eax (Item)
+	out = append(out, 0x80, 0xBF, 0x0E, 0x01, 0x00, 0x00, 0x00) // cmp byte [edi+10E],0 -- accessory?
+	out = append(out, 0x74, byte(len(guarded)))                 //nolint:gosec // bounded above
+	out = append(out, guarded...)
+	out = append(out, 0x61) // popad
 	return append(out, overwrite...), nil
 }
 

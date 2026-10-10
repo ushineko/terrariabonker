@@ -34,6 +34,22 @@ var (
 		0x80, 0x3D, 0, 0, 0, 0, 0x00, 0x74, 0x08,
 		0x8D, 0x65, 0xFC, 0x5E, 0x5D, 0xC2, 0x08, 0x00, 0x8D, 0x45, 0x08,
 	}
+	clrInventoryScan = []byte{
+		0x8B, 0x86, 0xD4, 0x00, 0x00, 0x00, 0x3B, 0x58, 0x04, 0x0F, 0x83, 0, 0, 0, 0,
+		0x8B, 0x44, 0x98, 0x08, 0x8B, 0x78, 0x50, 0x8B, 0xCE, 0x8B, 0xD7, 0xE8, 0, 0, 0, 0,
+	}
+	clrApplyFuncEntry = []byte{
+		0x55, 0x8B, 0xEC, 0x57, 0x56, 0x53, 0x81, 0xEC, 0x08, 0x01, 0x00, 0x00,
+		0x33, 0xC0, 0x89, 0x85, 0x1C, 0xFF, 0xFF, 0xFF,
+	}
+	clrGrantPrefixEntry = []byte{
+		0x55, 0x8B, 0xEC, 0x80, 0xBA, 0x2E, 0x01, 0x00, 0x00, 0x3E, 0x75, 0x06,
+		0xFF, 0x81, 0x64, 0x04, 0x00, 0x00, 0x80, 0xBA, 0x2E, 0x01, 0x00, 0x00, 0x3F,
+	}
+	clrGrantArmorEntry = []byte{
+		0x55, 0x8B, 0xEC, 0x57, 0x56, 0x53, 0x8B, 0xF1, 0x8B, 0xFA, 0x8B, 0x5F, 0x50,
+		0x8B, 0xCE, 0x8B, 0xD3, 0xE8, 0, 0, 0, 0, 0x8B, 0xCE, 0x8B, 0xD3, 0xE8,
+	}
 	clrPlayerTeleport = []byte{
 		0xC7, 0x83, 0xA4, 0x06, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
 		0xC7, 0x83, 0x54, 0x03, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
@@ -93,7 +109,11 @@ const (
 	clrBenefits = clrCode + 0x780
 	clrTrigger  = clrCode + 0x800
 	clrTpEntry  = clrCode + 0x880 // Player.Teleport entry; its anchor sits 0x21 in
-	clrHookTo   = clrCode + 0x980
+	clrInvScan  = clrCode + 0x900
+	clrApplyFn  = clrCode + 0xA00
+	clrPrefixFn = clrCode + 0xA80
+	clrArmorFn  = clrCode + 0xB00
+	clrHookTo   = clrCode + 0xB80
 )
 
 // clrStubbed is the CLR coder with the three hooks' code planted, and memory
@@ -112,6 +132,10 @@ func clrStubbed() *execMem {
 	mem.PokeBytes(clrBenefits, clrBenefitLoop)
 	mem.PokeBytes(clrTrigger, clrTriggerPing)
 	mem.PokeBytes(clrTpEntry+0x21, clrPlayerTeleport) // the anchor, 0x21 past the entry
+	mem.PokeBytes(clrInvScan, clrInventoryScan)
+	mem.PokeBytes(clrApplyFn, clrApplyFuncEntry)
+	mem.PokeBytes(clrPrefixFn, clrGrantPrefixEntry)
+	mem.PokeBytes(clrArmorFn, clrGrantArmorEntry)
 	return mem
 }
 
@@ -187,6 +211,37 @@ func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 	require.Equal(t, clrSmartCursor, mem.Read(clrSmart, len(clrSmartCursor)))
 	require.Equal(t, clrEffectsLoop, mem.Read(clrEffects, len(clrEffectsLoop)))
 	require.Equal(t, clrBenefitLoop, mem.Read(clrBenefits, len(clrBenefitLoop)))
+}
+
+/*
+Under .NET Framework inventory accessories hooks the inventory loop and its stub
+calls GrantPrefixBenefits, GrantArmorBenefits and ApplyEquipFunctional -- the
+three method entries resolved by their own anchors. Disabling restores the loop.
+*/
+func TestUnderTheCLRInventoryAccessoriesAreInstalled(t *testing.T) {
+	const runtime = "netfx-4.8.9345.0"
+	mem := clrStubbed()
+	code, _, errOut := runUnder(t, runtime, mem, "patch", "enable", "inventory_accs")
+	require.Zero(t, code, errOut)
+
+	jmp := mem.Read(clrInvScan+19, 5)
+	require.Equal(t, byte(0xE9), jmp[0], "no jump at the inventory-scan hook")
+	stub := clrInvScan + 19 + 5 + binary.LittleEndian.Uint32(jmp[1:])
+	body := mem.Read(stub, 80)
+
+	// the three call targets, in order, as mov eax,imm32 (B8) immediates
+	var targets []uint32
+	for i := 0; i+5 <= len(body); i++ {
+		if body[i] == 0xB8 && i+4 < len(body) && body[i+5] == 0xFF && body[i+6] == 0xD0 {
+			targets = append(targets, binary.LittleEndian.Uint32(body[i+1:]))
+		}
+	}
+	require.Equal(t, []uint32{clrPrefixFn, clrArmorFn, clrApplyFn}, targets,
+		"the stub calls prefix, armor, then apply-functional")
+
+	code, _, errOut = runUnder(t, runtime, mem, "patch", "disable", "inventory_accs")
+	require.Zero(t, code, errOut)
+	require.Equal(t, clrInventoryScan, mem.Read(clrInvScan, len(clrInventoryScan)))
 }
 
 /*

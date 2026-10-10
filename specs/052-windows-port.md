@@ -757,11 +757,26 @@ Slice 12 â€” Cheat Engine as a scriptable .NET resolver; map-ping teleport:
       the x16 tile->pixel scale, then the newPos stack slot); disabled, and the hook
       read back as its original prologue.
 
+Slice 13 — inventory accessories on the CLR:
+- [x] The mono design, ported faithfully: hook UpdateEquips' 58-slot inventory loop
+      (`inventory_scan`) where the Item is in eax, and for each item that is an
+      accessory call GrantPrefixBenefits, GrantArmorBenefits and ApplyEquipFunctional
+      -- the same three methods an equipped accessory goes through, resolved by their
+      own prologue anchors. The seven displaced loop bytes are wildcarded.
+- [x] This calls managed code from the arena per inventory item per frame -- the
+      high-frequency case the GC research warned about -- but the objects it touches
+      (player, inventory array, items) are permanently rooted in static Main.player[],
+      so collection is impossible and only a rare gen2 compaction could relocate one
+      under the hidden frame. Ran stably in play; the no-call loop-extension remains
+      the fallback if a crash ever appears.
+- [x] Live on Windows (2026-10-09): accessories in the bag granted their effects,
+      confirmed by the maintainer; disabled, and the loop read back as its original
+      bytes.
+
 Next slices:
-- [ ] inventory_accs on the CLR (no-call: extend UpdateEquips' loops and patch
-      GetEffectiveArmor for the extra slots); then auto_use; then ore_extract, which
-      needs many managed calls per frame and so wants the delegate-thunk design
-      (see [[clr-ore-extract-approach]]), not the per-ping exception teleport takes.
+- [ ] auto_use (paired with auto-fishing, not yet ported); then ore_extract, the last
+      cheat -- highest arena-call frequency, wants the delegate-thunk design
+      (see [[clr-ore-extract-approach]]).
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

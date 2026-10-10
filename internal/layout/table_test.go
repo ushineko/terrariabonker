@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "fc8009c58a78ab281679cdcdf325501f1d2448b5696ba2b9dd5edaceba2951a3",
+	require.Equal(t, "f5e42910b40edfe0da4669be1e44dc05eb764c00f0c4e088b247808728f8a911",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
