@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "f5e42910b40edfe0da4669be1e44dc05eb764c00f0c4e088b247808728f8a911",
+	require.Equal(t, "27df6762e69552ff88e3ee4c80191eebdbd02dae5683e1c2f13db74202b696c8",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -162,7 +162,8 @@ func TestTheCLRPlayerFieldsAreTheTable(t *testing.T) {
 func TestTheMonoPlayerFieldsAreTheConstants(t *testing.T) {
 	require.Equal(t, PlayerFields{NameFromLife: -0x6C0, InventoryFromLife: -0x664, SelectedItemFromLife: -0x694,
 		LifeMaxFromLife: -0x08, LifeMax2FromLife: -0x04,
-		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C}, monoEntry.Player)
+		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C,
+		PositionFromLife: 0x0C - 0x738}, monoEntry.Player)
 }
 
 /*

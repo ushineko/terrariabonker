@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/memtest"
 	"github.com/ushineko/terrariabonker/internal/tiles"
 )
@@ -368,14 +369,14 @@ func TestWhitelist(t *testing.T) {
 
 // A world that is not loaded is said to be, rather than read as an empty one.
 func TestAWorldThatIsNotLoaded(t *testing.T) {
-	_, err := tiles.New(memtest.New(base, size), staticBase)
+	_, err := tiles.New(memtest.New(base, size), layout.Mono(), staticBase)
 	require.Error(t, err, "a world was read where none is loaded")
 	require.Contains(t, err.Error(), "is a world loaded")
 }
 
 func tm(t *testing.T) *tiles.TileMap {
 	t.Helper()
-	got, err := tiles.New(plant(), staticBase)
+	got, err := tiles.New(plant(), layout.Mono(), staticBase)
 	require.NoError(t, err)
 	return got
 }
@@ -395,7 +396,7 @@ So the cost is what is measured.
 */
 func TestTheSearchReadsRunsRatherThanTiles(t *testing.T) {
 	counted := &counter{FakeMem: plant()}
-	tm, err := tiles.New(counted, staticBase)
+	tm, err := tiles.New(counted, layout.Mono(), staticBase)
 	require.NoError(t, err)
 
 	counted.reads = 0

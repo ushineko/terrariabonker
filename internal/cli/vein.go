@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/service"
 	"github.com/ushineko/terrariabonker/internal/tiles"
 )
@@ -41,7 +42,7 @@ func (a *App) veinCmd() *cobra.Command {
 		Short: "dry run: what a vein miner would take from a tile (reads only)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			got, err := a.gameReadingAll()
+			got, err := a.gameReading(layout.ReadTiles)
 			if err != nil {
 				return err
 			}

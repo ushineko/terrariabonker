@@ -7,7 +7,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ushineko/terrariabonker/internal/locate"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/tiles"
 )
@@ -83,8 +82,9 @@ func (s *Service) PlayerTile() (int32, int32, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	base := live.LifeAddr - locate.StatLifeFromObj
-	raw := s.Mem.Read(base+0x0C, 8)
+	entry, _, _ := s.Support()
+	addr := uint32(int(live.LifeAddr) + entry.Player.PositionFromLife) //nolint:gosec // an offset from statLife
+	raw := s.Mem.Read(addr, 8)
 	if len(raw) < 8 {
 		return 0, 0, &Error{Message: "the player's position is not readable"}
 	}

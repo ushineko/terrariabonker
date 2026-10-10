@@ -34,7 +34,8 @@ var monoEntry = Entry{
 	},
 	Player: PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff, SelectedItemFromLife: SelectedItemOff,
 		LifeMaxFromLife: StatLifeMaxOff, LifeMax2FromLife: StatLifeMax2Off,
-		ManaFromLife: StatManaOff, ManaMaxFromLife: StatManaMaxOff, ManaMax2FromLife: StatManaMax2Off},
+		ManaFromLife: StatManaOff, ManaMaxFromLife: StatManaMaxOff, ManaMax2FromLife: StatManaMax2Off,
+		PositionFromLife: 0x0C - 0x738},
 	Item: ItemFields{
 		Type: ItemType, Stack: ItemStack, UseTime: ItemUseTime, UseAnim: ItemUseAnim,
 		Pick: ItemPick, TileBoost: ItemTileBoost, Damage: ItemDamage, Rare: ItemRare,
@@ -46,7 +47,7 @@ var monoEntry = Entry{
 		Summon: ItemSummon,
 		CopyLo: CopyLo, CopyHi: CopyHi,
 	},
-	Reads:        []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer},
+	Reads:        []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer, ReadTiles},
 	LocalPlayer:  ByAnchor,
 	Writes:       true,
 	Enabled:      true,
@@ -54,7 +55,9 @@ var monoEntry = Entry{
 	Anchors:      monoAnchors,
 	Cheats:       monoCheats,
 	Injections:   "mono",
-	Provenance:   "Cheat Engine mono dissector and cmd/monofields, 1.4.5.7 and 1.4.5.8",
+	Tiles: TileShape{TypeOff: 0x08, HeaderOff: 0x0E, ActiveBit: 0x20,
+		Record: 24, DataOff: ArrDataOff, Resolver: "mono"},
+	Provenance: "Cheat Engine mono dissector and cmd/monofields, 1.4.5.7 and 1.4.5.8",
 }
 
 /*

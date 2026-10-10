@@ -24,7 +24,8 @@ var clrEntry = Entry{
 	},
 	Player: PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C,
 		LifeMaxFromLife: -0x08, LifeMax2FromLife: -0x04,
-		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C},
+		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C,
+		PositionFromLife: 0x20 - 0x470},
 	// Item: CLRFields["Item"], by name (TestTheCLRItemFieldsAreTheTable). No
 	// SelectedItemFromLife: the CLR has no selectedItem field, only a
 	// selectedItemState struct, and which word of it is the index is unmeasured.
@@ -46,10 +47,10 @@ var clrEntry = Entry{
 	Statics: MainStatics{
 		NPCFromPlayer: -0x54, ProjectileFromPlayer: -0x48,
 		PlayerLen: 256, NPCLen: 201, ProjectileLen: 1001,
-		PlayerActive: 0x70E, LifeInPlayer: 0x470,
+		PlayerActive: 0x70E, LifeInPlayer: 0x470, TileFromPlayer: -0x68,
 	},
 	Enabled: true,
-	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory},
+	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory, ReadTiles},
 	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields, WriteItemTemplates,
 		CheatFeature("mining"), CheatFeature("reach"),
 		CheatFeature("max_minions"), CheatFeature("fast_place"), CheatFeature("pylons"),
@@ -61,7 +62,12 @@ var clrEntry = Entry{
 	Anchors:      netfxAnchors,
 	Cheats:       netfxCheats,
 	Injections:   "netfx",
-	Provenance:   "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
+	// Tile is a reference type: type at +0x04, sTileHeader at +0x08 (active bit
+	// 0x20), objects 0x18 apart; the Tile[,] array keeps its data at +0x18 with
+	// dims inline. Measured live 2026-10-09 (clr-tile-layout).
+	Tiles: TileShape{TypeOff: 0x04, HeaderOff: 0x08, ActiveBit: 0x20,
+		Record: 24, DataOff: 0x18, Resolver: "clr"},
+	Provenance: "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }
 
 /*

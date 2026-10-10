@@ -90,6 +90,9 @@ const (
 	// WriteItemFields is editing an item's fields in place: stack, use speed,
 	// pick power, reach, damage, auto-reuse. The item keeps its type.
 	WriteItemFields Feature = "item-fields"
+	// ReadTiles is reading the world tile map: ids and the active bit, for the
+	// vein finder. A wrong layout reads wrong ids, never a write, so it is a read.
+	ReadTiles Feature = "tiles"
 	// WriteItemTemplates is putting a different item in a slot, or a modifier on
 	// one: both copy from the game's pristine template of that item type, which
 	// needs the template scan and the span of fields to copy.
@@ -130,6 +133,8 @@ type PlayerFields struct {
 	// both runtimes measured (statLifeMax, the permanent cap, first).
 	LifeMaxFromLife, LifeMax2FromLife               int
 	ManaFromLife, ManaMaxFromLife, ManaMax2FromLife int
+	// PositionFromLife is Entity.position (a Vector2, world pixels) from statLife.
+	PositionFromLife int
 }
 
 // LocalPlayerBy is how an entry tells which player copy is the live one.
@@ -162,6 +167,25 @@ type MainStatics struct {
 	PlayerActive int
 	// LifeInPlayer is Player.statLife, object-relative.
 	LifeInPlayer int
+	// TileFromPlayer is Main.tile's static slot relative to Main.player's, for an
+	// entry that finds the tile array by the statics (the CLR). Zero when the tile
+	// array is reached another way (mono, via a static-block offset).
+	TileFromPlayer int
+}
+
+/*
+TileShape is how one runtime lays the world tiles out: the offsets of a tile
+object's fields, the tile objects' allocation stride, where an array object keeps
+its first element, and which resolver (tiles package) finds the array and its
+dimensions. Tiles are a reference array on both runtimes; only these numbers and
+the resolver differ.
+*/
+type TileShape struct {
+	TypeOff, HeaderOff int    // within a Tile object
+	ActiveBit          uint16 // active() is (sTileHeader & ActiveBit) != 0
+	Record             int    // the tile objects' contiguous allocation stride
+	DataOff            int    // the array object's first element
+	Resolver           string // "mono" | "clr": how the array and dims are found
 }
 
 /*
@@ -213,6 +237,8 @@ type Entry struct {
 	// Injections names the injection set (patch's registry) this entry's
 	// stub-based cheats come from; "" when it has none.
 	Injections string
+	// Tiles is how the world tiles are laid out and found.
+	Tiles TileShape
 	// Provenance is where the numbers came from.
 	Provenance string
 }

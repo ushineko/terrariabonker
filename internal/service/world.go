@@ -40,11 +40,12 @@ A world change moves the tile buffer, not the statics, so the view is still
 rebuilt each call.
 */
 func (s *Service) TileMap() (*tiles.TileMap, error) {
-	base, ok := s.StaticBase()
+	entry, _, _ := s.Support()
+	base, ok := s.tileBase(entry)
 	if !ok {
 		return nil, &Error{Message: "could not locate Main's statics -- is the game in a world?"}
 	}
-	tm, err := tiles.New(s.Mem, base)
+	tm, err := tiles.New(s.Mem, entry, base)
 	if err != nil {
 		// Stale, or no world loaded: scan again next time rather than keeping a
 		// base that no longer describes anything.
@@ -52,6 +53,39 @@ func (s *Service) TileMap() (*tiles.TileMap, error) {
 		return nil, &Error{Message: err.Error()}
 	}
 	return tm, nil
+}
+
+/*
+tileBase is the base the entry's tile resolver reads. Under mono it is Main's
+static block; under the CLR the tile array is a reference static, so the base is
+its slot -- Main.player's slot (found by the statics finder) plus the entry's
+tile offset.
+*/
+func (s *Service) tileBase(entry layout.Entry) (uint32, bool) {
+	if entry.Statics.TileFromPlayer == 0 {
+		return s.StaticBase()
+	}
+	slot, ok := s.mainPlayerSlot()
+	if !ok {
+		return 0, false
+	}
+	return uint32(int(slot) + entry.Statics.TileFromPlayer), true //nolint:gosec // a slot near the player's
+}
+
+/*
+mainPlayerSlot is Main.player's static slot, for an entry that finds the statics
+by identity (the CLR). Resolving the live player leaves the slot in the kept
+anchor.
+*/
+func (s *Service) mainPlayerSlot() (uint32, bool) {
+	blocks, err := s.Players()
+	if err != nil || len(blocks) == 0 {
+		return 0, false
+	}
+	if _, ok := s.resolveLive(blocks); !ok {
+		return 0, false
+	}
+	return s.anchor, true
 }
 
 // World is which world is loaded.

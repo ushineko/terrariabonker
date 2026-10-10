@@ -30,28 +30,73 @@ returns a constant zero, which makes every tile look mined. CheckActiveOffset
 exists because that failure is silent and a self-consistent test fixture will not
 catch it.
 */
-const (
-	boundsOff     = 0x08 // to {width, originX, height, originY}
-	entriesOff    = layout.ArrDataOff
-	tileTypeOff   = 0x08 // ushort, within a tile object
-	tileHeaderOff = 0x0E // sTileHeader, ushort
-	activeBit     = 0x20 // active() is (sTileHeader & 32) == 32
-)
+const boundsOff = 0x08 // mono: array -> {width, originX, height, originY}
 
 /*
-tileRecord is how far apart the tile objects sit.
-
-They are pool-allocated and run contiguously down a column: a 1200-tile column
-measured 1,197 deltas of exactly this and only three breaks, with no gaps.
-Reading a whole run at once and striding the type out of it is what makes a
-full-world search affordable -- 0.15 s against 5,040,000 tiles, where one read per
-tile extrapolated to 13.2 s.
-
-This is an **allocator observation, not a guaranteed layout**, so the search
-verifies the stride as it goes and falls back to per-tile reads for any run that
-does not hold. A different allocation pattern costs speed and never correctness.
+arrayInfo is a resolved tile array: its data start and the world's dimensions.
+Where these come from differs by runtime (resolvers), so finding them is the one
+per-runtime piece; everything downstream reads through layout.TileShape.
 */
-const tileRecord = 24
+type arrayInfo struct {
+	buf            uint32
+	stride, ox, oy int32
+	maxX, maxY     int32
+}
+
+// resolvers find the tile array and its dimensions, by the name an entry's
+// TileShape gives. Each is a distinct module; no shared code branches on runtime.
+var resolvers = map[string]func(Mem, uint32, layout.TileShape) (arrayInfo, error){
+	"mono": monoArray,
+	"clr":  clrArray,
+}
+
+/*
+monoArray follows the mono layout: a Main.tile pointer at a static-block offset,
+then a bounds sub-object holding the dimensions, and the world size in the static
+block.
+*/
+func monoArray(mem Mem, staticBase uint32, sh layout.TileShape) (arrayInfo, error) {
+	arr, _ := mem.ReadU32(staticBase + layout.MainTileOff)
+	var bounds uint32
+	if arr != 0 {
+		bounds, _ = mem.ReadU32(arr + boundsOff)
+	}
+	if bounds == 0 {
+		return arrayInfo{}, fmt.Errorf("cannot read Main.tile -- is a world loaded?")
+	}
+	info := arrayInfo{buf: arr + uint32(sh.DataOff)} //nolint:gosec // a small offset
+	info.stride, _ = mem.ReadI32(bounds + 0x08)      // the buffer's height, the stride
+	info.ox, _ = mem.ReadI32(bounds + 0x04)
+	info.oy, _ = mem.ReadI32(bounds + 0x0C)
+	info.maxX, _ = mem.ReadI32(staticBase + layout.MainMaxTilesOff)
+	info.maxY, _ = mem.ReadI32(staticBase + layout.MainMaxTilesOff + 4)
+	if info.stride == 0 || info.maxX == 0 || info.maxY == 0 {
+		return arrayInfo{}, fmt.Errorf("world dimensions unreadable")
+	}
+	return info, nil
+}
+
+/*
+clrArray follows the .NET layout: base is Main.tile's reference-static slot
+holding the Tile[,] array directly, whose dimensions are inline (lenX at +0x08,
+lenY at +0x0C, the stride), lower bounds zero. Measured 2026-10-09.
+*/
+func clrArray(mem Mem, slot uint32, sh layout.TileShape) (arrayInfo, error) {
+	arr, _ := mem.ReadU32(slot)
+	if arr == 0 {
+		return arrayInfo{}, fmt.Errorf("cannot read Main.tile -- is a world loaded?")
+	}
+	lenX, _ := mem.ReadI32(arr + 0x08)
+	lenY, _ := mem.ReadI32(arr + 0x0C)
+	if lenX == 0 || lenY == 0 {
+		return arrayInfo{}, fmt.Errorf("world dimensions unreadable")
+	}
+	return arrayInfo{buf: arr + uint32(sh.DataOff), stride: lenY, maxX: lenX, maxY: lenY}, nil //nolint:gosec // a small offset
+}
+
+// Tile objects are pool-allocated a fixed stride apart (layout.TileShape.Record),
+// which lets a contiguous run be read in one go; a run that is not contiguous
+// falls back to per-tile reads, costing speed not correctness.
 
 /*
 Ores is the vanilla ore tile ids.
@@ -129,28 +174,28 @@ type TileMap struct {
 	OriginY int32
 	MaxX    int32
 	MaxY    int32
+	sh      layout.TileShape
 }
 
-// New is a view of the world the given Main static block describes.
-func New(mem Mem, staticBase uint32) (*TileMap, error) {
-	buf, _ := mem.ReadU32(staticBase + layout.MainTileOff)
-	var bounds uint32
-	if buf != 0 {
-		bounds, _ = mem.ReadU32(buf + boundsOff)
+/*
+New is a view of the world the given entry describes. base is the entry's tile
+base: the Main static block under mono, or Main.tile's reference-static slot
+under the CLR -- whichever the entry's resolver reads.
+*/
+func New(mem Mem, e layout.Entry, base uint32) (*TileMap, error) {
+	resolve := resolvers[e.Tiles.Resolver]
+	if resolve == nil {
+		return nil, fmt.Errorf("no tile resolver %q", e.Tiles.Resolver)
 	}
-	if bounds == 0 {
-		return nil, fmt.Errorf("cannot read Main.tile -- is a world loaded?")
+	info, err := resolve(mem, base, e.Tiles)
+	if err != nil {
+		return nil, err
 	}
-	tm := &TileMap{Mem: mem, Buf: buf}
-	tm.Stride, _ = mem.ReadI32(bounds + 0x08) // the buffer's height, which is the stride
-	tm.OriginX, _ = mem.ReadI32(bounds + 0x04)
-	tm.OriginY, _ = mem.ReadI32(bounds + 0x0C)
-	tm.MaxX, _ = mem.ReadI32(staticBase + layout.MainMaxTilesOff)
-	tm.MaxY, _ = mem.ReadI32(staticBase + layout.MainMaxTilesOff + 4)
-	if tm.Stride == 0 || tm.MaxX == 0 || tm.MaxY == 0 {
-		return nil, fmt.Errorf("world dimensions unreadable")
-	}
-	return tm, nil
+	return &TileMap{
+		Mem: mem, Buf: info.buf, Stride: info.stride,
+		OriginX: info.ox, OriginY: info.oy, MaxX: info.maxX, MaxY: info.maxY,
+		sh: e.Tiles,
+	}, nil
 }
 
 // InWorld reports whether a coordinate is inside the world at all.
@@ -161,7 +206,7 @@ func (t *TileMap) InWorld(x, y int32) bool {
 // entry is the tile object at a coordinate, or zero when there is none.
 func (t *TileMap) entry(x, y int32) uint32 {
 	idx := t.Stride*(x-t.OriginX) + (y - t.OriginY)
-	p, _ := t.Mem.ReadU32(t.Buf + entriesOff + 4*uint32(idx)) //nolint:gosec // an index into the buffer
+	p, _ := t.Mem.ReadU32(t.Buf + 4*uint32(idx)) //nolint:gosec // an index into the buffer
 	return p
 }
 
@@ -180,7 +225,7 @@ func (t *TileMap) TypeAt(x, y int32) (uint16, bool) {
 	if p == 0 {
 		return 0, false
 	}
-	raw := t.Mem.Read(p+tileTypeOff, 2)
+	raw := t.Mem.Read(p+uint32(t.sh.TypeOff), 2) //nolint:gosec // a small field offset
 	if len(raw) < 2 {
 		return 0, false
 	}
@@ -204,11 +249,11 @@ func (t *TileMap) ActiveAt(x, y int32) (bool, bool) {
 	if p == 0 {
 		return false, false
 	}
-	raw := t.Mem.Read(p+tileHeaderOff, 2)
+	raw := t.Mem.Read(p+uint32(t.sh.HeaderOff), 2) //nolint:gosec // a small field offset
 	if len(raw) < 2 {
 		return false, false
 	}
-	return binary.LittleEndian.Uint16(raw)&activeBit != 0, true
+	return binary.LittleEndian.Uint16(raw)&t.sh.ActiveBit != 0, true
 }
 
 // SolidTypeAt is the tile id where a tile is really there, and nothing for empty
@@ -233,7 +278,7 @@ func (t *TileMap) Column(x, y0, y1 int32) []Tile {
 		return nil
 	}
 	idx := t.Stride*(x-t.OriginX) + (y0 - t.OriginY)
-	blob := t.Mem.Read(t.Buf+entriesOff+4*uint32(idx), int(4*(y1-y0))) //nolint:gosec // an index into the buffer
+	blob := t.Mem.Read(t.Buf+4*uint32(idx), int(4*(y1-y0))) //nolint:gosec // an index into the buffer
 
 	out := make([]Tile, 0, y1-y0)
 	for i := range int(y1 - y0) {
@@ -245,7 +290,7 @@ func (t *TileMap) Column(x, y0, y1 int32) []Tile {
 			out = append(out, Tile{})
 			continue
 		}
-		raw := t.Mem.Read(p+tileTypeOff, 2)
+		raw := t.Mem.Read(p+uint32(t.sh.TypeOff), 2) //nolint:gosec // a small field offset
 		if len(raw) != 2 {
 			out = append(out, Tile{})
 			continue
@@ -280,7 +325,7 @@ func (t *TileMap) FindType(want uint16, limit int) []Point {
 	var out []Point
 	for x := int32(0); x < t.MaxX; x++ {
 		idx := t.Stride*(x-t.OriginX) - t.OriginY
-		blob := t.Mem.Read(t.Buf+entriesOff+4*uint32(idx), int(4*t.MaxY)) //nolint:gosec // an index into the buffer
+		blob := t.Mem.Read(t.Buf+4*uint32(idx), int(4*t.MaxY)) //nolint:gosec // an index into the buffer
 		if len(blob) < int(4*t.MaxY) {
 			continue
 		}
@@ -292,7 +337,7 @@ func (t *TileMap) FindType(want uint16, limit int) []Point {
 		// one go.
 		start := 0
 		for i := 1; i <= len(ptrs); i++ {
-			if i < len(ptrs) && int64(ptrs[i])-int64(ptrs[i-1]) == tileRecord {
+			if i < len(ptrs) && int64(ptrs[i])-int64(ptrs[i-1]) == int64(t.sh.Record) {
 				continue
 			}
 			for _, y := range t.runMatches(ptrs[start:i], want) {
@@ -317,10 +362,10 @@ silently blind.
 func (t *TileMap) runMatches(ptrs []uint32, want uint16) []int {
 	var out []int
 	if len(ptrs) > 0 && ptrs[0] != 0 {
-		raw := t.Mem.Read(ptrs[0], tileRecord*len(ptrs))
-		if len(raw) == tileRecord*len(ptrs) {
+		raw := t.Mem.Read(ptrs[0], t.sh.Record*len(ptrs))
+		if len(raw) == t.sh.Record*len(ptrs) {
 			for i := range ptrs {
-				if binary.LittleEndian.Uint16(raw[i*tileRecord+tileTypeOff:]) == want {
+				if binary.LittleEndian.Uint16(raw[i*t.sh.Record+t.sh.TypeOff:]) == want {
 					out = append(out, i)
 				}
 			}
@@ -331,7 +376,7 @@ func (t *TileMap) runMatches(ptrs []uint32, want uint16) []int {
 		if p == 0 {
 			continue
 		}
-		raw := t.Mem.Read(p+tileTypeOff, 2)
+		raw := t.Mem.Read(p+uint32(t.sh.TypeOff), 2) //nolint:gosec // a small field offset
 		if len(raw) == 2 && binary.LittleEndian.Uint16(raw) == want {
 			out = append(out, i)
 		}
@@ -434,13 +479,13 @@ func (t *TileMap) CheckActiveOffset(x, y, width int32) ActiveCheck {
 				if p == 0 {
 					continue
 				}
-				raw := t.Mem.Read(p+tileHeaderOff, 2)
+				raw := t.Mem.Read(p+uint32(t.sh.HeaderOff), 2) //nolint:gosec // a small field offset
 				if len(raw) < 2 {
 					continue
 				}
 				h := binary.LittleEndian.Uint16(raw)
 				sampled++
-				if h&activeBit != 0 {
+				if h&t.sh.ActiveBit != 0 {
 					active++
 				}
 				headers[h] = true
