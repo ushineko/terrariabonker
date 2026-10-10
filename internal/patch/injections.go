@@ -120,6 +120,10 @@ type Builder struct {
 	Scanner *Scanner
 	Mem     BuilderMem
 	Arena   uint32
+	// LivePlayer is the live player's object address, for a stub that writes the
+	// player directly rather than calling a game method. Zero when it could not
+	// be resolved (no world loaded); such a stub reports that itself.
+	LivePlayer uint32
 }
 
 // BuilderMem is memory a stub can be built against: readable, writable, and

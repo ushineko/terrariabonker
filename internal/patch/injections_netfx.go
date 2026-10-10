@@ -1,6 +1,10 @@
 package patch
 
-import "github.com/ushineko/terrariabonker/internal/layout"
+import (
+	"fmt"
+
+	"github.com/ushineko/terrariabonker/internal/layout"
+)
 
 /*
 The .NET Framework injection set: the stub-based cheats as the CLR's JIT compiled
@@ -24,8 +28,8 @@ each cheat is applied.
 netfxInjectionAnchors are the patterns the CLR set's stubs resolve through.
 
 Ledger: on 2026-10-09 pickup (x10), the drop floor (100%), the spawn cap (30),
-tool reach (30), the smart cursor clamp (20) and the vanity accessory slots
-were each confirmed in play on the maintainer's Windows game, then disabled and
+tool reach (30), the smart cursor clamp (20), the vanity accessory slots and
+map-ping teleport were each confirmed in play on the maintainer's Windows game, then disabled and
 every site read back as its original bytes.
 */
 var netfxInjectionAnchors = map[string]Anchor{
@@ -107,6 +111,26 @@ var netfxInjectionAnchors = map[string]Anchor{
 		twins differ in the call and in which argument they pass it, so those are
 		wildcarded too.
 	*/
+	/*
+		Main.TriggerPing(Vector2 position), hooked at offset 3 -- after `push ebp;
+		mov ebp,esp` so [ebp+8]/[ebp+0C] are the ping's world X/Y (floats). The
+		early-out `cmp byte [abs],0; jz; ...; ret 8` and the Vector2 load make it
+		unique; the ASLR'd static address is wildcarded. The six displaced bytes
+		(push esi; sub esp,0C; xor eax,eax) are reproduced by the stub.
+	*/
+	"trigger_ping": {Pattern: MustParse(
+		"55 8B EC ?? ?? ?? ?? ?? ?? 89 45 F0 80 3D ?? ?? ?? ?? 00 74 08 " +
+			"8D 65 FC 5E 5D C2 08 00 8D 45 08"),
+		Verified: netfxVerified},
+	/*
+		Player.Teleport(Vector2 newPos, int Style, int extraInfo): the call target
+		for the ping hook. Anchored on the two constant field stores near its start
+		(`mov [ebx+6A4],0x64; mov [ebx+354],4`), position-independent; the method
+		entry is the anchor less 0x21.
+	*/
+	"player_teleport": {Pattern: MustParse(
+		"C7 83 A4 06 00 00 64 00 00 00 C7 83 54 03 00 00 04 00 00 00"),
+		Verified: netfxVerified},
 	"trydrop": {Pattern: MustParse(
 		"55 8B EC 57 56 53 ?? ?? ?? ?? ?? 8B 4D ?? 39 09 E8 ?? ?? ?? ?? " +
 			"3B 46 18 7D 30 8B 7D 08 8B 5E 08 8B 56 10 8B 46 14"),
@@ -142,6 +166,23 @@ var netfxInjections = map[string]Injection{
 		Overwrite: []byte{0x89, 0x43, 0x20, 0x83, 0x7D, 0xC4, 0x00},
 		MakeBody:  netfxSmartCursor.shrink, RerunOverwrite: false, Arena: true,
 	},
+	/*
+		Map-ping teleport: write the ping's position into the live player, no call
+		into the game. The player object is baked in at enable (PlacePlayerBody),
+		so re-toggle after a world reload -- the same note mono's teleport carries.
+	*/
+	"teleport": {
+		Name: "teleport", Anchor: "trigger_ping", InjectOff: 3,
+		Overwrite: []byte{0x56, 0x83, 0xEC, 0x0C, 0x33, 0xC0},
+		BuildBody: func(b *Builder, inj Injection) ([]byte, error) {
+			res := b.Scanner.Resolve("player_teleport", "")
+			if !res.Available {
+				return nil, fmt.Errorf("%s", res.Reason)
+			}
+			return TeleportCallBody(b.LivePlayer, res.Sites[0]-0x21, inj.Overwrite)
+		},
+		RerunOverwrite: false, Arena: true,
+	},
 	// The slot clamped in edx on its way to ApplyEquipFunctional, and both loops
 	// widened to the vanity slots, together.
 	"vanity_accs": {
@@ -159,6 +200,53 @@ var netfxInjections = map[string]Injection{
 		Overwrite: []byte{0x8B, 0xF1, 0x8B, 0x56, 0x0C},
 		MakeBody:  CapDropDenomEDX, RerunOverwrite: false, Multi: true, Arena: true,
 	},
+}
+
+/*
+TeleportCallBody is the map-ping teleport stub.
+
+It calls Player.Teleport(newPos, Style=0, extraInfo=0) so the warp gets the
+game's own sound and dust, matching the Linux build. The CLR passes the instance
+in ecx and the int Style in edx; the Vector2 newPos and extraInfo are on the
+stack. TriggerPing delivers the ping in *tile* coordinates and Teleport wants
+world pixels at sixteen to the tile, so each coordinate is scaled x16 by adding
+four to its float exponent (f32Times16). esp is saved in ebx across the call and
+restored after, so the stub is right whether the callee cleans the stack or not
+(the same guard mono's TeleportBody uses). playerObj and teleport are baked at
+enable.
+
+This is the one CLR cheat that calls a managed method from the arena. The thread
+is in cooperative GC mode with no transition frame, so a GC during the call can
+miss roots in the frames below and crash -- but teleport fires once per ping, a
+rare user action, so the window is tiny. (The ore extractor, which would call per
+tile continuously, does not take this path.)
+*/
+func TeleportCallBody(playerObj, teleport uint32, overwrite []byte) ([]byte, error) {
+	if playerObj == 0 {
+		return nil, fmt.Errorf("no player found -- load into a world and re-enable teleport")
+	}
+	out := []byte{0x60}                 // pushad
+	out = append(out, 0x8B, 0xDC)       // mov ebx,esp -- saved for cleanup-agnostic return
+	out = append(out, 0x8B, 0x45, 0x08) // mov eax,[ebp+08] -- ping tile X
+	out = append(out, 0x05)             // add eax, x16 -> world pixel
+	out = append(out, i32(f32Times16)...)
+	out = append(out, 0x8B, 0x4D, 0x0C) // mov ecx,[ebp+0C] -- ping tile Y
+	out = append(out, 0x81, 0xC1)       // add ecx, x16
+	out = append(out, i32(f32Times16)...)
+	// newPos is at [ebp+0C]/[ebp+10] and extraInfo at [ebp+08] in Teleport, so the
+	// pushes put Y highest, then X, then extraInfo lowest; Style rides in edx.
+	out = append(out, 0x51)       // push ecx -- newPos.Y -> [esp+0C]
+	out = append(out, 0x50)       // push eax -- newPos.X -> [esp+08]
+	out = append(out, 0x6A, 0x00) // push 0 -- extraInfo  -> [esp+04]
+	out = append(out, 0x33, 0xD2) // xor edx,edx -- Style 0
+	out = append(out, 0xB9)       // mov ecx, playerObj -- this
+	out = append(out, u32(playerObj)...)
+	out = append(out, 0xB8) // mov eax, teleport
+	out = append(out, u32(teleport)...)
+	out = append(out, 0xFF, 0xD0) // call eax
+	out = append(out, 0x8B, 0xE3) // mov esp,ebx
+	out = append(out, 0x61)       // popad
+	return append(out, overwrite...), nil
 }
 
 /*

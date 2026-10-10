@@ -29,6 +29,15 @@ var (
 		0xDB, 0x07, 0xD9, 0x5D, 0xD8, 0xD9, 0x45, 0xD8, 0xD8, 0x0D, 0, 0, 0, 0, 0xDD, 0x5D, 0xD0,
 		0xF2, 0x0F, 0x10, 0x45, 0xD0, 0xF2, 0x0F, 0x2C, 0xC0, 0x89, 0x07,
 		0x8D, 0x65, 0xF4, 0x5B, 0x5E, 0x5F, 0x5D, 0xC2, 0x08, 0x00)
+	clrTriggerPing = []byte{
+		0x55, 0x8B, 0xEC, 0x56, 0x83, 0xEC, 0x0C, 0x33, 0xC0, 0x89, 0x45, 0xF0,
+		0x80, 0x3D, 0, 0, 0, 0, 0x00, 0x74, 0x08,
+		0x8D, 0x65, 0xFC, 0x5E, 0x5D, 0xC2, 0x08, 0x00, 0x8D, 0x45, 0x08,
+	}
+	clrPlayerTeleport = []byte{
+		0xC7, 0x83, 0xA4, 0x06, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
+		0xC7, 0x83, 0x54, 0x03, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+	}
 	clrTryDrop = func(arg byte) []byte {
 		return []byte{0x55, 0x8B, 0xEC, 0x57, 0x56, 0x53, 0x8B, 0xF1, 0x8B, 0x56, 0x0C, 0x8B, 0x4D, arg,
 			0x39, 0x09, 0xE8, 0, 0, 0, 0, 0x3B, 0x46, 0x18, 0x7D, 0x30, 0x8B, 0x7D, 0x08,
@@ -82,7 +91,9 @@ const (
 	clrSmart    = clrCode + 0x600
 	clrEffects  = clrCode + 0x700
 	clrBenefits = clrCode + 0x780
-	clrHookTo   = clrCode + 0x800
+	clrTrigger  = clrCode + 0x800
+	clrTpEntry  = clrCode + 0x880 // Player.Teleport entry; its anchor sits 0x21 in
+	clrHookTo   = clrCode + 0x980
 )
 
 // clrStubbed is the CLR coder with the three hooks' code planted, and memory
@@ -99,6 +110,8 @@ func clrStubbed() *execMem {
 	mem.PokeBytes(clrSmart, clrSmartCursor)
 	mem.PokeBytes(clrEffects, clrEffectsLoop)
 	mem.PokeBytes(clrBenefits, clrBenefitLoop)
+	mem.PokeBytes(clrTrigger, clrTriggerPing)
+	mem.PokeBytes(clrTpEntry+0x21, clrPlayerTeleport) // the anchor, 0x21 past the entry
 	return mem
 }
 
@@ -174,6 +187,35 @@ func TestUnderTheCLRTheStubsAreInstalled(t *testing.T) {
 	require.Equal(t, clrSmartCursor, mem.Read(clrSmart, len(clrSmartCursor)))
 	require.Equal(t, clrEffectsLoop, mem.Read(clrEffects, len(clrEffectsLoop)))
 	require.Equal(t, clrBenefitLoop, mem.Read(clrBenefits, len(clrBenefitLoop)))
+}
+
+/*
+Under .NET Framework teleport hooks TriggerPing at offset 3 and its stub calls
+Player.Teleport -- the method entry resolved as its anchor less 0x21 -- with the
+live player baked in. Disabling restores the hook.
+*/
+func TestUnderTheCLRTeleportIsInstalled(t *testing.T) {
+	const runtime = "netfx-4.8.9345.0"
+	mem := clrStubbed()
+	code, _, errOut := runUnder(t, runtime, mem, "patch", "enable", "teleport")
+	require.Zero(t, code, errOut)
+
+	// the hook is the 5-byte jmp at TriggerPing+3
+	jmp := mem.Read(clrTrigger+3, 5)
+	require.Equal(t, byte(0xE9), jmp[0], "no jump at the TriggerPing hook")
+	stub := clrTrigger + 3 + 5 + binary.LittleEndian.Uint32(jmp[1:])
+
+	body := mem.Read(stub, 48)
+	require.Equal(t, byte(0x60), body[0], "stub does not start with pushad")
+	// the call target immediate (mov eax, imm32 == B8) must be the Teleport entry
+	i := bytes.IndexByte(body, 0xB8)
+	require.GreaterOrEqual(t, i, 0, "no mov eax,target in the stub")
+	target := binary.LittleEndian.Uint32(body[i+1:])
+	require.EqualValues(t, clrTpEntry, target, "the call target is not Teleport's entry (anchor - 0x21)")
+
+	code, _, errOut = runUnder(t, runtime, mem, "patch", "disable", "teleport")
+	require.Zero(t, code, errOut)
+	require.Equal(t, clrTriggerPing, mem.Read(clrTrigger, len(clrTriggerPing)))
 }
 
 /*

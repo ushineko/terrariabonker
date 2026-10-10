@@ -659,7 +659,7 @@ Slice 7 â€” in-place cheats as entry data; mining and reach on the CLR:
       as `89 96 70 05 00 00 D9 E8 D9 9E 14 05 00 00`, the original bytes. 1.4.5.8 is
       added to the CLR `reset_block` ledger.
 
-Slice 8 — the remaining in-place cheats on the CLR:
+Slice 8 ï¿½ the remaining in-place cheats on the CLR:
 - [x] max_minions: ResetEffects' `maxMinions = 1; maxTurrets = 1` (0x30C, 0x5A8), the
       shape of mono's anchor with esi for edi; the immediate is the value.
 - [x] fast_place: `ApplyItemTime(Item, float)`, found by its useTime load and
@@ -680,7 +680,7 @@ Slice 8 — the remaining in-place cheats on the CLR:
       five in-place cheats now work under .NET Framework; the stub-based ones need a
       CLR injection set.
 
-Slice 9 — the CLR injection set; pickup, spawn rate and the drop floor:
+Slice 9 ï¿½ the CLR injection set; pickup, spawn rate and the drop floor:
 - [x] How an arena's memory comes to exist is a module the injection set names
       (`arenaMakers`): the mono set's `springboard` (the game calls VirtualAlloc
       from a per-frame hook, so it needs frames), and the CLR set's `allocate`
@@ -704,7 +704,7 @@ Slice 9 — the CLR injection set; pickup, spawn rate and the drop floor:
       disabled, and every site (the four twins included) read back as its original
       instruction.
 
-Slice 10 — tool reach and the smart cursor clamp on the CLR:
+Slice 10 ï¿½ tool reach and the smart cursor clamp on the CLR:
 - [x] tool_reach: `GetRanges`, reached through `GetTileRegion`'s direct call; hooked
       at its exit, x through edi and y through its stack argument
       (`ForceXYOutOnStack`).
@@ -715,7 +715,7 @@ Slice 10 — tool reach and the smart cursor clamp on the CLR:
 - [x] Live on Windows (2026-10-09): both confirmed in play by the maintainer;
       disabled, and both sites read back as their original instructions.
 
-Slice 11 — vanity accessories on the CLR; edits checked first:
+Slice 11 ï¿½ vanity accessories on the CLR; edits checked first:
 - [x] vanity_accs: UpdateEquips reached through GrantPrefixBenefits (the one
       `prefix == 62` test) and its single call slot. The stub clamps the slot in
       edx before ApplyEquipFunctional; both `k < 10` bounds become 20.
@@ -729,9 +729,39 @@ Slice 11 — vanity accessories on the CLR; edits checked first:
   conservatively. inventory_accs, teleport and ore_extract do this under mono and
   need a design in which managed code makes the call.
 
+Slice 12 â€” Cheat Engine as a scriptable .NET resolver; map-ping teleport:
+- [x] Installed CE 7.7 and scripted it headlessly (a Lua in `autorun/` writing a log
+      the Go side reads), the Windows counterpart of `ce/ce-terraria.sh`. CE's
+      DotNetDataCollector resolves managed methods to their JIT address and static
+      fields to their runtime address *by name* -- `Main.TriggerPing`,
+      `Player.Teleport`, `PickTile`, `WorldGen.KillTile`, `UpdateEquips`, and the
+      `Main` statics -- turning the blind AOB hunts that stalled the remaining cheats
+      into lookups. It confirmed the research: reference-type statics
+      (`player` 0x6865ED8, `tile`, `PylonSystem`) and primitive/value statics
+      (`mapFullscreen`, `mapFullscreenPos`) sit at different bases, which is why a
+      single base-plus-offset guess was wrong.
+- [x] teleport on the CLR: hook `Main.TriggerPing` at offset 3 (after its frame is
+      set), read the ping's Vector2 at [ebp+0C]/[ebp+10], and call
+      `Player.Teleport(newPos, 0, 0)` (entry = the `player_teleport` anchor less 0x21)
+      with the live player in ecx -- so the warp plays the game's sound and dust, as
+      on Linux. TriggerPing gives *tiles*; Teleport wants pixels, so each coordinate
+      is scaled x16 (the `f32Times16` exponent trick), the same conversion mono makes.
+      The six displaced prologue bytes are wildcarded in the anchor so a cold
+      re-resolve still matches once the hook is in.
+- [x] This is the one CLR cheat that calls a managed method from the arena (see
+      [[clr-managed-calls-from-stubs]]): GC-unsafe in principle, but teleport fires
+      once per ping, so the exposure is tiny. Worst case is a crash, not save
+      corruption.
+- [x] Live on Windows (2026-10-09): confirmed landing on the ping with sound and
+      dust by the maintainer (after two coordinate-convention fixes found in play:
+      the x16 tile->pixel scale, then the newPos stack slot); disabled, and the hook
+      read back as its original prologue.
+
 Next slices:
-- [ ] The remaining stubs under the CLR: inventory_accs (see the finding above); then teleport, auto_use and ore_extract, which call into the
-      game or carry state the mono code builds from mono-only locators.
+- [ ] inventory_accs on the CLR (no-call: extend UpdateEquips' loops and patch
+      GetEffectiveArmor for the extra slots); then auto_use; then ore_extract, which
+      needs many managed calls per frame and so wants the delegate-thunk design
+      (see [[clr-ore-extract-approach]]), not the per-ping exception teleport takes.
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

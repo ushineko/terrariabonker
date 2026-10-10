@@ -141,3 +141,36 @@ func TestTheSmartCursorBodies(t *testing.T) {
 		"the store, then mov eax,[ebx+14]; add eax,[ebx+18]")
 	require.Equal(t, []byte{0x83, 0x7D, 0xC4, 0x00}, clr[len(clr)-4:])
 }
+
+/*
+The teleport stub scales the ping's tile coordinates to pixels, calls
+Player.Teleport(newPos, 0, 0) with the player baked in ecx, restores esp and
+reproduces the displaced prologue. No player (no world) is an error, not a silent
+no-op.
+*/
+func TestTeleportCallBody(t *testing.T) {
+	_, err := TeleportCallBody(0, 0x22F37E90, []byte{0x56})
+	require.Error(t, err, "a teleport stub with no player")
+
+	over := []byte{0x56, 0x83, 0xEC, 0x0C, 0x33, 0xC0}
+	body, err := TeleportCallBody(0x10000800, 0x22F37E90, over)
+	require.NoError(t, err)
+	require.Equal(t, []byte{
+		0x60,       // pushad
+		0x8B, 0xDC, // mov ebx,esp
+		0x8B, 0x45, 0x08, // mov eax,[ebp+08] -- ping tile X
+		0x05, 0x00, 0x00, 0x00, 0x02, // add eax, x16
+		0x8B, 0x4D, 0x0C, // mov ecx,[ebp+0C] -- ping tile Y
+		0x81, 0xC1, 0x00, 0x00, 0x00, 0x02, // add ecx, x16
+		0x51,       // push ecx -- newPos.Y
+		0x50,       // push eax -- newPos.X
+		0x6A, 0x00, // push 0 -- extraInfo
+		0x33, 0xD2, // xor edx,edx -- Style 0
+		0xB9, 0x00, 0x08, 0x00, 0x10, // mov ecx, playerObj
+		0xB8, 0x90, 0x7E, 0xF3, 0x22, // mov eax, teleport
+		0xFF, 0xD0, // call eax
+		0x8B, 0xE3, // mov esp,ebx
+		0x61,                               // popad
+		0x56, 0x83, 0xEC, 0x0C, 0x33, 0xC0, // the displaced prologue
+	}, body)
+}

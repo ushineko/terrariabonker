@@ -323,6 +323,21 @@ func (p *Patcher) checkEdits(edits []Edit) error {
 	return nil
 }
 
+/*
+liveObject is the live player's object address under the current entry, or 0 when
+it cannot be found. It is the live character's statLife less the object-relative
+statLife offset -- the handle a direct-write stub bakes in, re-resolved on each
+enable, which is why teleport is re-toggled after a world reload.
+*/
+func (p *Patcher) liveObject() uint32 {
+	targets, err := p.valueTargets()
+	if err != nil || len(targets) == 0 {
+		return 0
+	}
+	off := uint32(p.entry.Statics.LifeInPlayer) //nolint:gosec // a small object offset
+	return targets[0] - off
+}
+
 // stubBody is the instructions a stub runs, however this injection builds them.
 func (p *Patcher) stubBody(inj Injection, value float64) ([]byte, error) {
 	switch {
@@ -331,7 +346,8 @@ func (p *Patcher) stubBody(inj Injection, value float64) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		body, err := inj.BuildBody(&Builder{Scanner: p.Scanner, Mem: p.Mem, Arena: arena}, inj)
+		body, err := inj.BuildBody(&Builder{Scanner: p.Scanner, Mem: p.Mem, Arena: arena,
+			LivePlayer: p.liveObject()}, inj)
 		if err != nil {
 			return nil, err
 		}
