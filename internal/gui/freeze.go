@@ -53,7 +53,8 @@ func (f *freezer) set(godmode, mana bool) {
 
 	argv := client.FreezeArgv(godmode, mana)
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, "sudo", append(sudoPrefix(f.u.cli), argv...)...) //nolint:gosec // argv comes from the client package
+	prog, prefix := cliLauncher(f.u.cli)
+	cmd := exec.CommandContext(ctx, prog, append(prefix, argv...)...) //nolint:gosec // argv comes from the client package
 	// Kill rather than wait if it will not go: this is a loop with no stdin to
 	// close, and the window must not hang on it at shutdown.
 	cmd.WaitDelay = freezeStopGrace

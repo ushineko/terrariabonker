@@ -21,6 +21,15 @@ LDFLAGS=-w -s -X $(MODULE)/internal/buildinfo.Version=$(VERSION) -X $(MODULE)/in
 # what the tag asserts.
 FYNE_TAGS?=migrated_fynedo
 
+# On Windows the GUI must link as a GUI subsystem binary, or Windows gives it a
+# console window that sits behind the Fyne window for its whole life. -H
+# windowsgui sets the PE subsystem to GUI; it is a PE-only flag, so it is added
+# only for a Windows build (it is not a valid header type for an ELF link).
+GUI_LDFLAGS=$(LDFLAGS)
+ifeq ($(shell go env GOOS),windows)
+GUI_LDFLAGS+= -H windowsgui
+endif
+
 BINDIR=$(shell go env GOPATH)
 LINT_NAME?=golangci-lint
 LINT_VERSION?=v2.12.2
@@ -78,7 +87,7 @@ build: ## Build the CLI (no CGO: it needs no display)
 .PHONY: build-gui
 build-gui: ## Build the window (needs CGO, OpenGL and X11/Wayland headers)
 	@mkdir -p bin
-	CGO_ENABLED=1 go build -tags $(FYNE_TAGS) -ldflags='$(LDFLAGS)' -trimpath -o bin/terrariabonker-gui ./cmd/terrariabonker-gui
+	CGO_ENABLED=1 go build -tags $(FYNE_TAGS) -ldflags='$(GUI_LDFLAGS)' -trimpath -o bin/terrariabonker-gui ./cmd/terrariabonker-gui
 
 .PHONY: release
 release: build build-gui ## Package both binaries into dist/ with a checksum file

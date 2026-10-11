@@ -295,7 +295,7 @@ func (u *ui) resolve(o Options) {
 			u.cli = p
 		}
 	}
-	u.sudoOK = passwordlessSudo()
+	u.sudoOK = privilegeReady()
 }
 
 // start brings up the privileged worker and the first status read.
@@ -327,35 +327,14 @@ func (u *ui) startWorker() {
 	if !u.sudoOK {
 		return
 	}
-	h, err := newHelper("sudo", append(sudoPrefix(u.cli), "serve"), u.note)
+	prog, prefix := cliLauncher(u.cli)
+	h, err := newHelper(prog, append(prefix, "serve"), u.note)
 	if err != nil {
 		u.note("worker did not start: " + err.Error())
 		return
 	}
 	u.work = h
 }
-
-// sudoPrefix is the argv between `sudo` and the subcommand.
-//
-// -n is non-interactive: without passwordless sudo the call fails at once with a
-// clear message, where without it the process would block on a password prompt
-// that has no terminal to appear on. -E keeps the environment, which is how the
-// CLI finds the game the same way the user's shell would.
-func sudoPrefix(cli string) []string {
-	return []string{"-n", "-E", cli}
-}
-
-// passwordlessSudo reports whether sudo runs without a password, which is what
-// every memory operation here needs. Bounded, because this runs before the first
-// section is drawn and a sudo that hangs would hang the window's startup.
-func passwordlessSudo() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), sudoProbeTimeout)
-	defer cancel()
-	return exec.CommandContext(ctx, "sudo", "-n", "true").Run() == nil
-}
-
-// sudoProbeTimeout bounds the passwordless-sudo check.
-const sudoProbeTimeout = 5 * time.Second
 
 // run performs one CLI operation, through the warm worker when it will take it
 // and as a one-shot sudo run otherwise. Call off the UI thread.
@@ -382,7 +361,8 @@ func (u *ui) run(ctx context.Context, argv []string) (string, error) {
 		// worker that has gone must not take the window with it.
 		u.note("running " + argv[0] + " directly")
 	}
-	cmd := exec.CommandContext(ctx, "sudo", append(sudoPrefix(u.cli), argv...)...) //nolint:gosec // argv comes from the client package
+	prog, prefix := cliLauncher(u.cli)
+	cmd := exec.CommandContext(ctx, prog, append(prefix, argv...)...) //nolint:gosec // argv comes from the client package
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
