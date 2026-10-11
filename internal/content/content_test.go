@@ -96,6 +96,20 @@ var itemImage = []item{
 // excluded is the address the caller says belongs to the player.
 const excluded = base + 0x1E00
 
+// monoOffsets are the item field offsets the scan reads, the mono ones the
+// planted objects use (layout.Offsets). Production builds these from the entry.
+var monoOffsets = content.ItemOffsets{
+	Type: layout.ItemType, Damage: layout.ItemDamage, Defense: layout.ItemDefense,
+	Rare: layout.ItemRare, Pick: layout.ItemPick, UseTime: layout.ItemUseTime,
+	UseAnim: layout.ItemUseAnim, TileBoost: layout.ItemTileBoost,
+	AutoReuse: layout.ItemAutoReuse, CreateTile: layout.ItemCreateTile,
+	BuffType: layout.ItemBuffType, HealLife: layout.ItemHealLife,
+	HealMana: layout.ItemHealMana, HeadSlot: layout.ItemHeadSlot,
+	BodySlot: layout.ItemBodySlot, LegSlot: layout.ItemLegSlot, Prefix: layout.ItemPrefix,
+	Accessory: layout.ItemAccessory, Melee: layout.ItemMelee, Ranged: layout.ItemRanged,
+	Magic: layout.ItemMagic, Summon: layout.ItemSummon,
+}
+
 /*
 npcImage is the objects planted for the NPC scan, in two runs far enough apart to
 cluster separately.
@@ -148,7 +162,7 @@ only one is pristine, a copy the caller excludes because it is the player's own,
 and a run laid out so a wrong clustering would take the wrong one.
 */
 func TestFindingItemTemplates(t *testing.T) {
-	got := content.FindItemTemplates(plant(itemImage), vtable, map[uint32]bool{excluded: true})
+	got := content.FindItemTemplates(plant(itemImage), vtable, map[uint32]bool{excluded: true}, monoOffsets)
 
 	require.Len(t, got, 5, "a different number of templates was found")
 	require.Contains(t, got, int32(1234))
@@ -166,20 +180,20 @@ a second one they carry -- so the type survives, with the stats of the copy that
 was not excluded rather than the one that was.
 */
 func TestAnExcludedItemDoesNotBecomeATemplate(t *testing.T) {
-	got := content.FindItemTemplates(plant(itemImage), vtable, map[uint32]bool{excluded: true})
+	got := content.FindItemTemplates(plant(itemImage), vtable, map[uint32]bool{excluded: true}, monoOffsets)
 	require.Contains(t, got, int32(9))
 	require.Equal(t, int32(0), got[9].Damage,
 		"the player's own edited copy was taken as the template")
 
 	// The tie resolves the same way however many times it is asked.
 	for range 20 {
-		again := content.FindItemTemplates(plant(itemImage), vtable, nil)
+		again := content.FindItemTemplates(plant(itemImage), vtable, nil, monoOffsets)
 		require.Equal(t, got[1234].Damage, again[1234].Damage,
 			"a tie between two copies resolves differently from one run to the next")
 	}
 
 	// With nothing excluded, the edited copy is a candidate again.
-	all := content.FindItemTemplates(plant(itemImage), vtable, nil)
+	all := content.FindItemTemplates(plant(itemImage), vtable, nil, monoOffsets)
 	require.Contains(t, all, int32(9))
 }
 

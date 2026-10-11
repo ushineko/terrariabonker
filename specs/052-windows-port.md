@@ -808,9 +808,28 @@ Slice 15 � auto-fishing (auto_use plus the bobber reads it needs):
 
 Done: auto-fishing works under .NET Framework.
 
+Slice 16 — the item compendium on the CLR (done):
+- [x] The template scan takes its item field offsets from the entry rather than
+      fixed mono constants: `content.ItemOffsets`/`ItemOffsetsFrom`, threaded
+      through `FindItemTemplates`/`readItemStats`, with the scan span computed
+      from them. The object-identity scan was already runtime-agnostic (the mono
+      vtable and the CLR MethodTable are both the object's first dword).
+- [x] A new `ContentFields` block on the entry carries the six catalog-only item
+      offsets `ItemFields` does not (createTile, healLife, healMana, head/body/leg
+      slot), measured from docs/clr-fields-1.4.5.8.txt, plus `NPCStats` — off for
+      the CLR, so the catalog lists NPCs by name without stats. The NPC template
+      scan finds its array through mono's statics and array layout (a different
+      path on the CLR, player-relative), deferred to its own slice.
+- [x] `compendium` gates on a new `ReadContent` feature, not the write flag; both
+      entries' reads gain it, and the `Writes`-based `gameReadingAll` is retired.
+- [x] Live on Windows (2026-10-10): the catalog read real item stats under the CLR
+      -- Iron Broadsword 12 dmg, Healing Potion heals 100, Dirt/Stone blocks tile
+      0/1, Shadow armour head/body/leg slot 5 at defense 6/7/6 -- 629 of 6195 items
+      with damage, kinds classified; NPCs listed by name, no stats.
+
 Next slices:
-- [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
-      (phase 4), each with characterization tests pinned first.
+- [ ] NPC template stats on the CLR (the NPC array found player-relative), then
+      selling and buffs; then the full `Writes` flip. Each with tests pinned first.
 
 Findings from slice 1:
 - **A buffed player can be missed by the scan, on both runtimes (pre-existing).**

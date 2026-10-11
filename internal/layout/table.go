@@ -101,6 +101,10 @@ const (
 	// one: both copy from the game's pristine template of that item type, which
 	// needs the template scan and the span of fields to copy.
 	WriteItemTemplates Feature = "item-templates"
+	// ReadContent is the compendium: scanning the heap for the game's pristine
+	// item (and, where the entry allows, NPC) templates and reading their stats.
+	// A read -- a wrong layout reads wrong stats, never a write.
+	ReadContent Feature = "content"
 )
 
 /*
@@ -119,6 +123,21 @@ type ItemFields struct {
 	// slot's item is changed: everything past the object header and the
 	// reference fields, to the end of the object.
 	CopyLo, CopyHi int
+}
+
+/*
+ContentFields are the offsets the compendium's item/NPC template scan reads
+beyond what ItemFields already carries, declared per runtime.
+
+The item fields here are the ones only the catalog reads (a weapon's healing, an
+armour slot), kept out of ItemFields so the editor's struct is not widened for
+them. NPCStats gates the NPC half of the scan, which finds its array through a
+runtime's static and array layout: ported for mono, not yet for the CLR, so the
+CLR catalog lists NPCs by name without stats (spec 052).
+*/
+type ContentFields struct {
+	CreateTile, HealLife, HealMana, HeadSlot, BodySlot, LegSlot int
+	NPCStats                                                    bool
 }
 
 /*
@@ -242,6 +261,8 @@ type Entry struct {
 	Shapes        Shapes
 	Player        PlayerFields
 	Item          ItemFields
+	// Content is the extra offsets the compendium's template scan reads.
+	Content ContentFields
 	// LocalPlayer is how ReadLocalPlayer is done, and Statics its numbers when it
 	// is ByStatics.
 	LocalPlayer LocalPlayerBy

@@ -149,7 +149,9 @@ func (s *Service) itemTemplateCache(refresh bool) map[int32]content.ItemStats {
 			if !ok {
 				return map[int32]content.ItemStats{}
 			}
-			return content.FindItemTemplates(s.Mem, vt, s.ownItemAddrs())
+			entry, _, _ := s.Support()
+			offsets := content.ItemOffsetsFrom(entry.Item, entry.Content)
+			return content.FindItemTemplates(s.Mem, vt, s.ownItemAddrs(), offsets)
 		})
 }
 
@@ -158,6 +160,12 @@ func (s *Service) itemTemplateCache(refresh bool) map[int32]content.ItemStats {
 func (s *Service) npcTemplateCache(refresh bool) map[int32]content.NPCStats {
 	return templateCache(s, "npcs", refresh, nil,
 		func() map[int32]content.NPCStats {
+			// The NPC template scan finds its array through a runtime's statics and
+			// array layout, ported for mono but not yet the CLR: an entry that
+			// cannot run it lists NPCs by name without stats (spec 052).
+			if entry, _, _ := s.Support(); !entry.Content.NPCStats {
+				return map[int32]content.NPCStats{}
+			}
 			base, ok := s.StaticBase()
 			if !ok {
 				return map[int32]content.NPCStats{}

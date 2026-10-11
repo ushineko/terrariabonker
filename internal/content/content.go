@@ -82,6 +82,39 @@ type ItemStats struct {
 	Summon    bool  `json:"summon"`
 }
 
+/*
+ItemOffsets are the item-object field offsets the template scan reads, so the
+scan takes its numbers from the entry rather than from fixed mono constants (spec
+052). Built from the entry's ItemFields plus the catalog-only ContentFields.
+*/
+type ItemOffsets struct {
+	Type, Damage, Defense, Rare, Pick, UseTime, UseAnim, TileBoost int
+	AutoReuse, CreateTile, BuffType, HealLife, HealMana            int
+	HeadSlot, BodySlot, LegSlot, Prefix                            int
+	Accessory, Melee, Ranged, Magic, Summon                        int
+}
+
+// ItemOffsetsFrom builds the scan's offsets from an entry's item layout.
+func ItemOffsetsFrom(it layout.ItemFields, c layout.ContentFields) ItemOffsets {
+	return ItemOffsets{
+		Type: it.Type, Damage: it.Damage, Defense: it.Defense, Rare: it.Rare,
+		Pick: it.Pick, UseTime: it.UseTime, UseAnim: it.UseAnim, TileBoost: it.TileBoost,
+		AutoReuse: it.AutoReuse, BuffType: it.BuffType, Prefix: it.Prefix,
+		Accessory: it.Accessory, Melee: it.Melee, Ranged: it.Ranged,
+		Magic: it.Magic, Summon: it.Summon,
+		CreateTile: c.CreateTile, HealLife: c.HealLife, HealMana: c.HealMana,
+		HeadSlot: c.HeadSlot, BodySlot: c.BodySlot, LegSlot: c.LegSlot,
+	}
+}
+
+// span is how much of an item object has to be readable before its fields can be
+// trusted: to the furthest field the scan reads, plus its width.
+func (o ItemOffsets) span() int {
+	return furthest(o.Type, o.Damage, o.Defense, o.Rare, o.Pick, o.UseTime,
+		o.CreateTile, o.Accessory, o.Summon, o.LegSlot, o.HealMana, o.BuffType,
+		o.UseAnim, o.TileBoost, o.AutoReuse, o.Prefix) + 4
+}
+
 // found is one object the scan turned up.
 type found[T any] struct {
 	addr  uint32
@@ -227,14 +260,6 @@ func withoutPrefix(s ItemStats) ItemStats {
 	return s
 }
 
-// itemSpan is how much of an item object has to be readable before its fields
-// can be trusted.
-var itemSpan = furthest(layout.ItemType, layout.ItemDamage, layout.ItemDefense,
-	layout.ItemRare, layout.ItemPick, layout.ItemUseTime, layout.ItemCreateTile,
-	layout.ItemAccessory, layout.ItemSummon, layout.ItemLegSlot, layout.ItemHealMana,
-	layout.ItemBuffType, layout.ItemUseAnim, layout.ItemTileBoost, layout.ItemAutoReuse,
-	layout.ItemPrefix) + 4
-
 // furthest is the largest of some offsets.
 func furthest(offs ...int) int {
 	most := 0
@@ -252,8 +277,9 @@ FindItemTemplates is every item the game has a template for.
 exclude is the addresses of objects known to be the player's own -- the ones this
 program edits, and so the likeliest to be mistaken for a template.
 */
-func FindItemTemplates(mem Mem, vtable uint32, exclude map[uint32]bool) map[int32]ItemStats {
-	objects := scanObjects(mem, vtable, itemSpan, readItemStats,
+func FindItemTemplates(mem Mem, vtable uint32, exclude map[uint32]bool, o ItemOffsets) map[int32]ItemStats {
+	objects := scanObjects(mem, vtable, o.span(),
+		func(buf []byte, off int) ItemStats { return readItemStats(buf, off, o) },
 		func(s ItemStats) bool { return s.Type > 0 && s.Type < MaxType })
 
 	byType := map[int32][]ItemStats{}
@@ -272,26 +298,26 @@ func FindItemTemplates(mem Mem, vtable uint32, exclude map[uint32]bool) map[int3
 	return out
 }
 
-// readItemStats is one item object's fields.
-func readItemStats(buf []byte, off int) ItemStats {
+// readItemStats is one item object's fields, at the entry's offsets.
+func readItemStats(buf []byte, off int, o ItemOffsets) ItemStats {
 	i32 := func(field int) int32 {
 		return int32(binary.LittleEndian.Uint32(buf[off+field:])) //nolint:gosec // a field, as its bits
 	}
 	return ItemStats{
-		Type: i32(layout.ItemType), Damage: i32(layout.ItemDamage),
-		Defense: i32(layout.ItemDefense), Rare: i32(layout.ItemRare),
-		Pick: i32(layout.ItemPick), UseTime: i32(layout.ItemUseTime),
-		UseAnim: i32(layout.ItemUseAnim), TileBoost: i32(layout.ItemTileBoost),
-		AutoReuse:  int32(buf[off+layout.ItemAutoReuse]),
-		CreateTile: i32(layout.ItemCreateTile), BuffType: i32(layout.ItemBuffType),
-		HealLife: i32(layout.ItemHealLife), HealMana: i32(layout.ItemHealMana),
-		HeadSlot: i32(layout.ItemHeadSlot), BodySlot: i32(layout.ItemBodySlot),
-		LegSlot: i32(layout.ItemLegSlot), Prefix: int32(buf[off+layout.ItemPrefix]),
-		Accessory: buf[off+layout.ItemAccessory] != 0,
-		Melee:     buf[off+layout.ItemMelee] != 0,
-		Ranged:    buf[off+layout.ItemRanged] != 0,
-		Magic:     buf[off+layout.ItemMagic] != 0,
-		Summon:    buf[off+layout.ItemSummon] != 0,
+		Type: i32(o.Type), Damage: i32(o.Damage),
+		Defense: i32(o.Defense), Rare: i32(o.Rare),
+		Pick: i32(o.Pick), UseTime: i32(o.UseTime),
+		UseAnim: i32(o.UseAnim), TileBoost: i32(o.TileBoost),
+		AutoReuse:  int32(buf[off+o.AutoReuse]),
+		CreateTile: i32(o.CreateTile), BuffType: i32(o.BuffType),
+		HealLife: i32(o.HealLife), HealMana: i32(o.HealMana),
+		HeadSlot: i32(o.HeadSlot), BodySlot: i32(o.BodySlot),
+		LegSlot: i32(o.LegSlot), Prefix: int32(buf[off+o.Prefix]),
+		Accessory: buf[off+o.Accessory] != 0,
+		Melee:     buf[off+o.Melee] != 0,
+		Ranged:    buf[off+o.Ranged] != 0,
+		Magic:     buf[off+o.Magic] != 0,
+		Summon:    buf[off+o.Summon] != 0,
 	}
 }
 

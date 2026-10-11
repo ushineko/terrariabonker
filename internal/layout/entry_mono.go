@@ -47,7 +47,12 @@ var monoEntry = Entry{
 		Summon: ItemSummon,
 		CopyLo: CopyLo, CopyHi: CopyHi,
 	},
-	Reads:        []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer, ReadTiles, ReadProjectiles},
+	Content: ContentFields{
+		CreateTile: ItemCreateTile, HealLife: ItemHealLife, HealMana: ItemHealMana,
+		HeadSlot: ItemHeadSlot, BodySlot: ItemBodySlot, LegSlot: ItemLegSlot,
+		NPCStats: true,
+	},
+	Reads:        []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer, ReadTiles, ReadProjectiles, ReadContent},
 	LocalPlayer:  ByAnchor,
 	Writes:       true,
 	Enabled:      true,

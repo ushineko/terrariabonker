@@ -51,9 +51,10 @@ Under .NET Framework, status and inventory read the player and their items with
 the CLR's numbers, and reads the entry cannot do are refused by name rather than
 run with another runtime's numbers.
 
-The item catalog walks many structures (NPCs, templates) the CLR entry has no
-readers for yet, so it is still refused. A write is refused by the build gate,
-which internal/service tests.
+The item catalog reads the CLR's item templates (ReadContent), so it runs and
+emits its JSON. Its NPC half is off under the CLR, so NPCs are listed by name
+without stats (spec 052). A write is refused by the build gate, which
+internal/service tests.
 */
 func TestUnderTheCLRThePlayerAndInventoryAreRead(t *testing.T) {
 	const runtime = "netfx-4.8.9345.0"
@@ -68,9 +69,9 @@ func TestUnderTheCLRThePlayerAndInventoryAreRead(t *testing.T) {
 	require.Zero(t, code, errOut)
 	require.Contains(t, out, "type=757")
 
-	code, _, errOut = runUnder(t, runtime, clrGame(), "compendium")
-	require.NotZero(t, code, "the catalog ran under the CLR entry")
-	require.Contains(t, errOut, runtime)
+	code, out, errOut = runUnder(t, runtime, clrGame(), "compendium")
+	require.Zero(t, code, errOut)
+	require.Contains(t, out, `"items"`)
 }
 
 /*

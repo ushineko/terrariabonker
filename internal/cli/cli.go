@@ -295,23 +295,6 @@ func (a *App) gameReading(f layout.Feature) (*Game, error) {
 }
 
 /*
-gameReadingAll attaches for a read that walks more than one feature's numbers --
-the item catalog, a vein -- and so needs an entry with every reader: one that may
-also write.
-*/
-func (a *App) gameReadingAll() (*Game, error) {
-	got, err := a.game(false, false)
-	if err != nil {
-		return nil, err
-	}
-	if entry, _, runtime := got.Svc.Support(); !entry.Writes {
-		return nil, &service.Error{Message: fmt.Sprintf("Terraria is running on %s, which this "+
-			"version of terrariabonker can only partly read so far (spec 052)", runtime)}
-	}
-	return got, nil
-}
-
-/*
 gameWriting attaches for one kind of write, and refuses under an entry that does
 not allow it -- the per-feature counterpart of game(true, force), for writes whose
 paths take their numbers from the entry.

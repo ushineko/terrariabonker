@@ -47,6 +47,15 @@ var clrEntry = Entry{
 		// game, 2026-10-08). TestTheCLRCopySpanHoldsNoReference.
 		CopyLo: 0x018, CopyHi: 0x144,
 	},
+	// The catalog-only item fields, from the same CLR measurement as Item
+	// (docs/clr-fields-1.4.5.8.txt, object-relative). NPCStats is off: the NPC
+	// template scan finds its array through mono's statics and array layout, not
+	// yet ported to the CLR, so the catalog lists NPCs by name without stats.
+	Content: ContentFields{
+		CreateTile: 0x07c, HealLife: 0x090, HealMana: 0x094,
+		HeadSlot: 0x0a8, BodySlot: 0x0ac, LegSlot: 0x0b0,
+		NPCStats: false,
+	},
 	LocalPlayer: ByStatics,
 	Statics: MainStatics{
 		NPCFromPlayer: -0x54, ProjectileFromPlayer: -0x48,
@@ -54,7 +63,7 @@ var clrEntry = Entry{
 		PlayerActive: 0x70E, LifeInPlayer: 0x470, TileFromPlayer: -0x68,
 	},
 	Enabled: true,
-	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory, ReadTiles, ReadProjectiles},
+	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory, ReadTiles, ReadProjectiles, ReadContent},
 	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields, WriteItemTemplates,
 		CheatFeature("mining"), CheatFeature("reach"),
 		CheatFeature("max_minions"), CheatFeature("fast_place"), CheatFeature("pylons"),

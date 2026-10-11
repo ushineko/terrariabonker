@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ushineko/terrariabonker/internal/game"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/proc"
 	"github.com/ushineko/terrariabonker/internal/recipes"
 	"github.com/ushineko/terrariabonker/internal/sprites"
@@ -30,7 +31,7 @@ func (a *App) compendiumCmd() *cobra.Command {
 		Short: "dump the full item/NPC catalog as JSON (for the GUI tab)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.gameReadingAll()
+			got, err := a.gameReading(layout.ReadContent)
 			if err != nil {
 				return err
 			}
