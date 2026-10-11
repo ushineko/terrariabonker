@@ -70,6 +70,7 @@ func newHelper(prog string, argv []string, note func(string)) (*helper, error) {
 	// is stopped by closing its stdin (which is what it waits on) rather than by
 	// cancellation.
 	cmd := exec.CommandContext(context.Background(), prog, argv...) //nolint:gosec // argv is built by the client package, never from input
+	hideConsole(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("worker stdin: %w", err)

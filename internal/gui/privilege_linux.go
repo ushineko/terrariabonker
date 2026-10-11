@@ -34,3 +34,6 @@ func privilegeReady() bool {
 
 // sudoProbeTimeout bounds the passwordless-sudo check.
 const sudoProbeTimeout = 5 * time.Second
+
+// hideConsole does nothing on Linux: there is no console window to suppress.
+func hideConsole(*exec.Cmd) {}

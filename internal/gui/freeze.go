@@ -55,6 +55,7 @@ func (f *freezer) set(godmode, mana bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	prog, prefix := cliLauncher(f.u.cli)
 	cmd := exec.CommandContext(ctx, prog, append(prefix, argv...)...) //nolint:gosec // argv comes from the client package
+	hideConsole(cmd)
 	// Kill rather than wait if it will not go: this is a loop with no stdin to
 	// close, and the window must not hang on it at shutdown.
 	cmd.WaitDelay = freezeStopGrace

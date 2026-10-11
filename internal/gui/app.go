@@ -363,6 +363,7 @@ func (u *ui) run(ctx context.Context, argv []string) (string, error) {
 	}
 	prog, prefix := cliLauncher(u.cli)
 	cmd := exec.CommandContext(ctx, prog, append(prefix, argv...)...) //nolint:gosec // argv comes from the client package
+	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
@@ -464,6 +465,7 @@ func (u *ui) runUser(ctx context.Context, argv []string) (string, error) {
 		return "", fmt.Errorf("%s is not on PATH", cliName)
 	}
 	cmd := exec.CommandContext(ctx, u.cli, argv...) //nolint:gosec // argv comes from the client package
+	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)

@@ -63,6 +63,7 @@ to reap it.
 */
 func startDetached(name string, args ...string) error {
 	cmd := exec.CommandContext(context.Background(), name, args...) //nolint:gosec // a fixed command and a fixed URL
+	hideConsole(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", name, err)
 	}
