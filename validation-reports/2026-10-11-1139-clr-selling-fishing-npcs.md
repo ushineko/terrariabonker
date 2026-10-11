@@ -130,13 +130,18 @@ Done, reads only: everything in "Measurements"; `sell --dry-run` returned
 `destination: bank`, `reachable: placed` at exit 0; `fishing` passed the gate and
 reported "you already have a rod and bait" / "bait ok".
 
-**Not done**: no coin has been credited and no bait or rod has been written on the
-CLR. The sale is permanent and the whitelist is the player's, so it was left for
-the maintainer to make and watch in-game. Spec 052 keeps those two boxes open.
+**Live sale, done later the same day** at the maintainer's request: Rain Coat
+(1136) whitelisted; the dry run listed the one in slot 31 at 200 copper,
+destination bank; `sell` reported it sold and 2 silver paid; the slot then read
+empty and a second dry run found nothing to sell. The bank was not read back by
+the tool; the maintainer confirmed the result in-game.
+
+**Not done**: no bait or rod has been written on the CLR. Spec 052 keeps that box
+open.
 
 ## Overall
 
-- All gates passed: YES headless; live writes pending
+- All gates passed: YES headless; live sale confirmed; live fishing-gear write pending
 - Notes: the paths still behind the every-write gate are the projectile editor,
   `spawn-npc`, `extract-recipes`, `freeze`/`godmode` and `extract-tick`. Until
   the flip `build-check` reports `read_only` under the CLR.

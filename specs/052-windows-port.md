@@ -874,8 +874,7 @@ Slice 19 — NPC template stats on the CLR (done):
       town NPCs; 22 bosses, 39 town NPCs, 124 critters. The published frame
       counts read slime 2, Eye of Cthulhu 6, Merchant 25, Guide 26; 11 tints.
 
-Slice 20 — selling on the CLR (done headless and read live; the live sale is the
-maintainer's to make):
+Slice 20 — selling on the CLR (done):
 - [x] `selling.Container` and `selling.Bank` take their numbers from the entry
       (`selling.ShapeOf`): the item fields, the szarray header, and a new
       `SellFields` block -- `Item.value` 0x0D8, `Player.bank` 0x0E0 (from statLife
@@ -895,10 +894,10 @@ maintainer's to make):
       as a chest of 40 holding 77 platinum, 25 gold, 76 silver, 39 copper;
       favorited matched the hotbar; `sell --dry-run` chose the bank ("placed");
       the world read "Royal Brewery of Maggots".
-- [ ] A live sale on Windows, watched in-game. Every number the write uses was
-      read live above, and the write itself goes through fields already written
-      live in earlier slices (type, stack, the template copy span), but no coin
-      has been credited on the CLR yet.
+- [x] A live sale on Windows (2026-10-11): Rain Coat (1136) whitelisted, the dry
+      run listed the one in slot 31 at 200 copper for the bank, `sell` reported
+      it sold and 2 silver paid into the Piggy Bank, the slot read empty and a
+      second dry run found nothing to sell. The maintainer confirmed it in-game.
 
 Slice 21 — the fishing gear writes on the CLR (done headless; the live write is the
 maintainer's to make):
