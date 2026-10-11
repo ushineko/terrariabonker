@@ -253,6 +253,28 @@ func TestAnUnsupportedRuntimeIsRefusedEvenWhenForced(t *testing.T) {
 	}
 }
 
+/*
+RequireAnyWrite passes under an entry that can make at least one write, so
+restore runs on .NET Framework and applies what it can -- where RequireCompatible
+(every write) still refuses. A runtime with no entry at all is still refused:
+there is nothing to apply.
+*/
+func TestRequireAnyWriteRunsWhereAnEntryWritesSomething(t *testing.T) {
+	t.Run("netfx writes some features", func(t *testing.T) {
+		_, _, svc := gateFixture(t)
+		service.WatchRuntime(t, "netfx-4.8.9345.0")
+		require.Error(t, svc.RequireCompatible(false), "the every-write gate should still refuse netfx")
+		require.NoError(t, svc.RequireAnyWrite(false), "restore should run under an entry that writes some features")
+	})
+	t.Run("a runtime with no entry is refused", func(t *testing.T) {
+		_, _, svc := gateFixture(t)
+		service.WatchRuntime(t, "coreclr-9.0.0")
+		err := svc.RequireAnyWrite(false)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no memory layout")
+	})
+}
+
 // What Linux runs today still passes: any wine-mono, and a runtime that could
 // not be detected, which is not evidence of anything.
 func TestWineMonoAndAnUndetectedRuntimeStillPass(t *testing.T) {

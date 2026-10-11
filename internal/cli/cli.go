@@ -309,3 +309,20 @@ func (a *App) gameWriting(f layout.Feature, force bool) (*Game, error) {
 	}
 	return got, nil
 }
+
+/*
+gameWritingAny attaches for an operation that makes several writes and reports
+what it could not do rather than refusing them all -- restore. It passes under
+any entry that can make at least one write, so on a runtime whose write paths
+land one feature at a time it restores what it can and the report names the rest.
+*/
+func (a *App) gameWritingAny(force bool) (*Game, error) {
+	got, err := a.game(false, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := got.Svc.RequireAnyWrite(force); err != nil {
+		return nil, err
+	}
+	return got, nil
+}

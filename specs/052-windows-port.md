@@ -843,6 +843,17 @@ Slice 17 — potion buffs on the CLR (done):
       Potion effect, a second run read it back as "kept", and `--sonar` added a
       second -- the read and write both land at the CLR offsets.
 
+Slice 18 — restore applies per-feature on the CLR (done):
+- [x] `restore` (and the GUI's auto-restore, which runs it at startup) gated on
+      the every-write flag, so it was refused wholesale on the CLR. `service.Restore`
+      was already per-feature -- each cheat and item edit lands in the report's
+      applied/pending/skipped/absent list on its own -- so the fix is only the gate:
+      a new `RequireAnyWrite`/`gameWritingAny` that passes under any entry with at
+      least one write, keeping the build-compatibility check.
+- [x] Live on Windows (2026-10-10): `restore` returns `[OK]` under the CLR
+      (an empty profile applied nothing) where it was refused before; the GUI's
+      startup auto-restore no longer fails.
+
 Next slices:
 - [ ] NPC template stats on the CLR (the NPC array found player-relative), the
       fishing gear/bait writes and selling; then the full `Writes` flip. Each with

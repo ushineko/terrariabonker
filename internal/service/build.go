@@ -88,6 +88,24 @@ func (s *Service) RequireWritable(f layout.Feature, force bool) error {
 	return s.requireBuild(force)
 }
 
+/*
+RequireAnyWrite passes under any entry that can make at least one write, and is
+for an operation that applies several writes and reports what it could not do
+rather than refusing them all up front -- restore, which re-applies the saved
+cheats and item edits, each checking its own feature and landing in the report's
+pending or skipped list when the entry cannot make it.
+
+An entry that can write nothing at all (no full Writes and no WriteFeatures, or no
+entry for the runtime) is still refused: there would be nothing to apply.
+*/
+func (s *Service) RequireAnyWrite(force bool) error {
+	entry, support, runtime := s.Support()
+	if !entry.Writes && len(entry.WriteFeatures) == 0 {
+		return &Error{Message: noWrites(support, runtime)}
+	}
+	return s.requireBuild(force)
+}
+
 // requireBuild refuses an outright incompatible build unless forced.
 func (s *Service) requireBuild(force bool) error {
 	level, msg := s.Compatibility()

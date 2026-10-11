@@ -242,7 +242,7 @@ func (a *App) restoreCmd() *cobra.Command {
 		Short: "re-apply the saved profile (cheats + item edits) to the game",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWritingAny(force)
 			if err != nil {
 				return err
 			}
