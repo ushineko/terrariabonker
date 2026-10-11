@@ -1,0 +1,42 @@
+# fynstall manifest for terrariabonker. Build with (from this directory):
+#   fynstall build --runtime-path ../fynstall
+# until fynstall has a release binary of its own; then `fynstall build`.
+# The binaries must already be in bin/ (make build / the GUI target).
+app:
+  id: io.ushineko.terrariabonker
+  name: TerrariaBonker
+  version: 0.44.0        # keep in step with .tag on each release
+  publisher: ushineko
+  icon: assets/terrariabonker.png
+
+install:
+  # Per-user: no administrator needed. The install and everything it writes
+  # stay under the user's own profile.
+  scopes: [user]
+  dir:
+    user: "{programs}/{id}"
+
+targets: [windows/amd64]
+
+payload:
+  # The CLI does the work; the GUI is a front-end that shells out to it.
+  - src: bin/terrariabonker{exe}
+    dst: bin/terrariabonker{exe}
+  - src: bin/terrariabonker-gui{exe}
+    dst: bin/terrariabonker-gui{exe}
+  - src: README.md
+    dst: share/doc/README.md
+
+ui:
+  # The finish page offers to start the GUI.
+  launch: bin/terrariabonker-gui{exe}
+
+integration:
+  # Put bin/ on PATH so `terrariabonker` resolves by name -- the GUI finds
+  # the CLI with exec.LookPath("terrariabonker").
+  path_links: ["bin/terrariabonker{exe}"]
+  desktop:
+    - name: TerrariaBonker
+      comment: Terraria trainer (read inventory, recipes, and run cheats)
+      exec: bin/terrariabonker-gui{exe}
+      categories: [Game, Utility]
