@@ -295,7 +295,8 @@ func (s *Service) FishingBuffTick(want map[string]bool, ticks int32) (map[string
 	if err != nil {
 		return nil, err
 	}
-	bar := buffs.New(s.Mem, live.LifeAddr)
+	entry, _, _ := s.Support()
+	bar := buffs.NewFor(entry, s.Mem, live.LifeAddr)
 	if ticks <= 0 {
 		ticks = buffs.DefaultTicks
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/service"
 )
 
@@ -188,7 +189,7 @@ func (a *App) fishingBuffsCmd() *cobra.Command {
 				printf(cmd, "[fishing] pick at least one of --power, --sonar, --crate")
 				return &ExitError{Code: ExitFailure}
 			}
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteBuffs, force)
 			if err != nil {
 				return err
 			}

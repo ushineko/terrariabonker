@@ -105,6 +105,9 @@ const (
 	// item (and, where the entry allows, NPC) templates and reading their stats.
 	// A read -- a wrong layout reads wrong stats, never a write.
 	ReadContent Feature = "content"
+	// WriteBuffs is renewing the player's active effects: writing a type and a
+	// time into the two buff arrays (potions, fishing-buffs).
+	WriteBuffs Feature = "buffs"
 )
 
 /*
@@ -158,6 +161,10 @@ type PlayerFields struct {
 	ManaFromLife, ManaMaxFromLife, ManaMax2FromLife int
 	// PositionFromLife is Entity.position (a Vector2, world pixels) from statLife.
 	PositionFromLife int
+	// BuffTypeFromLife and BuffTimeFromLife are the player's two buff-array
+	// references (int[]), from statLife. Zero when the entry has no measurement;
+	// the buff reader needs both.
+	BuffTypeFromLife, BuffTimeFromLife int
 }
 
 // LocalPlayerBy is how an entry tells which player copy is the live one.

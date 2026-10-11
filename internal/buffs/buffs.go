@@ -36,10 +36,32 @@ type Mem interface {
 type Buffs struct {
 	Mem  Mem
 	Life uint32
+	// The two buff-array references from statLife, and the runtime's szarray
+	// header offsets, so the reader takes its numbers from the entry.
+	typePtrOff, timePtrOff int
+	arrLenOff, arrDataOff  uint32
 }
 
-// New is the buffs of the player whose statLife is at life.
-func New(mem Mem, life uint32) *Buffs { return &Buffs{Mem: mem, Life: life} }
+// New is the buffs of the player whose statLife is at life, with mono's numbers.
+// NewFor takes them from an entry; this stays for the package's own tests.
+func New(mem Mem, life uint32) *Buffs {
+	return &Buffs{
+		Mem: mem, Life: life,
+		typePtrOff: layout.BuffTypePtrOff, timePtrOff: layout.BuffTimePtrOff,
+		arrLenOff: layout.ArrLenOff, arrDataOff: layout.ArrDataOff,
+	}
+}
+
+// NewFor is the buffs of a player under an entry, its numbers taken from the
+// entry: the two buff-array references from statLife and the szarray header.
+func NewFor(e layout.Entry, mem Mem, life uint32) *Buffs {
+	return &Buffs{
+		Mem: mem, Life: life,
+		typePtrOff: e.Player.BuffTypeFromLife, timePtrOff: e.Player.BuffTimeFromLife,
+		arrLenOff:  uint32(e.Shapes.ArrLenOff),  //nolint:gosec // a small header offset
+		arrDataOff: uint32(e.Shapes.ArrDataOff), //nolint:gosec // a small header offset
+	}
+}
 
 /*
 array is where one of the two arrays starts and how long it is.
@@ -57,7 +79,7 @@ func (b *Buffs) array(ptrOff int) (uint32, int, error) {
 	if ptr == 0 {
 		return 0, 0, fmt.Errorf("buff array pointer is null -- is a player loaded?")
 	}
-	head := b.Mem.Read(ptr+layout.ArrLenOff, 4)
+	head := b.Mem.Read(ptr+b.arrLenOff, 4)
 	if len(head) < 4 {
 		return 0, 0, fmt.Errorf("could not read the buff arrays")
 	}
@@ -65,12 +87,12 @@ func (b *Buffs) array(ptrOff int) (uint32, int, error) {
 	if n <= 0 || n > 256 {
 		return 0, 0, fmt.Errorf("buff array length %d is not believable", n)
 	}
-	return ptr + layout.ArrDataOff, n, nil
+	return ptr + b.arrDataOff, n, nil
 }
 
 // Slots is how many buffs the player can hold at once.
 func (b *Buffs) Slots() (int, error) {
-	_, n, err := b.array(layout.BuffTypePtrOff)
+	_, n, err := b.array(b.typePtrOff)
 	return n, err
 }
 
@@ -100,11 +122,11 @@ type Active struct {
 
 // Active is every occupied slot.
 func (b *Buffs) Active() ([]Active, error) {
-	types, err := b.read(layout.BuffTypePtrOff)
+	types, err := b.read(b.typePtrOff)
 	if err != nil {
 		return nil, err
 	}
-	times, err := b.read(layout.BuffTimePtrOff)
+	times, err := b.read(b.timePtrOff)
 	if err != nil {
 		return nil, err
 	}
@@ -156,19 +178,19 @@ func (b *Buffs) Renew(buffType, ticks int32) (string, error) {
 	if ticks <= 0 {
 		return "", fmt.Errorf("ticks must be positive")
 	}
-	types, err := b.read(layout.BuffTypePtrOff)
+	types, err := b.read(b.typePtrOff)
 	if err != nil {
 		return "", err
 	}
-	times, err := b.read(layout.BuffTimePtrOff)
+	times, err := b.read(b.timePtrOff)
 	if err != nil {
 		return "", err
 	}
-	typeBase, _, err := b.array(layout.BuffTypePtrOff)
+	typeBase, _, err := b.array(b.typePtrOff)
 	if err != nil {
 		return "", err
 	}
-	timeBase, _, err := b.array(layout.BuffTimePtrOff)
+	timeBase, _, err := b.array(b.timePtrOff)
 	if err != nil {
 		return "", err
 	}

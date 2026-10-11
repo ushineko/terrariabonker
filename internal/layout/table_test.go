@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "701836e5d4b62ec381e68995d4ecd2f8bfaccc65015c49e5b3226c2c2316b431",
+	require.Equal(t, "d94cc0872e4cc74c54c4c80995b10b4ac4593b68f2e4e1c30f4d377e2841c960",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -156,6 +156,8 @@ func TestTheCLRPlayerFieldsAreTheTable(t *testing.T) {
 	}
 	require.Equal(t, at["name"]-at["statLife"], clrEntry.Player.NameFromLife)
 	require.Equal(t, at["inventory"]-at["statLife"], clrEntry.Player.InventoryFromLife)
+	require.Equal(t, at["buffType"]-at["statLife"], clrEntry.Player.BuffTypeFromLife)
+	require.Equal(t, at["buffTime"]-at["statLife"], clrEntry.Player.BuffTimeFromLife)
 }
 
 // The mono player fields are the mono constants they always were.
@@ -163,7 +165,8 @@ func TestTheMonoPlayerFieldsAreTheConstants(t *testing.T) {
 	require.Equal(t, PlayerFields{NameFromLife: -0x6C0, InventoryFromLife: -0x664, SelectedItemFromLife: -0x694,
 		LifeMaxFromLife: -0x08, LifeMax2FromLife: -0x04,
 		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C,
-		PositionFromLife: 0x0C - 0x738}, monoEntry.Player)
+		PositionFromLife: 0x0C - 0x738,
+		BuffTypeFromLife: -0x670, BuffTimeFromLife: -0x66C}, monoEntry.Player)
 }
 
 /*

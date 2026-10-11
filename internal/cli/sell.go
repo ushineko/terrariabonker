@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ushineko/terrariabonker/internal/game"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/profile"
 	"github.com/ushineko/terrariabonker/internal/selling"
 	"github.com/ushineko/terrariabonker/internal/service"
@@ -248,7 +249,7 @@ func (a *App) potionsCmd() *cobra.Command {
 		Short: "favorited potions grant their buff from the inventory",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteBuffs, force)
 			if err != nil {
 				return err
 			}

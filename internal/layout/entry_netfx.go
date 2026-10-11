@@ -31,7 +31,10 @@ var clrEntry = Entry{
 		// hotbar index 0..9. The struct's own fields are player, selected, hotbar,
 		// buffered, overridden; `selected` is the committed slot. Measured from
 		// metadata 2026-10-10 (SelectedItemState +0x04; struct at Player+0x9F0).
-		SelectedItemFromLife: 0x9F4 - 0x470},
+		SelectedItemFromLife: 0x9F4 - 0x470,
+		// Player.buffType (0x0C8) and buffTime (0x0CC), int[] references, from
+		// statLife (0x470): CLRFields, measured 2026-10-08.
+		BuffTypeFromLife: 0x0C8 - 0x470, BuffTimeFromLife: 0x0CC - 0x470},
 	// Item: CLRFields["Item"], by name (TestTheCLRItemFieldsAreTheTable).
 	Item: ItemFields{
 		Type: 0x050, Stack: 0x064, UseTime: 0x060, UseAnim: 0x05C,
@@ -70,7 +73,7 @@ var clrEntry = Entry{
 		CheatFeature("pickup"), CheatFeature("spawn_rate"), CheatFeature("loot"),
 		CheatFeature("tool_reach"), CheatFeature("smart_cursor"), CheatFeature("vanity_accs"),
 		CheatFeature("teleport"), CheatFeature("inventory_accs"), CheatFeature("ore_extract"),
-		CheatFeature("auto_use")},
+		CheatFeature("auto_use"), WriteBuffs},
 	Writes:       false,
 	PlayerValues: map[string]int{"pickSpeed": 0xA4, "blockRange": 0x100},
 	Anchors:      netfxAnchors,

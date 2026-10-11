@@ -827,9 +827,26 @@ Slice 16 — the item compendium on the CLR (done):
       0/1, Shadow armour head/body/leg slot 5 at defense 6/7/6 -- 629 of 6195 items
       with damage, kinds classified; NPCs listed by name, no stats.
 
+Slice 17 — potion buffs on the CLR (done):
+- [x] The buff reader takes its numbers from the entry rather than mono constants:
+      `buffs.NewFor` carries the two buff-array references from statLife
+      (`PlayerFields.BuffType/BuffTimeFromLife`) and the szarray header offsets
+      (`Shapes.ArrLen/ArrDataOff`). `buffs.New` keeps mono's numbers for the
+      package's own tests.
+- [x] The CLR offsets are the measured ones: `Player.buffType` 0x0C8 and
+      `buffTime` 0x0CC from statLife 0x470 (CLRFields), tied to the metadata in
+      `TestTheCLRPlayerFieldsAreTheTable`.
+- [x] `potions` and `fishing-buffs` gate on a new `WriteBuffs` feature instead of
+      the full-write flag; the netfx entry's write features gain it. (The `fishing`
+      gear command still needs the broader writes and is unchanged.)
+- [x] Live on Windows (2026-10-10): `fishing-buffs --power` added the Fishing
+      Potion effect, a second run read it back as "kept", and `--sonar` added a
+      second -- the read and write both land at the CLR offsets.
+
 Next slices:
-- [ ] NPC template stats on the CLR (the NPC array found player-relative), then
-      selling and buffs; then the full `Writes` flip. Each with tests pinned first.
+- [ ] NPC template stats on the CLR (the NPC array found player-relative), the
+      fishing gear/bait writes and selling; then the full `Writes` flip. Each with
+      tests pinned first.
 
 Findings from slice 1:
 - **A buffed player can be missed by the scan, on both runtimes (pre-existing).**

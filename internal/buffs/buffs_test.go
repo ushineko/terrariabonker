@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/buffs"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/memtest"
 )
 
@@ -232,4 +233,45 @@ func TestTheSlotCount(t *testing.T) {
 	got, err := buffs.New(plant(slots), life).Slots()
 	require.NoError(t, err)
 	require.Equal(t, slots, got, "a different number of slots was read")
+}
+
+/*
+NewFor reads and renews buffs under the CLR's layout, taking its numbers from
+the entry: the two buff-array references from statLife and the szarray header
+(length at +4, data at +8), not mono's (spec 052).
+*/
+func TestNewForReadsTheCLRLayout(t *testing.T) {
+	e, support := layout.Select(layout.Build1458s24893155, "netfx-4.8.9345.0")
+	require.Equal(t, layout.Supported, support)
+
+	const (
+		clrLife = base + 0x900
+		typeCLR = base + 0x1800
+		timeCLR = base + 0x1C00
+	)
+	mem := memtest.New(base, size)
+	mem.PokeBytes(uint32(int64(clrLife)+int64(e.Player.BuffTypeFromLife)), u32(typeCLR)) //nolint:gosec // a delta
+	mem.PokeBytes(uint32(int64(clrLife)+int64(e.Player.BuffTimeFromLife)), u32(timeCLR)) //nolint:gosec // a delta
+	lenOff, dataOff := uint32(e.Shapes.ArrLenOff), uint32(e.Shapes.ArrDataOff)           //nolint:gosec // small header offsets
+	mem.PokeI32(typeCLR+lenOff, slots)
+	mem.PokeI32(timeCLR+lenOff, slots)
+	mem.PokeI32(typeCLR+dataOff+2*4, 77) // slot 2: buff 77
+	mem.PokeI32(timeCLR+dataOff+2*4, 300)
+
+	bar := buffs.NewFor(e, mem, clrLife)
+	got, err := bar.Active()
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.EqualValues(t, 2, got[0].Slot)
+	require.EqualValues(t, 77, got[0].Type)
+	require.EqualValues(t, 300, got[0].Ticks)
+
+	// A renewal reads and writes at the CLR offsets: an empty slot gets the new
+	// buff, so a second effect comes on.
+	what, err := bar.Renew(50, 120)
+	require.NoError(t, err)
+	require.Equal(t, buffs.Added, what)
+	got, err = bar.Active()
+	require.NoError(t, err)
+	require.Len(t, got, 2)
 }

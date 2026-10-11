@@ -35,7 +35,8 @@ var monoEntry = Entry{
 	Player: PlayerFields{NameFromLife: NamePtrOff, InventoryFromLife: InventoryPtrOff, SelectedItemFromLife: SelectedItemOff,
 		LifeMaxFromLife: StatLifeMaxOff, LifeMax2FromLife: StatLifeMax2Off,
 		ManaFromLife: StatManaOff, ManaMaxFromLife: StatManaMaxOff, ManaMax2FromLife: StatManaMax2Off,
-		PositionFromLife: 0x0C - 0x738},
+		PositionFromLife: 0x0C - 0x738,
+		BuffTypeFromLife: BuffTypePtrOff, BuffTimeFromLife: BuffTimePtrOff},
 	Item: ItemFields{
 		Type: ItemType, Stack: ItemStack, UseTime: ItemUseTime, UseAnim: ItemUseAnim,
 		Pick: ItemPick, TileBoost: ItemTileBoost, Damage: ItemDamage, Rare: ItemRare,

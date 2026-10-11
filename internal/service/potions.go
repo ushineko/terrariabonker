@@ -23,7 +23,8 @@ func (s *Service) PotionTick(minStack, ticks int32) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	bar := buffs.New(s.Mem, live.LifeAddr)
+	entry, _, _ := s.Support()
+	bar := buffs.NewFor(entry, s.Mem, live.LifeAddr)
 
 	out := map[string][]map[string]int32{
 		buffs.Added: {}, buffs.Renewed: {}, buffs.Kept: {}, buffs.Full: {},
