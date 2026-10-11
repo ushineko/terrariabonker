@@ -136,12 +136,15 @@ destination bank; `sell` reported it sold and 2 silver paid; the slot then read
 empty and a second dry run found nothing to sell. The bank was not read back by
 the tool; the maintainer confirmed the result in-game.
 
-**Not done**: no bait or rod has been written on the CLR. Spec 052 keeps that box
-open.
+**Live fishing-gear writes, done later the same day** at the maintainer's
+request: `fishing --keep 31` took the bait in slot 8 from 30 to 31 (confirmed
+in-game); `--power 100` took the Golden Fishing Rod from 50 to 100 and
+`--restore` put it back to 50, each read back by the tool. The rod at 100 was
+not watched in-game.
 
 ## Overall
 
-- All gates passed: YES headless; live sale confirmed; live fishing-gear write pending
+- All gates passed: YES headless; live sale and fishing-gear writes confirmed
 - Notes: the paths still behind the every-write gate are the projectile editor,
   `spawn-npc`, `extract-recipes`, `freeze`/`godmode` and `extract-tick`. Until
   the flip `build-check` reports `read_only` under the CLR.

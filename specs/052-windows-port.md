@@ -899,15 +899,17 @@ Slice 20 — selling on the CLR (done):
       it sold and 2 silver paid into the Piggy Bank, the slot read empty and a
       second dry run found nothing to sell. The maintainer confirmed it in-game.
 
-Slice 21 — the fishing gear writes on the CLR (done headless; the live write is the
-maintainer's to make):
+Slice 21 — the fishing gear writes on the CLR (done):
 - [x] The service side already took its numbers from the entry (the inventory's
       `ItemFields`, `GiveItem`'s templates); what refused it was the every-write
       gate. `fishing` gates on a new `WriteFishingGear` feature.
 - [x] Live on Windows (2026-10-11), reads only: the gear read a Golden Fishing Rod
       at power 50 and bait at power 35, stack 30; `fishing` ran through the gate
       and, with a rod and full bait carried, had nothing to change.
-- [ ] A bait top-up and a rod-power raise and restore on Windows, watched in-game.
+- [x] Live writes on Windows (2026-10-11): `fishing --keep 31` took the bait in
+      slot 8 from 30 to 31, which the maintainer confirmed in-game; `--power 100`
+      took the Golden Fishing Rod from 50 to 100 and `--restore` put it back to
+      50, each read back by the tool. The rod at 100 was not watched in-game.
 
 Next slices:
 - [ ] The paths still behind the every-write gate: the projectile editor,
