@@ -854,10 +854,71 @@ Slice 18 — restore applies per-feature on the CLR (done):
       (an empty profile applied nothing) where it was refused before; the GUI's
       startup auto-restore no longer fails.
 
+Slice 19 — NPC template stats on the CLR (done):
+- [x] The NPC half of the template scan takes its numbers from the entry: a new
+      `NPCShape` (the eleven object-relative field offsets the catalog reads, the
+      object's extent, and a resolver name) replaces the `NPCStats` on/off flag.
+      The CLR's offsets are `CLRFields`' by name, width and height from `Entity`.
+- [x] Finding `Main.npc` and `Main.npcFrameCount` is a resolver per runtime in
+      `content` ("mono": the static block, pinned offset then scan; "clr": the
+      reference-static slots at measured distances from `Main.player`'s, 0x54
+      below and 0xA0 above). The CLR has no block to fall back to scanning, so
+      the slot is believed only when it holds an array of 201 whose elements
+      share a MethodTable.
+- [x] Live NPCs are excluded through the same resolver, so a difficulty-scaled
+      NPC standing in the world is not taken for its template.
+- [x] Live on Windows (2026-10-11): `compendium --refresh` read stats for 754 of
+      759 NPCs -- Blue Slime 25 life / 7 damage / 2 defense, Green Slime (net id
+      -3) 14 / 6 / 0, Eye of Cthulhu 2800 / 15 / 12 boss, King Slime 2000 / 40 /
+      10, Wall of Flesh 8000, Empress of Light 70000, Merchant and Guide 250 life
+      town NPCs; 22 bosses, 39 town NPCs, 124 critters. The published frame
+      counts read slime 2, Eye of Cthulhu 6, Merchant 25, Guide 26; 11 tints.
+
+Slice 20 — selling on the CLR (done headless and read live; the live sale is the
+maintainer's to make):
+- [x] `selling.Container` and `selling.Bank` take their numbers from the entry
+      (`selling.ShapeOf`): the item fields, the szarray header, and a new
+      `SellFields` block -- `Item.value` 0x0D8, `Player.bank` 0x0E0 (from statLife
+      0x470) and `Chest.item` 0x004. `Chest` was measured for this slice
+      (`cmd/clrfields Terraria.Chest`, 2026-10-11) and appended to
+      docs/clr-fields-1.4.5.8.txt.
+- [x] A slot is read field by field, not as one span from type to stack: under
+      the CLR `favorited` (0x10C) is nowhere near type (0x050) and stack (0x064).
+- [x] `Service.WorldID` reads `Main.worldName` under the CLR, through its slot
+      0x280 below `Main.player`'s. Selling keeps "is a Piggy Bank placed" per
+      world; without the world's name the first world's answer would have been
+      kept for every world after it. `status` reports the world on Windows as a
+      side effect.
+- [x] `sell` and `sell-tick` gate on a new `WriteSelling` feature.
+- [x] Live on Windows (2026-10-11), reads only: the four coins read 5, 500, 50000
+      and 5000000 in `Item.value`; a Terra Blade read 1000000; the Piggy Bank read
+      as a chest of 40 holding 77 platinum, 25 gold, 76 silver, 39 copper;
+      favorited matched the hotbar; `sell --dry-run` chose the bank ("placed");
+      the world read "Royal Brewery of Maggots".
+- [ ] A live sale on Windows, watched in-game. Every number the write uses was
+      read live above, and the write itself goes through fields already written
+      live in earlier slices (type, stack, the template copy span), but no coin
+      has been credited on the CLR yet.
+
+Slice 21 — the fishing gear writes on the CLR (done headless; the live write is the
+maintainer's to make):
+- [x] The service side already took its numbers from the entry (the inventory's
+      `ItemFields`, `GiveItem`'s templates); what refused it was the every-write
+      gate. `fishing` gates on a new `WriteFishingGear` feature.
+- [x] Live on Windows (2026-10-11), reads only: the gear read a Golden Fishing Rod
+      at power 50 and bait at power 35, stack 30; `fishing` ran through the gate
+      and, with a rod and full bait carried, had nothing to change.
+- [ ] A bait top-up and a rod-power raise and restore on Windows, watched in-game.
+
 Next slices:
-- [ ] NPC template stats on the CLR (the NPC array found player-relative), the
-      fishing gear/bait writes and selling; then the full `Writes` flip. Each with
-      tests pinned first.
+- [ ] The paths still behind the every-write gate: the projectile editor,
+      `spawn-npc` (its copy spans and fields are mono's), `extract-recipes`,
+      `freeze`/`godmode`, `extract-tick`; then the full `Writes` flip. Each with
+      tests pinned first. Until the flip `build-check` reports `read_only` under
+      the CLR (seen live, 2026-10-11, with all 15 cheats resolving), and the
+      window's build gate treats that as every cheat being off for this build
+      (`gui/buildgate.go` `applyBuildDecision`; read from the code, not watched in
+      the window).
 
 Findings from slice 1:
 - **A buffed player can be missed by the scan, on both runtimes (pre-existing).**

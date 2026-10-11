@@ -51,8 +51,12 @@ var monoEntry = Entry{
 	Content: ContentFields{
 		CreateTile: ItemCreateTile, HealLife: ItemHealLife, HealMana: ItemHealMana,
 		HeadSlot: ItemHeadSlot, BodySlot: ItemBodySlot, LegSlot: ItemLegSlot,
-		NPCStats: true,
 	},
+	NPC: NPCShape{Type: NPCType, NetID: NPCNetID, LifeMax: NPCLifeMax,
+		Damage: NPCDamage, Defense: NPCDefense, Width: NPCWidth, Height: NPCHeight,
+		Boss: NPCBoss, Town: NPCTown, Active: NPCActive, Color: NPCColor,
+		Size: NPCObjectSize, Resolver: "mono"},
+	Selling:      SellFields{ItemValue: ItemValue, BankFromLife: BankPtrOff, ChestItem: ChestItemOff},
 	Reads:        []Feature{ReadPlayer, ReadInventory, ReadLocalPlayer, ReadTiles, ReadProjectiles, ReadContent},
 	LocalPlayer:  ByAnchor,
 	Writes:       true,

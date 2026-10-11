@@ -337,19 +337,19 @@ type NPCStats struct {
 	Color [4]byte `json:"color"`
 }
 
-// readNPCStats is one NPC object's fields.
-func readNPCStats(buf []byte, off int) NPCStats {
+// readNPCStats is one NPC object's fields, at the entry's offsets.
+func readNPCStats(buf []byte, off int, o layout.NPCShape) NPCStats {
 	i32 := func(field int) int32 {
 		return int32(binary.LittleEndian.Uint32(buf[off+field:])) //nolint:gosec // a field, as its bits
 	}
 	var color [4]byte
-	copy(color[:], buf[off+layout.NPCColor:off+layout.NPCColor+4])
+	copy(color[:], buf[off+o.Color:off+o.Color+4])
 	return NPCStats{
-		Type: i32(layout.NPCType), NetID: i32(layout.NPCNetID),
-		Life: i32(layout.NPCLifeMax), Damage: i32(layout.NPCDamage),
-		Defense: i32(layout.NPCDefense), Width: i32(layout.NPCWidth),
-		Height: i32(layout.NPCHeight),
-		Boss:   buf[off+layout.NPCBoss] != 0, Town: buf[off+layout.NPCTown] != 0,
+		Type: i32(o.Type), NetID: i32(o.NetID),
+		Life: i32(o.LifeMax), Damage: i32(o.Damage),
+		Defense: i32(o.Defense), Width: i32(o.Width),
+		Height: i32(o.Height),
+		Boss:   buf[off+o.Boss] != 0, Town: buf[off+o.Town] != 0,
 		Color: color,
 	}
 }
@@ -365,8 +365,9 @@ Reading the templates rather than the NPCs in the world is not a detail -- a liv
 NPC's stats have been scaled by the world's difficulty, so a Blue Slime in an
 expert world reads 60 life where its template says 25.
 */
-func FindNPCTemplates(mem Mem, vtable uint32, exclude map[uint32]bool) map[int32]NPCStats {
-	objects := scanObjects(mem, vtable, layout.NPCObjectSize, readNPCStats,
+func FindNPCTemplates(mem Mem, vtable uint32, exclude map[uint32]bool, o layout.NPCShape) map[int32]NPCStats {
+	objects := scanObjects(mem, vtable, o.Size,
+		func(buf []byte, off int) NPCStats { return readNPCStats(buf, off, o) },
 		func(s NPCStats) bool {
 			return s.NetID > -layout.MaxNPCType && s.NetID < layout.MaxNPCType &&
 				s.Type >= 0 && s.Type < layout.MaxNPCType

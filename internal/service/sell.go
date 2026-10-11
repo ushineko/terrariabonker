@@ -274,15 +274,17 @@ func (s *Service) SellTick(dryRun bool) (map[string]any, error) {
 	}
 
 	array := func() (uint32, bool) { return inv.ArrayAddr() }
-	purse := &selling.Container{Mem: s.Mem, Array: array, Slots: layout.SellSlots}
+	entry, _, _ := s.Support()
+	shape := selling.ShapeOf(entry)
+	purse := &selling.Container{Mem: s.Mem, Array: array, Slots: layout.SellSlots, Shape: shape}
 	// Coins go only where the game's own sell path puts them; the scan may look
 	// further.
-	coinPurse := &selling.Container{Mem: s.Mem, Array: array, Slots: layout.CoinSlots}
+	coinPurse := &selling.Container{Mem: s.Mem, Array: array, Slots: layout.CoinSlots, Shape: shape}
 
 	var bank *selling.Container
 	dest := "inventory"
 	if reach.Reachable {
-		if got, ok := selling.Bank(s.Mem, live.LifeAddr); ok {
+		if got, ok := selling.Bank(s.Mem, entry, live.LifeAddr); ok {
 			bank, dest = got, "bank"
 		}
 	}

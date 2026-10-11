@@ -78,7 +78,7 @@ func (a *App) sellCmd() *cobra.Command {
 			if list {
 				return a.printWhitelist(cmd, asJSON)
 			}
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteSelling, force)
 			if err != nil {
 				return err
 			}
@@ -129,7 +129,7 @@ func (a *App) sellTickCmd() *cobra.Command {
 		Short: "one auto-sell round (GUI; PERMANENT)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteSelling, force)
 			if err != nil {
 				return err
 			}

@@ -160,21 +160,18 @@ func (s *Service) itemTemplateCache(refresh bool) map[int32]content.ItemStats {
 func (s *Service) npcTemplateCache(refresh bool) map[int32]content.NPCStats {
 	return templateCache(s, "npcs", refresh, nil,
 		func() map[int32]content.NPCStats {
-			// The NPC template scan finds its array through a runtime's statics and
-			// array layout, ported for mono but not yet the CLR: an entry that
-			// cannot run it lists NPCs by name without stats (spec 052).
-			if entry, _, _ := s.Support(); !entry.Content.NPCStats {
-				return map[int32]content.NPCStats{}
-			}
-			base, ok := s.StaticBase()
+			// An entry with no way to the NPC array finds no vtable here, and its
+			// catalog lists NPCs by name without stats.
+			entry, _, _ := s.Support()
+			base, ok := s.npcBase(entry)
 			if !ok {
 				return map[int32]content.NPCStats{}
 			}
-			vt, ok := content.FindNPCVTable(s.Mem, base)
+			vt, ok := content.FindNPCVTable(s.Mem, entry, base)
 			if !ok {
 				return map[int32]content.NPCStats{}
 			}
-			return content.FindNPCTemplates(s.Mem, vt, s.liveNPCAddrs())
+			return content.FindNPCTemplates(s.Mem, vt, s.liveNPCAddrs(), entry.NPC)
 		})
 }
 
@@ -340,11 +337,12 @@ without sudo. Written through the same give-back path as the caches, for the
 same reason.
 */
 func (s *Service) publishNPCDrawData(npcStats map[int32]content.NPCStats) {
-	base, ok := s.StaticBase()
+	entry, _, _ := s.Support()
+	base, ok := s.npcBase(entry)
 	if !ok {
 		return
 	}
-	counts := content.FrameCounts(s.Mem, base)
+	counts := content.FrameCounts(s.Mem, entry, base)
 	if len(counts) == 0 {
 		return
 	}

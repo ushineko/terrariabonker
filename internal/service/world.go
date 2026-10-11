@@ -90,6 +90,34 @@ func (s *Service) projectileBase(entry layout.Entry) (uint32, bool) {
 }
 
 /*
+npcBase is the base the entry's NPC resolver reads, for the NPC array and the
+frame-count table alike: Main's static block under mono, Main.player's slot under
+the CLR, where the resolver applies the entry's distances itself.
+*/
+func (s *Service) npcBase(entry layout.Entry) (uint32, bool) {
+	if entry.Statics.NPCFromPlayer == 0 {
+		return s.StaticBase()
+	}
+	return s.mainPlayerSlot()
+}
+
+/*
+worldNameSlot is where Main.worldName's string reference is kept: an offset into
+Main's static block under mono, a slot off Main.player's under the CLR.
+*/
+func (s *Service) worldNameSlot(entry layout.Entry) (uint32, bool) {
+	if entry.Statics.WorldNameFromPlayer == 0 {
+		base, ok := s.StaticBase()
+		return base + layout.MainWorldNameOff, ok
+	}
+	slot, ok := s.mainPlayerSlot()
+	if !ok {
+		return 0, false
+	}
+	return uint32(int(slot) + entry.Statics.WorldNameFromPlayer), true //nolint:gosec // a slot near the player's
+}
+
+/*
 mainPlayerSlot is Main.player's static slot, for an entry that finds the statics
 by identity (the CLR). Resolving the live player leaves the slot in the kept
 anchor.
@@ -126,15 +154,16 @@ back empty, and callers fall back to their old behaviour rather than acting on a
 wrong answer.
 */
 func (s *Service) WorldID() (World, bool) {
-	base, ok := s.StaticBase()
+	entry, _, _ := s.Support()
+	slot, ok := s.worldNameSlot(entry)
 	if !ok {
 		return World{}, false
 	}
-	ptr, ok := s.Mem.ReadU32(base + layout.MainWorldNameOff)
+	ptr, ok := s.Mem.ReadU32(slot)
 	if !ok {
 		return World{}, false
 	}
-	name, ok := locate.ReadMonoString(s.Mem, ptr)
+	name, ok := locate.With(entry).ReadString(s.Mem, ptr)
 	if !ok || name == "" {
 		return World{}, false
 	}

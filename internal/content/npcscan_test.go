@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/terrariabonker/internal/content"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/memtest"
 )
 
@@ -115,10 +116,10 @@ the same length.
 */
 func TestAnArrayWhoseElementsShareNothingIsRejected(t *testing.T) {
 	mem := plantNPCs(false)
-	_, ok := content.NPCVTableOf(mem, decoyArr)
+	_, ok := content.NPCVTableOf(mem, layout.Mono(), decoyArr)
 	require.False(t, ok, "an array of unrelated elements was taken for the NPCs")
 
-	_, ok = content.NPCVTableOf(mem, npcArr)
+	_, ok = content.NPCVTableOf(mem, layout.Mono(), npcArr)
 	require.True(t, ok, "the real array was rejected")
 }
 
@@ -126,7 +127,7 @@ func TestAnArrayWhoseElementsShareNothingIsRejected(t *testing.T) {
 // table out of noise.
 func TestNoNPCArrayAtAll(t *testing.T) {
 	mem := memtest.New(scanBase, scanSize)
-	_, ok := content.FindNPCArray(mem, staticBase)
+	_, ok := content.FindNPCArray(mem, layout.Mono(), staticBase)
 	require.False(t, ok, "an array was found in empty memory")
-	require.Empty(t, content.FrameCounts(mem, staticBase), "frame counts were read from nothing")
+	require.Empty(t, content.FrameCounts(mem, layout.Mono(), staticBase), "frame counts were read from nothing")
 }

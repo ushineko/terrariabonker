@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "d94cc0872e4cc74c54c4c80995b10b4ac4593b68f2e4e1c30f4d377e2841c960",
+	require.Equal(t, "566733717231607b1f3375a38af5bf9f43c94bcfd40a0396a35333d60bfdc4e1",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -351,4 +351,78 @@ func TestEverySiteNamesItsEntrysAnchor(t *testing.T) {
 			require.True(t, e.CanWrite(CheatFeature(name)), "%s: %s has a site the entry may not write", e.Name, name)
 		}
 	}
+}
+
+/*
+The CLR NPC shape is the CLR table's own offsets, by name -- width and height
+from Entity, where they are declared -- and the mono shape is the mono constants.
+Size reaches the end of the furthest field read, color, which is four bytes.
+*/
+func TestTheCLRNPCShapeIsTheTable(t *testing.T) {
+	at := map[string]int{}
+	for _, class := range []string{"Entity", "NPC"} {
+		for _, f := range CLRFields[class] {
+			at[f.Name] = int(f.Offset)
+		}
+	}
+	clr := clrEntry.NPC
+	byGameName := map[string]int{
+		"type": clr.Type, "netID": clr.NetID, "lifeMax": clr.LifeMax,
+		"damage": clr.Damage, "defense": clr.Defense,
+		"width": clr.Width, "height": clr.Height,
+		"boss": clr.Boss, "townNPC": clr.Town, "active": clr.Active, "color": clr.Color,
+	}
+	// Every NPCShape field but Size and Resolver, which are not game fields.
+	require.Len(t, byGameName, reflectFieldCount(NPCShape{})-2, "an NPCShape field is not checked here")
+	for name, got := range byGameName {
+		want, ok := at[name]
+		require.True(t, ok, "%s is not in the CLR table", name)
+		require.Equal(t, want, got, "NPC.%s", name)
+	}
+	require.Equal(t, at["color"]+4, clr.Size)
+	require.Equal(t, "clr", clr.Resolver)
+
+	require.Equal(t, NPCShape{Type: 0x140, NetID: 0x1E8, LifeMax: 0x170, Damage: 0x160,
+		Defense: 0x164, Width: 0x034, Height: 0x038, Boss: 0x1CC, Town: 0x214,
+		Active: 0x1CB, Color: 0x1A8, Size: 664, Resolver: "mono"}, monoEntry.NPC)
+}
+
+/*
+The CLR sell fields are the CLR table's, by name: Item.value, Chest.item, and
+Player.bank less statLife. The mono ones are the mono constants.
+*/
+func TestTheCLRSellFieldsAreTheTable(t *testing.T) {
+	at := func(class, name string) int {
+		for _, f := range CLRFields[class] {
+			if f.Name == name {
+				return int(f.Offset)
+			}
+		}
+		t.Fatalf("%s.%s is not in the CLR table", class, name)
+		return 0
+	}
+	require.Equal(t, SellFields{
+		ItemValue:    at("Item", "value"),
+		BankFromLife: at("Player", "bank") - at("Player", "statLife"),
+		ChestItem:    at("Chest", "item"),
+	}, clrEntry.Selling)
+	require.Equal(t, SellFields{ItemValue: 0x124, BankFromLife: 0x0E0 - 0x738, ChestItem: 0x08},
+		monoEntry.Selling)
+}
+
+/*
+The two statics the CLR reaches from Main.player's slot beyond the arrays --
+npcFrameCount and worldName -- are the CLR table's own differences. Mono reaches
+both through its static block, so its numbers are zero.
+*/
+func TestTheCLRFrameCountAndWorldNameSlotsAreTheTable(t *testing.T) {
+	main := map[string]int{}
+	for _, f := range CLRFields["Main"] {
+		main[f.Name] = int(f.Offset)
+	}
+	s := clrEntry.Statics
+	require.Equal(t, main["npcFrameCount"]-main["player"], s.NPCFrameCountFromPlayer)
+	require.Equal(t, main["worldName"]-main["player"], s.WorldNameFromPlayer)
+	require.Zero(t, monoEntry.Statics.NPCFrameCountFromPlayer)
+	require.Zero(t, monoEntry.Statics.WorldNameFromPlayer)
 }

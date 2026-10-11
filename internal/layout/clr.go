@@ -84,6 +84,7 @@ var CLRFields = map[string][]CLRField{
 		{"shoot", 0x00bc, false},
 		{"shootSpeed", 0x00c0, false},
 		{"mana", 0x00d4, false},
+		{"value", 0x00d8, false},
 		{"buffType", 0x00dc, false},
 		{"crit", 0x00ec, false},
 		{"armorPenetration", 0x00f0, false},
@@ -98,6 +99,10 @@ var CLRFields = map[string][]CLRField{
 		{"magic", 0x0130, false},
 		{"ranged", 0x0131, false},
 		{"summon", 0x0132, false},
+	},
+	// Measured 2026-10-11 (cmd/clrfields Terraria.Chest), for selling.
+	"Chest": {
+		{"item", 0x0004, false},
 	},
 	"NPC": {
 		{"type", 0x00f4, false},

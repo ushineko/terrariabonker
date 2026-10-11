@@ -51,19 +51,31 @@ var clrEntry = Entry{
 		CopyLo: 0x018, CopyHi: 0x144,
 	},
 	// The catalog-only item fields, from the same CLR measurement as Item
-	// (docs/clr-fields-1.4.5.8.txt, object-relative). NPCStats is off: the NPC
-	// template scan finds its array through mono's statics and array layout, not
-	// yet ported to the CLR, so the catalog lists NPCs by name without stats.
+	// (docs/clr-fields-1.4.5.8.txt, object-relative).
 	Content: ContentFields{
 		CreateTile: 0x07c, HealLife: 0x090, HealMana: 0x094,
 		HeadSlot: 0x0a8, BodySlot: 0x0ac, LegSlot: 0x0b0,
-		NPCStats: false,
 	},
+	// NPC: CLRFields["NPC"] and, for width and height, ["Entity"], by name
+	// (TestTheCLRNPCShapeIsTheTable). Size is the end of the furthest field,
+	// color at 0x208, four bytes. The array is Main.npc's reference static, a
+	// slot off Main.player's (Statics.NPCFromPlayer).
+	NPC: NPCShape{Type: 0x0F4, NetID: 0x14C, LifeMax: 0x120,
+		Damage: 0x108, Defense: 0x10C, Width: 0x010, Height: 0x014,
+		Boss: 0x1D1, Town: 0x1D6, Active: 0x18C, Color: 0x208,
+		Size: 0x20C, Resolver: "clr"},
+	// Item.value 0x0D8 and Player.bank 0x0E0 (less statLife 0x470), measured
+	// 2026-10-08; Chest.item 0x004, measured 2026-10-11 (cmd/clrfields
+	// Terraria.Chest). TestTheCLRSellFieldsAreTheTable.
+	Selling:     SellFields{ItemValue: 0x0D8, BankFromLife: 0x0E0 - 0x470, ChestItem: 0x004},
 	LocalPlayer: ByStatics,
 	Statics: MainStatics{
 		NPCFromPlayer: -0x54, ProjectileFromPlayer: -0x48,
 		PlayerLen: 256, NPCLen: 201, ProjectileLen: 1001,
 		PlayerActive: 0x70E, LifeInPlayer: 0x470, TileFromPlayer: -0x68,
+		// Main.npcFrameCount 0x918 and Main.worldName 0x5F8 against Main.player
+		// 0x878 (CLRFields' Main statics).
+		NPCFrameCountFromPlayer: 0x918 - 0x878, WorldNameFromPlayer: 0x5F8 - 0x878,
 	},
 	Enabled: true,
 	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory, ReadTiles, ReadProjectiles, ReadContent},
@@ -73,7 +85,7 @@ var clrEntry = Entry{
 		CheatFeature("pickup"), CheatFeature("spawn_rate"), CheatFeature("loot"),
 		CheatFeature("tool_reach"), CheatFeature("smart_cursor"), CheatFeature("vanity_accs"),
 		CheatFeature("teleport"), CheatFeature("inventory_accs"), CheatFeature("ore_extract"),
-		CheatFeature("auto_use"), WriteBuffs},
+		CheatFeature("auto_use"), WriteBuffs, WriteFishingGear, WriteSelling},
 	Writes:       false,
 	PlayerValues: map[string]int{"pickSpeed": 0xA4, "blockRange": 0x100},
 	Anchors:      netfxAnchors,

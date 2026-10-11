@@ -206,7 +206,7 @@ one object per id -- and dropping the whole run over it would lose every NPC
 beside it.
 */
 func TestFindingNPCTemplates(t *testing.T) {
-	got := content.FindNPCTemplates(plant(npcImage), vtable, nil)
+	got := content.FindNPCTemplates(plant(npcImage), vtable, nil, layout.Mono().NPC)
 
 	require.NotContains(t, got, int32(5), "a net id that appears twice in a run was kept")
 	require.Contains(t, got, int32(6), "a unique neighbour was thrown away with the duplicate")

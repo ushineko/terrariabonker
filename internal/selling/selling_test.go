@@ -146,7 +146,7 @@ whole reason the price comes off the live item rather than off its type's
 template: a modifier changes what a thing is worth.
 */
 func TestReadingTheBank(t *testing.T) {
-	bank, ok := selling.Bank(plant(layout.BankSlots), life)
+	bank, ok := selling.Bank(plant(layout.BankSlots), layout.Mono(), life)
 	require.True(t, ok, "the bank did not read as one")
 
 	got := bank.Rows()
@@ -171,7 +171,7 @@ offset is far more likely to miss it than to hit it.
 */
 func TestAChestOfTheWrongLengthIsNotTheBank(t *testing.T) {
 	for _, slots := range []int32{0, 39, 41, layout.BankSlots} {
-		_, ok := selling.Bank(plant(slots), life)
+		_, ok := selling.Bank(plant(slots), layout.Mono(), life)
 		require.Equalf(t, slots == layout.BankSlots, ok,
 			"a chest of %d slots was judged wrongly", slots)
 	}
@@ -200,7 +200,7 @@ func TestAWriteChecksTheSlotFirst(t *testing.T) {
 			mem := plant(layout.BankSlots)
 			before := mem.Hex()
 
-			bank, _ := selling.Bank(mem, life)
+			bank, _ := selling.Bank(mem, layout.Mono(), life)
 			got := bank.Write(0, selling.Change{
 				ExpectType: c.expectType, ExpectStack: c.expectStack, Stack: &zero,
 			})
@@ -218,7 +218,7 @@ func TestAWriteChecksTheSlotFirst(t *testing.T) {
 // addressed.
 func TestASlotThatIsNotThere(t *testing.T) {
 	mem := plant(layout.BankSlots)
-	bank, _ := selling.Bank(mem, life)
+	bank, _ := selling.Bank(mem, layout.Mono(), life)
 	before := mem.Hex()
 
 	for _, index := range []int{-1, len(bankItems), layout.BankSlots, layout.BankSlots + 1} {

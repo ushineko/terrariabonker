@@ -18,8 +18,6 @@ Ported from terrariabonker/selling.py (spec 051, step 5).
 package selling
 
 import (
-	"encoding/binary"
-
 	"github.com/ushineko/terrariabonker/internal/layout"
 )
 
@@ -99,6 +97,30 @@ type Mem interface {
 }
 
 /*
+Shape is one version-table entry's numbers for a container: where an item keeps
+the fields a sale reads and writes, the szarray's header, and the way from a
+player to their Piggy Bank's items. Built from the entry (ShapeOf), so a
+container never reads with another runtime's offsets.
+*/
+type Shape struct {
+	itemType, stack, favorited, value int
+	copyLo                            int
+	arrLen, arrData                   uint32
+	bankFromLife, chestItem           int
+}
+
+// ShapeOf is an entry's container numbers.
+func ShapeOf(e layout.Entry) Shape {
+	return Shape{
+		itemType: e.Item.Type, stack: e.Item.Stack, favorited: e.Item.Favorited,
+		value: e.Selling.ItemValue, copyLo: e.Item.CopyLo,
+		arrLen:       uint32(e.Shapes.ArrLenOff),  //nolint:gosec // a header offset
+		arrData:      uint32(e.Shapes.ArrDataOff), //nolint:gosec // a header offset
+		bankFromLife: e.Selling.BankFromLife, chestItem: e.Selling.ChestItem,
+	}
+}
+
+/*
 Container is a read and write view of one item array -- the inventory, or a bank
 chest.
 
@@ -109,6 +131,12 @@ type Container struct {
 	Mem   Mem
 	Array func() (uint32, bool)
 	Slots int
+	Shape Shape
+}
+
+// at is the address of one of an item's fields.
+func at(item uint32, field int) uint32 {
+	return item + uint32(field) //nolint:gosec // a field offset
 }
 
 // ItemAddr is the item object in a slot, or nothing when there is none.
@@ -117,7 +145,7 @@ func (c *Container) ItemAddr(index int) (uint32, bool) {
 	if !ok || index < 0 || index >= c.Slots {
 		return 0, false
 	}
-	addr, ok := c.Mem.ReadU32(arr + layout.ArrDataOff + uint32(index)*4) //nolint:gosec // a slot index
+	addr, ok := c.Mem.ReadU32(arr + c.Shape.arrData + uint32(index)*4) //nolint:gosec // a slot index
 	return addr, ok && addr != 0
 }
 
@@ -137,19 +165,26 @@ func (c *Container) Read(index int) (Row, bool) {
 	if !ok {
 		return Row{}, false
 	}
-	// One read covering type through stack, which is where everything but the
-	// value lives.
-	width := layout.ItemStack - layout.ItemType + 4
-	head := c.Mem.Read(addr+uint32(layout.ItemType), width) //nolint:gosec // a field offset
-	if len(head) < width {
+	// Field by field rather than one span: the four are in a different order
+	// under each runtime, and favorited is nowhere near the others under the CLR.
+	f := c.Shape
+	itemType, ok := c.Mem.ReadI32(at(addr, f.itemType))
+	if !ok {
 		return Row{}, false
 	}
-	value, _ := c.Mem.ReadI32(addr + layout.ItemValue)
+	stack, ok := c.Mem.ReadI32(at(addr, f.stack))
+	if !ok {
+		return Row{}, false
+	}
+	favorited := c.Mem.Read(at(addr, f.favorited), 1)
+	if len(favorited) < 1 {
+		return Row{}, false
+	}
+	value, _ := c.Mem.ReadI32(at(addr, f.value))
 	return Row{
 		Index: index, Addr: addr,
-		Type:      int32(binary.LittleEndian.Uint32(head)),                                    //nolint:gosec // a field, as its bits
-		Stack:     int32(binary.LittleEndian.Uint32(head[layout.ItemStack-layout.ItemType:])), //nolint:gosec // a field, as its bits
-		Favorited: head[layout.ItemFavorited-layout.ItemType] != 0,
+		Type: itemType, Stack: stack,
+		Favorited: favorited[0] != 0,
 		Value:     value,
 	}, true
 }
@@ -193,20 +228,21 @@ func (c *Container) Write(index int, change Change) bool {
 	if !ok {
 		return false
 	}
-	if got, _ := c.Mem.ReadI32(addr + uint32(layout.ItemType)); got != change.ExpectType { //nolint:gosec // a field offset
+	f := c.Shape
+	if got, _ := c.Mem.ReadI32(at(addr, f.itemType)); got != change.ExpectType {
 		return false
 	}
-	if got, _ := c.Mem.ReadI32(addr + uint32(layout.ItemStack)); got != change.ExpectStack { //nolint:gosec // a field offset
+	if got, _ := c.Mem.ReadI32(at(addr, f.stack)); got != change.ExpectStack {
 		return false
 	}
 	switch {
 	case change.Block != nil:
-		c.Mem.Write(addr+layout.CopyLo, change.Block)
+		c.Mem.Write(at(addr, f.copyLo), change.Block)
 	case change.ItemType != nil:
-		c.Mem.WriteI32(addr+uint32(layout.ItemType), *change.ItemType) //nolint:gosec // a field offset
+		c.Mem.WriteI32(at(addr, f.itemType), *change.ItemType)
 	}
 	if change.Stack != nil {
-		c.Mem.WriteI32(addr+uint32(layout.ItemStack), *change.Stack) //nolint:gosec // a field offset
+		c.Mem.WriteI32(at(addr, f.stack), *change.Stack)
 	}
 	return true
 }
@@ -218,17 +254,18 @@ The forty-slot length is **checked rather than trusted**: it is the cheapest
 signal that the chest pointer is really a chest, and a wrong offset is far more
 likely to miss it than to hit it.
 */
-func Bank(mem Mem, lifeAddr uint32) (*Container, bool) {
+func Bank(mem Mem, e layout.Entry, lifeAddr uint32) (*Container, bool) {
+	shape := ShapeOf(e)
 	array := func() (uint32, bool) {
-		chest, ok := mem.ReadU32(uint32(int64(lifeAddr) + layout.BankPtrOff)) //nolint:gosec // a delta from statLife
+		chest, ok := mem.ReadU32(uint32(int64(lifeAddr) + int64(shape.bankFromLife))) //nolint:gosec // a delta from statLife
 		if !ok || chest == 0 {
 			return 0, false
 		}
-		arr, ok := mem.ReadU32(chest + layout.ChestItemOff)
+		arr, ok := mem.ReadU32(at(chest, shape.chestItem))
 		if !ok || arr == 0 {
 			return 0, false
 		}
-		if n, _ := mem.ReadI32(arr + layout.ArrLenOff); n != layout.BankSlots {
+		if n, _ := mem.ReadI32(arr + shape.arrLen); n != layout.BankSlots {
 			return 0, false
 		}
 		return arr, true
@@ -236,5 +273,5 @@ func Bank(mem Mem, lifeAddr uint32) (*Container, bool) {
 	if _, ok := array(); !ok {
 		return nil, false
 	}
-	return &Container{Mem: mem, Array: array, Slots: layout.BankSlots}, true
+	return &Container{Mem: mem, Array: array, Slots: layout.BankSlots, Shape: shape}, true
 }

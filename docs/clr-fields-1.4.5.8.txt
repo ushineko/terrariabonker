@@ -2911,3 +2911,23 @@
   static 0x01690  et=0x02  _canShowMeteorFall
   static 0x01691  et=0x02  _isResizingAndRemakingTargets
   MethodTable 0x08279950, 1129 records; isStatic agrees with metadata 1129/1129
+# Terraria.Chest, measured 2026-10-11 by cmd/clrfields against the same build and runtime (spec 052, selling).
+== Terraria.Chest: 24 fields declared, 17 stored, 1 complete FieldDesc list(s)
+  inst   0x00004  et=0x12  item
+  inst   0x00008  et=0x12  name
+  inst   0x0000c  et=0x08  maxItems
+  inst   0x00010  et=0x08  x
+  inst   0x00014  et=0x08  y
+  inst   0x00018  et=0x08  index
+  inst   0x0001c  et=0x08  frameCounter
+  inst   0x00020  et=0x08  frame
+  inst   0x00024  et=0x08  eatingAnimationTime
+  inst   0x00028  et=0x02  bankChest
+  inst   0x00029  et=0x02  _itemsGotSet
+  static 0x00018  et=0x12  chestTypeToIcon
+  static 0x0001c  et=0x12  chestTypeToIcon2
+  static 0x00020  et=0x12  dresserTypeToIcon
+  static 0x00024  et=0x12  _chestsByCoords
+  static 0x00028  et=0x12  _particlePool
+  static 0x0002c  et=0x12  _chestInUse
+  MethodTable 0x081d1208, 17 records; isStatic agrees with metadata 17/17

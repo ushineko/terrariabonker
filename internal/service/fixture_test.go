@@ -969,7 +969,7 @@ func plantSellableWorth(mem *execMem, value, stack int32) {
 
 // bankStacks is what the bank holds now.
 func bankStacks(mem *execMem) []selling.Row {
-	bank, ok := selling.Bank(mem, liveLife)
+	bank, ok := selling.Bank(mem, layout.Mono(), liveLife)
 	if !ok {
 		return nil
 	}

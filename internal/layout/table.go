@@ -108,6 +108,14 @@ const (
 	// WriteBuffs is renewing the player's active effects: writing a type and a
 	// time into the two buff arrays (potions, fishing-buffs).
 	WriteBuffs Feature = "buffs"
+	// WriteFishingGear is the fishing command's own writes: a bait stack topped
+	// up, a rod's fishing power raised or put back, and a rod and bait handed to
+	// a player who has neither (the last through the item templates).
+	WriteFishingGear Feature = "fishing-gear"
+	// WriteSelling is auto-sell: coins credited to the Piggy Bank or the
+	// inventory, then the sold stack cleared. It reads an item's value and reaches
+	// the bank through the player, which are the entry's SellFields.
+	WriteSelling Feature = "selling"
 )
 
 /*
@@ -134,13 +142,45 @@ beyond what ItemFields already carries, declared per runtime.
 
 The item fields here are the ones only the catalog reads (a weapon's healing, an
 armour slot), kept out of ItemFields so the editor's struct is not widened for
-them. NPCStats gates the NPC half of the scan, which finds its array through a
-runtime's static and array layout: ported for mono, not yet for the CLR, so the
-CLR catalog lists NPCs by name without stats (spec 052).
+them. The NPC half of the scan takes its numbers from the entry's NPCShape.
 */
 type ContentFields struct {
 	CreateTile, HealLife, HealMana, HeadSlot, BodySlot, LegSlot int
-	NPCStats                                                    bool
+}
+
+/*
+NPCShape is how one runtime lays an NPC object out and finds Main.npc: the
+object-relative offsets of the fields the compendium reads from the game's NPC
+templates, how far an NPC object reaches, and which resolver (content package)
+finds the NPC array and the frame-count table. The szarray offsets are the
+entry's Shapes. An entry with no resolver has no NPC stats: its catalog lists
+NPCs by name.
+
+Boss, Town and Active are one-byte bools; Color is four bytes; the rest are
+4-byte ints.
+*/
+type NPCShape struct {
+	Type, NetID, LifeMax, Damage, Defense int
+	Width, Height                         int // Entity's
+	Boss, Town, Active                    int // bools
+	Color                                 int
+	// Size is how much of an NPC object has to be readable before its fields can
+	// be trusted: to the end of the furthest field.
+	Size     int
+	Resolver string // "mono" | "clr": how the array and the frame counts are found
+}
+
+/*
+SellFields is what selling reaches beyond ItemFields: what an item is worth, and
+the Piggy Bank's item array through the player and its Chest.
+*/
+type SellFields struct {
+	// ItemValue is Item.value, object-relative: five times the copper worth.
+	ItemValue int
+	// BankFromLife is Player.bank, a Chest reference, from statLife.
+	BankFromLife int
+	// ChestItem is Chest.item, the Item[] reference, object-relative.
+	ChestItem int
 }
 
 /*
@@ -201,6 +241,10 @@ type MainStatics struct {
 	// entry that finds the tile array by the statics (the CLR). Zero when the tile
 	// array is reached another way (mono, via a static-block offset).
 	TileFromPlayer int
+	// NPCFrameCountFromPlayer and WorldNameFromPlayer are Main.npcFrameCount's and
+	// Main.worldName's static slots relative to Main.player's, on the same terms
+	// as TileFromPlayer: zero when the entry reaches them through a static block.
+	NPCFrameCountFromPlayer, WorldNameFromPlayer int
 }
 
 /*
@@ -270,6 +314,10 @@ type Entry struct {
 	Item          ItemFields
 	// Content is the extra offsets the compendium's template scan reads.
 	Content ContentFields
+	// NPC is how NPC objects are laid out and Main.npc found.
+	NPC NPCShape
+	// Selling is what auto-sell reaches beyond Item.
+	Selling SellFields
 	// LocalPlayer is how ReadLocalPlayer is done, and Statics its numbers when it
 	// is ByStatics.
 	LocalPlayer LocalPlayerBy

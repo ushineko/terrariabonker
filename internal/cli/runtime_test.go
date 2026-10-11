@@ -51,10 +51,9 @@ Under .NET Framework, status and inventory read the player and their items with
 the CLR's numbers, and reads the entry cannot do are refused by name rather than
 run with another runtime's numbers.
 
-The item catalog reads the CLR's item templates (ReadContent), so it runs and
-emits its JSON. Its NPC half is off under the CLR, so NPCs are listed by name
-without stats (spec 052). A write is refused by the build gate, which
-internal/service tests.
+The item catalog reads the CLR's item and NPC templates (ReadContent), so it runs
+and emits its JSON; what it reads is internal/service's to test (spec 052). A
+write is refused by the build gate, which internal/service tests.
 */
 func TestUnderTheCLRThePlayerAndInventoryAreRead(t *testing.T) {
 	const runtime = "netfx-4.8.9345.0"
@@ -103,4 +102,36 @@ func TestUnderTheCLRTheStatWritesRunAndOthersAreRefused(t *testing.T) {
 	require.NotZero(t, code, "an NPC write ran under the CLR entry")
 	require.Contains(t, errOut, runtime)
 	require.Equal(t, before, mem.Hex(), "the refused write changed something")
+}
+
+/*
+Under .NET Framework the fishing gear and selling each run behind a write feature
+of their own, where they were refused with every other unported write.
+
+fishing tops a bait stack back up: stack at the CLR's 0x064, on an item whose
+bait power (0x04C) says it is bait. sell is asked for a dry run with nothing on
+the list and a Piggy Bank carried, so it runs to the end and writes nothing.
+*/
+func TestUnderTheCLRFishingGearAndSellingRun(t *testing.T) {
+	const runtime, items = "netfx-4.8.9345.0", 0x1000D000
+	mem := clrGame()
+	mem.PlantCLRInventory(0x10000800, 0x1000C000, items, []memtest.CLRItem{
+		{Slot: 5, Type: 2676, Stack: 4},
+		{Slot: 6, Type: 87, Stack: 1},
+	})
+	mem.PokeBytes(items+5*memtest.CLRItemSize+0x04C, []byte{50})
+
+	code, out, errOut := runUnder(t, runtime, mem, "fishing", "--no-kit", "--keep", "30")
+	require.Zero(t, code, errOut)
+	require.Contains(t, out, "topped up slot 5 4->30")
+	stack, _ := mem.ReadI32(items + 5*memtest.CLRItemSize + 0x064)
+	require.EqualValues(t, 30, stack)
+
+	before := mem.Hex()
+	code, out, errOut = runUnder(t, runtime, mem, "sell", "--dry-run")
+	require.Zero(t, code, errOut)
+	require.Contains(t, out, "nothing to sell")
+	code, _, errOut = runUnder(t, runtime, mem, "sell-tick", "--dry-run")
+	require.Zero(t, code, errOut)
+	require.Equal(t, before, mem.Hex(), "a dry run wrote something")
 }

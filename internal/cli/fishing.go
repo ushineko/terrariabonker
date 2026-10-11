@@ -24,7 +24,7 @@ func (a *App) fishingCmd() *cobra.Command {
 		Short: "a rod and bait if you have none, and bait that lasts",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteFishingGear, force)
 			if err != nil {
 				return err
 			}

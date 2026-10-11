@@ -49,16 +49,18 @@ numbers for the whole type.
 */
 func (s *Service) liveNPCAddrs() map[uint32]bool {
 	out := map[uint32]bool{}
-	base, ok := s.StaticBase()
+	entry, _, _ := s.Support()
+	base, ok := s.npcBase(entry)
 	if !ok {
 		return out
 	}
-	arr, ok := content.FindNPCArray(s.Mem, base)
+	arr, ok := content.FindNPCArray(s.Mem, entry, base)
 	if !ok {
 		return out
 	}
+	data := arr + uint32(entry.Shapes.ArrDataOff) //nolint:gosec // a header offset
 	for i := range layout.MaxNPCs {
-		obj, ok := s.Mem.ReadU32(arr + layout.ArrDataOff + uint32(i)*4) //nolint:gosec // a slot index
+		obj, ok := s.Mem.ReadU32(data + uint32(i)*4) //nolint:gosec // a slot index
 		if ok && obj != 0 {
 			out[obj] = true
 		}
@@ -75,13 +77,17 @@ stops being it. The parsed stats are cached instead, because those are numbers.
 
 A template is inactive, which is what tells it from a live NPC of the same type
 standing in the world with its stats already scaled.
+
+Spawning is mono's numbers throughout -- the copy spans and every field written
+below -- so it asks for the array the mono way and is refused under any entry
+that may not make every write.
 */
 func (s *Service) npcTemplateBlock(netID int32) ([]byte, bool) {
 	base, ok := s.StaticBase()
 	if !ok {
 		return nil, false
 	}
-	vt, ok := content.FindNPCVTable(s.Mem, base)
+	vt, ok := content.FindNPCVTable(s.Mem, layout.Mono(), base)
 	if !ok {
 		return nil, false
 	}
@@ -138,7 +144,7 @@ func (s *Service) SpawnNPC(netID int32, distanceTiles int) (Spawn, error) {
 	if !ok {
 		return Spawn{}, &Error{Message: "could not find Main.npc -- is a world loaded?"}
 	}
-	arr, ok := content.FindNPCArray(s.Mem, base)
+	arr, ok := content.FindNPCArray(s.Mem, layout.Mono(), base)
 	if !ok {
 		return Spawn{}, &Error{Message: "could not find Main.npc -- is a world loaded?"}
 	}
