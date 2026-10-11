@@ -62,12 +62,16 @@ func TestSectionNamesNeedsNoApp(t *testing.T) {
 	names := SectionNames()
 	require.Equal(t, []string{
 		"Player", "Effects", "Projectiles", "Patches", "Inventory", "Recipes", "Compendium",
-	}, names, "the navigation must keep the Qt window's tab order")
+		"Appearance", // the shell's standard scheme/font/size picker, appended last
+	}, names, "the navigation must keep the Qt window's tab order, with Appearance last")
 
-	for _, n := range names {
+	// Every name but the shell-provided Appearance has an app builder, and there
+	// is no app builder the navigation never shows.
+	app := names[:len(names)-1]
+	for _, n := range app {
 		require.Containsf(t, sectionBuilders(), n, "%q is advertised but has no section", n)
 	}
-	require.Len(t, sectionBuilders(), len(names), "a section exists that the navigation never shows")
+	require.Len(t, sectionBuilders(), len(app), "a section exists that the navigation never shows")
 }
 
 // Every section must render in every scheme without a display and without a

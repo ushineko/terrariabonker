@@ -175,6 +175,11 @@ func sections(u *ui) []shell.Section {
 		out = append(out, shell.NewSection(title, b.icon,
 			func(*shell.Shell) fyne.CanvasObject { return b.build(u) }))
 	}
+	// The standard scheme / font / text-size / scale picker: the window's
+	// preferences, which the Qt tool had and the port had dropped. fynedesygn
+	// makes it a section rather than a dialog; the sample is a line that looks
+	// like the program's own log.
+	out = append(out, shell.AppearanceSection("[catch] reeled in Rock Lobster"))
 	return out
 }
 
