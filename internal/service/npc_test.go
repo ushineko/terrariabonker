@@ -97,6 +97,13 @@ func TestASpawnLandsBehindThePlayer(t *testing.T) {
 				"the position written is not the one reported")
 			require.Zero(t, f32At(t, mem, obj+layout.NPCVelocityX),
 				"the template's velocity came across")
+			// oldPosition, 0x1C under mono: where the NPC is, as the game sets
+			// it for one it spawns itself, and not a zero left by the write
+			// that clears the velocity beside it.
+			require.InDelta(t, got.X*16, f32At(t, mem, obj+0x1C), 0.01,
+				"the old position is not the position")
+			require.InDelta(t, 4000.0, f32At(t, mem, obj+0x20), 0.01,
+				"the old position is not the position")
 		})
 	}
 }

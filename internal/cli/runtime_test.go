@@ -78,8 +78,8 @@ Under .NET Framework, the stat writes run and land in the CLR's fields; a write
 whose path still uses mono's numbers is refused.
 
 set-max-hp writes both caps, and the CLR stores them where clrfields says:
-statLifeMax at statLife-8, statLifeMax2 at statLife-4. spawn-npc copies an NPC
-template, which the CLR entry has no numbers for yet.
+statLifeMax at statLife-8, statLifeMax2 at statLife-4. The debug write pokes an
+address the caller names, which belongs to no feature the CLR entry allows.
 */
 func TestUnderTheCLRTheStatWritesRunAndOthersAreRefused(t *testing.T) {
 	const runtime, life = "netfx-4.8.9345.0", 0x10000800
@@ -98,8 +98,8 @@ func TestUnderTheCLRTheStatWritesRunAndOthersAreRefused(t *testing.T) {
 	}
 
 	before := mem.Hex()
-	code, _, errOut = runUnder(t, runtime, mem, "spawn-npc", "1")
-	require.NotZero(t, code, "an NPC write ran under the CLR entry")
+	code, _, errOut = runUnder(t, runtime, mem, "write", "10000900", "5")
+	require.NotZero(t, code, "a write outside every allowed feature ran under the CLR entry")
 	require.Contains(t, errOut, runtime)
 	require.Equal(t, before, mem.Hex(), "the refused write changed something")
 }
@@ -134,4 +134,41 @@ func TestUnderTheCLRFishingGearAndSellingRun(t *testing.T) {
 	code, _, errOut = runUnder(t, runtime, mem, "sell-tick", "--dry-run")
 	require.Zero(t, code, errOut)
 	require.Equal(t, before, mem.Hex(), "a dry run wrote something")
+}
+
+/*
+Under .NET Framework spawning and the projectile editor each run behind a write
+feature of their own, where they were refused with every other unported write.
+
+clrGame is a player with no world around them, so there is no Main.npc and no
+Main.projectile: each command gets as far as looking for its array and says it is
+not there, which is the command running -- the refusal names the runtime and
+never looks. projectile-of reads Item.shoot at the CLR's 0x0BC, from the one item
+of that type in memory.
+*/
+func TestUnderTheCLRSpawningAndTheProjectileEditorRun(t *testing.T) {
+	const runtime, items = "netfx-4.8.9345.0", 0x1000D000
+	mem := clrGame()
+	mem.PokeI32(items+0x0BC, 132)
+	before := mem.Hex()
+
+	code, _, errOut := runUnder(t, runtime, mem, "spawn-npc", "1")
+	require.NotZero(t, code)
+	require.Contains(t, errOut, "could not find Main.npc")
+	require.NotContains(t, errOut, runtime, "spawn-npc was refused for the runtime")
+
+	code, _, errOut = runUnder(t, runtime, mem, "projectile-tick", "--set", "132:scale=2", "--budget", "0")
+	require.NotZero(t, code)
+	require.Contains(t, errOut, "could not locate Main.projectile")
+	require.NotContains(t, errOut, runtime, "projectile-tick was refused for the runtime")
+
+	code, out, errOut := runUnder(t, runtime, mem, "projectile-stop")
+	require.Zero(t, code, errOut)
+	require.Contains(t, out, "stopped")
+
+	code, out, errOut = runUnder(t, runtime, mem, "projectile-of", "757")
+	require.Zero(t, code, errOut)
+	require.Contains(t, out, "item 757 shoots projectile 132")
+
+	require.Equal(t, before, mem.Hex(), "something was written")
 }

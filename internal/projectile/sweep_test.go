@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/projectile"
 )
 
@@ -20,7 +21,7 @@ func TestASweepWritesTheOverrides(t *testing.T) {
 	mem := plantFlying()
 	editor := projectile.NewEditor()
 
-	got := editor.Sweep(mem, arr, overrides)
+	got := editor.Sweep(mem, layout.Mono(), arr, overrides)
 	require.Positive(t, got.Patched, "a sweep over live projectiles wrote nothing")
 	require.NotEmpty(t, got.Types, "it reported nothing in flight")
 
@@ -36,7 +37,7 @@ func TestASweepWritesTheOverrides(t *testing.T) {
 		the once-only ones are not, because writing those repeatedly is what made
 		a projectile behave differently the longer it stayed in flight.
 	*/
-	again := editor.Sweep(mem, arr, overrides)
+	again := editor.Sweep(mem, layout.Mono(), arr, overrides)
 	require.Less(t, again.Patched, got.Patched,
 		"a second sweep rewrote the once-only fields")
 	require.Positive(t, again.Patched, "a second sweep stopped holding the values at all")
@@ -52,12 +53,12 @@ func TestForgettingMakesTheNextSweepWrite(t *testing.T) {
 	mem := plantFlying()
 	editor := projectile.NewEditor()
 
-	first := editor.Sweep(mem, arr, overrides)
+	first := editor.Sweep(mem, layout.Mono(), arr, overrides)
 	require.Positive(t, first.Patched)
-	require.Less(t, editor.Sweep(mem, arr, overrides).Patched, first.Patched)
+	require.Less(t, editor.Sweep(mem, layout.Mono(), arr, overrides).Patched, first.Patched)
 
 	editor.Forget()
-	require.Equal(t, first.Patched, editor.Sweep(mem, arr, overrides).Patched,
+	require.Equal(t, first.Patched, editor.Sweep(mem, layout.Mono(), arr, overrides).Patched,
 		"a forgotten editor did not write the values again")
 }
 

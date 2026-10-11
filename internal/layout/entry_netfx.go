@@ -40,7 +40,7 @@ var clrEntry = Entry{
 		Type: 0x050, Stack: 0x064, UseTime: 0x060, UseAnim: 0x05C,
 		Pick: 0x06C, TileBoost: 0x078, Damage: 0x088, Rare: 0x0B8,
 		Defense: 0x0A4, BuffType: 0x0DC, Mana: 0x0D4, Crit: 0x0EC,
-		Knockback: 0x08C, Scale: 0x09C, ShootSpeed: 0x0C0,
+		Knockback: 0x08C, Scale: 0x09C, ShootSpeed: 0x0C0, Shoot: 0x0BC,
 		FishingPole: 0x048, Bait: 0x04C, Prefix: 0x12E,
 		AutoReuse: 0x111, Accessory: 0x10E, Favorited: 0x10C,
 		Consumable: 0x110, Melee: 0x12F, Magic: 0x130, Ranged: 0x131,
@@ -64,6 +64,24 @@ var clrEntry = Entry{
 		Damage: 0x108, Defense: 0x10C, Width: 0x010, Height: 0x014,
 		Boss: 0x1D1, Town: 0x1D6, Active: 0x18C, Color: 0x208,
 		Size: 0x20C, Resolver: "clr"},
+	/*
+		Spawn: Entity's whoAmI, position, velocity and oldPosition, and the
+		player's Entity.direction 0x00C less statLife 0x470 (CLRFields, by name:
+		TestTheCLRSpawnFieldsAreTheTable).
+
+		The copy spans are the NPC object less what a slot keeps of its own:
+		[0x008, 0x020) is oldDirection to lavaWet, stopping at position;
+		[0x040, 0x050) is targetSetFrame and frameCounter, past oldVelocity;
+		[0x088, 0x20C) is everything after the fourteen references at
+		0x050..0x087, to the object's end -- the NPC MethodTable's BaseSize 0x210
+		on the live game (2026-10-11) less the sync block. On that game every one
+		of the 201 slots held its own index at 0x004, and 0x050..0x087 read as
+		heap pointers or null in each object sampled.
+		TestTheCLRSpawnSpansHoldNoReference.
+	*/
+	Spawn: SpawnFields{WhoAmI: 0x004, Position: 0x020, Velocity: 0x028, OldPosition: 0x030,
+		PlayerDirectionFromLife: 0x00C - 0x470,
+		CopySpans:               [][2]int{{0x008, 0x020}, {0x040, 0x050}, {0x088, 0x20C}}},
 	// Item.value 0x0D8 and Player.bank 0x0E0 (less statLife 0x470), measured
 	// 2026-10-08; Chest.item 0x004, measured 2026-10-11 (cmd/clrfields
 	// Terraria.Chest). TestTheCLRSellFieldsAreTheTable.
@@ -85,7 +103,8 @@ var clrEntry = Entry{
 		CheatFeature("pickup"), CheatFeature("spawn_rate"), CheatFeature("loot"),
 		CheatFeature("tool_reach"), CheatFeature("smart_cursor"), CheatFeature("vanity_accs"),
 		CheatFeature("teleport"), CheatFeature("inventory_accs"), CheatFeature("ore_extract"),
-		CheatFeature("auto_use"), WriteBuffs, WriteFishingGear, WriteSelling},
+		CheatFeature("auto_use"), WriteBuffs, WriteFishingGear, WriteSelling,
+		WriteProjectiles, WriteNPCSpawn},
 	Writes:       false,
 	PlayerValues: map[string]int{"pickSpeed": 0xA4, "blockRange": 0x100},
 	Anchors:      netfxAnchors,
@@ -100,8 +119,13 @@ var clrEntry = Entry{
 	// references), active at +0x102 and bobber at +0x104 (one-byte bools); the
 	// Projectile[] array is Main.projectile's reference static, a slot off
 	// Main.player's (Statics.ProjectileFromPlayer). Measured 2026-10-08 (CLRFields).
+	// The editor's fields are CLRFields["Projectile"] by name
+	// (TestTheCLRProjectileShapeIsTheTable); tileCollide is one byte with
+	// other bools on both sides of it.
 	Projectiles: ProjectileShape{AIOff: 0x40, LocalAIOff: 0x44,
-		ActiveOff: 0x102, BobberOff: 0x104, Len: 1001, Resolver: "clr"},
+		ActiveOff: 0x102, BobberOff: 0x104, Len: 1001, Resolver: "clr",
+		TypeOff: 0x080, TimeLeftOff: 0x09C, PenetrateOff: 0x0B4, MaxPenetrateOff: 0x0B8,
+		ExtraUpdatesOff: 0x0D0, ScaleOff: 0x078, TileCollideOff: 0x112},
 	Provenance: "cmd/clrfields and cmd/winrecon against the live game, 2026-10-08 (spec 052)",
 }
 

@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "566733717231607b1f3375a38af5bf9f43c94bcfd40a0396a35333d60bfdc4e1",
+	require.Equal(t, "2eb2db2e1a52569ce1831448a38953d306f585b85f0003404dee99c890293681",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -196,8 +196,11 @@ func TestTheCLRStaticsAreTheTable(t *testing.T) {
 /*
 The CLR projectile shape is the CLR table's own offsets, by name, and the mono
 shape is the mono constants. The bite condition reads ai, localAI, active and
-bobber, so each is checked against the class it is declared on; the array holds
-1001 projectiles under both.
+bobber, and the editor reads type and writes the other six, so each is checked
+against the class it is declared on; the array holds 1001 projectiles under both.
+
+The mono editor offsets are literals: cmd/monofields against 1.4.5.8, the
+numbers internal/layout's Projectile constants have carried since.
 */
 func TestTheCLRProjectileShapeIsTheTable(t *testing.T) {
 	at := map[string]int{}
@@ -211,11 +214,25 @@ func TestTheCLRProjectileShapeIsTheTable(t *testing.T) {
 	require.Equal(t, at["bobber"], clr.BobberOff)
 	require.Equal(t, 1001, clr.Len)
 	require.Equal(t, "clr", clr.Resolver)
+	byGameName := map[string]int{
+		"type": clr.TypeOff, "timeLeft": clr.TimeLeftOff, "penetrate": clr.PenetrateOff,
+		"maxPenetrate": clr.MaxPenetrateOff, "extraUpdates": clr.ExtraUpdatesOff,
+		"scale": clr.ScaleOff, "tileCollide": clr.TileCollideOff,
+	}
+	// Every ProjectileShape field: the four above, Len, Resolver and these.
+	require.Len(t, byGameName, reflectFieldCount(ProjectileShape{})-6, "a ProjectileShape field is not checked here")
+	for name, got := range byGameName {
+		want, ok := at[name]
+		require.True(t, ok, "Projectile.%s is not in the CLR table", name)
+		require.Equal(t, want, got, "Projectile.%s", name)
+	}
 
 	mono := monoEntry.Projectiles
 	require.Equal(t, ProjectileShape{AIOff: ProjectileAI, LocalAIOff: ProjectileLocalAI,
 		ActiveOff: ProjectileActive, BobberOff: ProjectileBobber,
-		Len: ProjectileArrayLen, Resolver: "mono"}, mono)
+		Len: ProjectileArrayLen, Resolver: "mono",
+		TypeOff: 0x094, TimeLeftOff: 0x0B4, PenetrateOff: 0x0D4, MaxPenetrateOff: 0x0DC,
+		ExtraUpdatesOff: 0x104, ScaleOff: 0x08C, TileCollideOff: 0x100}, mono)
 }
 
 /*
@@ -234,6 +251,7 @@ func TestTheCLRItemFieldsAreTheTable(t *testing.T) {
 		"pick": clr.Pick, "tileBoost": clr.TileBoost, "damage": clr.Damage, "rare": clr.Rare,
 		"defense": clr.Defense, "buffType": clr.BuffType, "mana": clr.Mana, "crit": clr.Crit,
 		"knockBack": clr.Knockback, "scale": clr.Scale, "shootSpeed": clr.ShootSpeed,
+		"shoot":       clr.Shoot,
 		"fishingPole": clr.FishingPole, "bait": clr.Bait, "prefix": clr.Prefix,
 		"autoReuse": clr.AutoReuse, "accessory": clr.Accessory, "favorited": clr.Favorited,
 		"consumable": clr.Consumable, "melee": clr.Melee, "magic": clr.Magic,
@@ -260,6 +278,7 @@ func TestTheCLRItemFieldsAreTheTable(t *testing.T) {
 	require.Equal(t, SelectedItemOff, monoEntry.Player.SelectedItemFromLife)
 	require.Equal(t, ItemType, monoEntry.Item.Type)
 	require.Equal(t, ItemSummon, monoEntry.Item.Summon)
+	require.Equal(t, 0xFC, monoEntry.Item.Shoot)
 }
 
 func reflectFieldCount(v any) int { return reflect.TypeOf(v).NumField() }
@@ -425,4 +444,34 @@ func TestTheCLRFrameCountAndWorldNameSlotsAreTheTable(t *testing.T) {
 	require.Equal(t, main["worldName"]-main["player"], s.WorldNameFromPlayer)
 	require.Zero(t, monoEntry.Statics.NPCFrameCountFromPlayer)
 	require.Zero(t, monoEntry.Statics.WorldNameFromPlayer)
+}
+
+/*
+The CLR spawn fields are the CLR table's, by name: Entity's whoAmI and three of
+its Vector2s in an NPC, and Entity.direction in the player, less statLife. The
+mono ones are the literals spawning has always written through, with the facing
+it read at 0x2C of the player (statLife is 0x738 there).
+*/
+func TestTheCLRSpawnFieldsAreTheTable(t *testing.T) {
+	at := func(class, name string) int {
+		for _, f := range CLRFields[class] {
+			if f.Name == name {
+				return int(f.Offset)
+			}
+		}
+		t.Fatalf("%s.%s is not in the CLR table", class, name)
+		return 0
+	}
+	clr := clrEntry.Spawn
+	require.Equal(t, at("Entity", "whoAmI"), clr.WhoAmI)
+	require.Equal(t, at("Entity", "position"), clr.Position)
+	require.Equal(t, at("Entity", "velocity"), clr.Velocity)
+	require.Equal(t, at("Entity", "oldPosition"), clr.OldPosition)
+	require.Equal(t, at("Entity", "direction")-at("Player", "statLife"), clr.PlayerDirectionFromLife)
+	// The player's position is the same Entity field, measured the same way.
+	require.Equal(t, at("Entity", "position")-at("Player", "statLife"), clrEntry.Player.PositionFromLife)
+
+	require.Equal(t, SpawnFields{WhoAmI: 0x08, Position: 0x0C, Velocity: 0x14, OldPosition: 0x1C,
+		PlayerDirectionFromLife: 0x2C - 0x738,
+		CopySpans:               [][2]int{{0x2C, 0x44}, {0x70, 0x298}}}, monoEntry.Spawn)
 }

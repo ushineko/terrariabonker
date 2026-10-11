@@ -30,14 +30,13 @@ const (
 )
 
 /*
-Field is one editable field: where it lives, how wide it is, and what it may be
-set to.
+Field is one editable field: how wide it is and what it may be set to. Where it
+lives is the running entry's (layout.ProjectileShape), found by offsetOf.
 
 Once marks a field applied when a projectile is first seen rather than enforced
 on every sweep -- see Editor for why the lifetime must be one of those.
 */
 type Field struct {
-	Offset int
 	Kind   Kind
 	Lo, Hi float64
 	Label  string
@@ -63,11 +62,21 @@ friend-or-foe flags turn the player's own projectiles on the player. Neither is
 reachable from here.
 */
 var Fields = map[string]Field{
-	"tileCollide":  {Offset: layout.ProjectileTileCollide, Kind: B8, Lo: 0, Hi: 1, Label: "Pass through blocks (0 = yes)"},
-	"penetrate":    {Offset: layout.ProjectilePenetrate, Kind: I32, Lo: -1, Hi: 999, Label: "Enemies pierced (-1 = infinite)"},
-	"extraUpdates": {Offset: layout.ProjectileExtraUpdates, Kind: I32, Lo: 0, Hi: 16, Label: "Extra ticks per frame (speed)"},
-	"scale":        {Offset: layout.ProjectileScale, Kind: F32, Lo: 0.05, Hi: 10.0, Label: "Size"},
-	"timeLeft":     {Offset: layout.ProjectileTimeLeft, Kind: I32, Lo: 1, Hi: 216000, Label: "Lifetime in ticks", Once: true},
+	"tileCollide":  {Kind: B8, Lo: 0, Hi: 1, Label: "Pass through blocks (0 = yes)"},
+	"penetrate":    {Kind: I32, Lo: -1, Hi: 999, Label: "Enemies pierced (-1 = infinite)"},
+	"extraUpdates": {Kind: I32, Lo: 0, Hi: 16, Label: "Extra ticks per frame (speed)"},
+	"scale":        {Kind: F32, Lo: 0.05, Hi: 10.0, Label: "Size"},
+	"timeLeft":     {Kind: I32, Lo: 1, Hi: 216000, Label: "Lifetime in ticks", Once: true},
+}
+
+// offsetOf is where each editable field lives under a shape, by the name Fields
+// gives it.
+var offsetOf = map[string]func(layout.ProjectileShape) int{
+	"tileCollide":  func(sh layout.ProjectileShape) int { return sh.TileCollideOff },
+	"penetrate":    func(sh layout.ProjectileShape) int { return sh.PenetrateOff },
+	"extraUpdates": func(sh layout.ProjectileShape) int { return sh.ExtraUpdatesOff },
+	"scale":        func(sh layout.ProjectileShape) int { return sh.ScaleOff },
+	"timeLeft":     func(sh layout.ProjectileShape) int { return sh.TimeLeftOff },
 }
 
 // WriteMem is the memory an override is written into.
@@ -84,8 +93,7 @@ Width is not a detail. The collide flag is a single byte and the next field
 begins at the following word, so a four-byte write of a flag reaches into
 whatever is packed behind it. The probe that preceded this did exactly that.
 */
-func write(mem WriteMem, addr uint32, field Field, value float64) {
-	at := addr + uint32(field.Offset) //nolint:gosec // a field offset
+func write(mem WriteMem, at uint32, field Field, value float64) {
 	switch field.Kind {
 	case F32:
 		mem.Write(at, binary.LittleEndian.AppendUint32(nil, math.Float32bits(float32(value))))
@@ -141,29 +149,31 @@ type Swept struct {
 }
 
 /*
-Sweep applies the overrides once over the array, and is what it did.
+Sweep applies the overrides once over the array at arr, laid out as the entry
+says, and is what it did.
 
 Counts rather than a bare total: "we wrote forty fields" says nothing about
 whether the right projectiles were touched, and the caller reports to a player.
 */
-func (e *Editor) Sweep(mem WriteMem, arr uint32, overrides map[int32]map[string]float64) Swept {
+func (e *Editor) Sweep(mem WriteMem, entry layout.Entry, arr uint32, overrides map[int32]map[string]float64) Swept {
 	out := Swept{Types: map[int32]int{}}
 	if len(overrides) == 0 {
 		e.Forget()
 		return out
 	}
-	raw := mem.Read(arr+layout.ArrDataOff, layout.ProjectileArrayLen*4)
-	if len(raw) < layout.ProjectileArrayLen*4 {
+	sh := entry.Projectiles
+	raw := mem.Read(arr+uint32(entry.Shapes.ArrDataOff), sh.Len*4) //nolint:gosec // a header offset
+	if len(raw) < sh.Len*4 || sh.Len == 0 {
 		return out
 	}
 
 	live := map[int]seenProjectile{}
-	for slot := range layout.ProjectileArrayLen {
+	for slot := range sh.Len {
 		obj := binary.LittleEndian.Uint32(raw[slot*4:])
-		if obj == 0 || !flagSet(mem, obj, layout.ProjectileActive) {
+		if obj == 0 || !flagSet(mem, obj, sh.ActiveOff) {
 			continue
 		}
-		ptype, _ := mem.ReadI32(obj + uint32(layout.ProjectileType)) //nolint:gosec // a field offset
+		ptype, _ := mem.ReadI32(obj + uint32(sh.TypeOff)) //nolint:gosec // a field offset
 		wanted, ok := overrides[ptype]
 		if !ok {
 			continue
@@ -180,14 +190,14 @@ func (e *Editor) Sweep(mem WriteMem, arr uint32, overrides map[int32]map[string]
 				continue
 			}
 			value := field.Clamp(wanted[name])
-			write(mem, obj, field, value)
+			write(mem, obj+uint32(offsetOf[name](sh)), field, value) //nolint:gosec // a field offset
 			/*
 				The defaults method ends by setting the maximum pierce from the
 				pierce, and the game treats them as a pair -- so writing one alone
 				leaves it accounting inconsistently.
 			*/
 			if name == "penetrate" {
-				mem.WriteI32(obj+uint32(layout.ProjectileMaxPenetrate), int32(value)) //nolint:gosec // clamped above
+				mem.WriteI32(obj+uint32(sh.MaxPenetrateOff), int32(value)) //nolint:gosec // clamped above
 			}
 			out.Patched++
 		}

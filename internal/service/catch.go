@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/patch"
 	"github.com/ushineko/terrariabonker/internal/projectile"
 )
@@ -250,7 +249,8 @@ func (s *Service) ProjectileOf(itemType int32) (map[string]any, error) {
 	if !ok {
 		return nil, &Error{Message: fmt.Sprintf("no template for item type %d", itemType)}
 	}
-	shoot, _ := s.Mem.ReadI32(addr + uint32(layout.ItemShoot)) //nolint:gosec // a field offset
+	entry, _, _ := s.Support()
+	shoot, _ := s.Mem.ReadI32(addr + uint32(entry.Item.Shoot)) //nolint:gosec // a field offset
 	return map[string]any{"item": itemType, "shoot": shoot}, nil
 }
 
@@ -283,6 +283,7 @@ func (s *Service) ProjectileTick(overrides map[int32]map[string]float64, budget 
 	if s.projEditor == nil {
 		s.projEditor = projectile.NewEditor()
 	}
+	entry, _, _ := s.Support()
 	if budget < 0 {
 		budget = 0
 	}
@@ -291,7 +292,7 @@ func (s *Service) ProjectileTick(overrides map[int32]map[string]float64, budget 
 	patched, sweeps := 0, 0
 	types := map[int32]int{}
 	for {
-		out := s.projEditor.Sweep(s.Mem, arr, clean)
+		out := s.projEditor.Sweep(s.Mem, entry, arr, clean)
 		patched += out.Patched
 		sweeps++
 		for t, n := range out.Types {

@@ -911,15 +911,60 @@ Slice 21 — the fishing gear writes on the CLR (done):
       took the Golden Fishing Rod from 50 to 100 and `--restore` put it back to
       50, each read back by the tool. The rod at 100 was not watched in-game.
 
+Slice 22 — the projectile editor on the CLR (done headless and read live; the live
+write is the maintainer's to make):
+- [x] `ProjectileShape` carries the editor's fields -- type, timeLeft, penetrate,
+      maxPenetrate, extraUpdates, scale, tileCollide -- and `Editor.Sweep` takes
+      the entry: the array's length and first element, the active flag and every
+      field written come from it. `projectile.Fields` keeps what a field is (its
+      width, range and label); where it lives is the entry's. The CLR numbers are
+      `CLRFields["Projectile"]`, measured 2026-10-08.
+- [x] `ItemFields.Shoot` (CLR 0x0BC), so `projectile-of` reads the right field.
+- [x] `projectile-tick`, `projectile-stop` and `projectile-of` gate on a new
+      `WriteProjectiles` feature.
+- [x] Live on Windows (2026-10-11), reads only: `clrfields --verify` agrees on
+      every field; `projectile-of` read Terra Blade 985, Stardust Dragon Staff 625,
+      Uzi 14, Solar Eruption 611, Golden Fishing Rod 364; the one projectile in
+      flight read type 211, penetrate and maxPenetrate -1, extraUpdates 0, scale
+      1.00, and the array's objects a BaseSize of 0x140.
+- [ ] A live edit on Windows, watched in-game: an override held on a weapon's
+      projectiles while firing, and the weapon back to normal once it stops.
+
+Slice 23 — `spawn-npc` on the CLR (done headless and read live; the live spawn is
+the maintainer's to make):
+- [x] A new `SpawnFields` block on the entry: Entity's whoAmI, position, velocity
+      and oldPosition in an NPC, the player's Entity.direction from statLife, and
+      the copy spans. The CLR spans are [0x008, 0x020), [0x040, 0x050) and
+      [0x088, 0x20C): the object less its header, whoAmI, the four Vector2s and
+      the fourteen references at 0x050..0x087.
+- [x] `SpawnNPC` takes the array, the template scan, the free slot, the player's
+      position and facing, and every write from the entry. It no longer asks for
+      mono's numbers by name.
+- [x] `spawn-npc` gates on a new `WriteNPCSpawn` feature.
+- [x] Measured live on Windows (2026-10-11), reads only: the NPC MethodTable's
+      BaseSize is 0x210, so the object ends at 0x20C; all 201 slots held their own
+      index at 0x004; 0x050..0x087 read as heap pointers or null in the three
+      objects sampled and 0x040..0x04F did not; in six active NPCs position less
+      velocity was oldPosition; the player's direction read 1 at 0x00C.
+- [ ] A live spawn on Windows, watched in-game.
+
+Finding from slice 23:
+- **A spawn zeroed the NPC's oldPosition, on mono too (fixed).** The spawn wrote
+  position and oldPosition, then cleared sixteen bytes from velocity -- and
+  oldPosition is the eight bytes after velocity under both runtimes, so it was
+  written and then zeroed. The clear is now eight bytes, written before
+  oldPosition. Under mono this changes one thing: a spawned NPC's oldPosition is
+  its position instead of (0, 0) until the game's next update. Not watched on
+  Linux.
+
 Next slices:
-- [ ] The paths still behind the every-write gate: the projectile editor,
-      `spawn-npc` (its copy spans and fields are mono's), `extract-recipes`,
-      `freeze`/`godmode`, `extract-tick`; then the full `Writes` flip. Each with
-      tests pinned first. Until the flip `build-check` reports `read_only` under
-      the CLR (seen live, 2026-10-11, with all 15 cheats resolving), and the
-      window's build gate treats that as every cheat being off for this build
-      (`gui/buildgate.go` `applyBuildDecision`; read from the code, not watched in
-      the window).
+- [ ] The paths still behind the every-write gate: `extract-recipes`,
+      `freeze`/`godmode`, `extract-tick` and `extract-stop`, the debug `write`;
+      then the full `Writes` flip. Each with tests pinned first. Until the flip
+      `build-check` reports `read_only` under the CLR (seen live, 2026-10-11,
+      with all 15 cheats resolving), and the window's build gate treats that as
+      every cheat being off for this build (`gui/buildgate.go`
+      `applyBuildDecision`; read from the code, not watched in the window).
 
 Findings from slice 1:
 - **A buffed player can be missed by the scan, on both runtimes (pre-existing).**

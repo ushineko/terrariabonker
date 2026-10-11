@@ -8,7 +8,6 @@ import (
 	"github.com/ushineko/terrariabonker/internal/content"
 	"github.com/ushineko/terrariabonker/internal/game"
 	"github.com/ushineko/terrariabonker/internal/layout"
-	"github.com/ushineko/terrariabonker/internal/locate"
 )
 
 /*
@@ -20,14 +19,6 @@ NPC object allocated when the world loaded -- so a spawn is a field copy plus a
 position. No code is injected, nothing managed is called, and nothing goes in the
 build ledger.
 */
-
-/*
-playerDirection is which way the player is facing, -1 or 1.
-
-Not in the layout package because it is not read as layout anywhere else: this is
-the only caller, and it wants the sign rather than the field.
-*/
-const playerDirection = 0x2C
 
 // Spawn is what a spawn did, in the caller's units: tiles, not pixels.
 type Spawn struct {
@@ -77,21 +68,13 @@ stops being it. The parsed stats are cached instead, because those are numbers.
 
 A template is inactive, which is what tells it from a live NPC of the same type
 standing in the world with its stats already scaled.
-
-Spawning is mono's numbers throughout -- the copy spans and every field written
-below -- so it asks for the array the mono way and is refused under any entry
-that may not make every write.
 */
-func (s *Service) npcTemplateBlock(netID int32) ([]byte, bool) {
-	base, ok := s.StaticBase()
+func (s *Service) npcTemplateBlock(entry layout.Entry, arr uint32, netID int32) ([]byte, bool) {
+	vt, ok := content.NPCVTableOf(s.Mem, entry, arr)
 	if !ok {
 		return nil, false
 	}
-	vt, ok := content.FindNPCVTable(s.Mem, layout.Mono(), base)
-	if !ok {
-		return nil, false
-	}
-	span := layout.NPCObjectSize
+	span := entry.NPC.Size
 	var best []byte
 	for _, region := range s.Mem.Regions() {
 		buf := s.Mem.Read(region.Start, region.Size())
@@ -102,8 +85,8 @@ func (s *Service) npcTemplateBlock(netID int32) ([]byte, bool) {
 			if i+span > len(buf) {
 				continue
 			}
-			nid := int32(binary.LittleEndian.Uint32(buf[i+layout.NPCNetID:])) //nolint:gosec // a signed field
-			if nid == netID && buf[i+layout.NPCActive] == 0 {
+			nid := int32(binary.LittleEndian.Uint32(buf[i+entry.NPC.NetID:])) //nolint:gosec // a signed field
+			if nid == netID && buf[i+entry.NPC.Active] == 0 {
 				best = buf[i : i+span]
 			}
 		}
@@ -112,13 +95,14 @@ func (s *Service) npcTemplateBlock(netID int32) ([]byte, bool) {
 }
 
 // freeNPCSlot is the index and object address of an unused Main.npc slot.
-func (s *Service) freeNPCSlot(arr uint32) (int, uint32, bool) {
+func (s *Service) freeNPCSlot(entry layout.Entry, arr uint32) (int, uint32, bool) {
+	data := arr + uint32(entry.Shapes.ArrDataOff) //nolint:gosec // a header offset
 	for i := range layout.MaxNPCs {
-		obj, ok := s.Mem.ReadU32(arr + layout.ArrDataOff + uint32(i)*4) //nolint:gosec // a slot index
+		obj, ok := s.Mem.ReadU32(data + uint32(i)*4) //nolint:gosec // a slot index
 		if !ok || obj == 0 {
 			continue
 		}
-		if active := s.Mem.Read(obj+layout.NPCActive, 1); len(active) == 1 && active[0] == 0 {
+		if active := s.Mem.Read(obj+uint32(entry.NPC.Active), 1); len(active) == 1 && active[0] == 0 { //nolint:gosec // a field offset
 			return i, obj, true
 		}
 	}
@@ -140,33 +124,34 @@ func (s *Service) SpawnNPC(netID int32, distanceTiles int) (Spawn, error) {
 	if err != nil {
 		return Spawn{}, err
 	}
-	base, ok := s.StaticBase()
+	entry, _, _ := s.Support()
+	base, ok := s.npcBase(entry)
 	if !ok {
 		return Spawn{}, &Error{Message: "could not find Main.npc -- is a world loaded?"}
 	}
-	arr, ok := content.FindNPCArray(s.Mem, layout.Mono(), base)
+	arr, ok := content.FindNPCArray(s.Mem, entry, base)
 	if !ok {
 		return Spawn{}, &Error{Message: "could not find Main.npc -- is a world loaded?"}
 	}
-	block, ok := s.npcTemplateBlock(netID)
+	block, ok := s.npcTemplateBlock(entry, arr, netID)
 	if !ok {
 		return Spawn{}, &Error{
 			Message: fmt.Sprintf("no template for NPC %d (%s)", netID, names.Label(int(netID))),
 		}
 	}
-	slot, obj, ok := s.freeNPCSlot(arr)
+	slot, obj, ok := s.freeNPCSlot(entry, arr)
 	if !ok {
 		return Spawn{}, &Error{Message: "no free NPC slot -- the world is at its NPC limit"}
 	}
 
-	player := live.LifeAddr - locate.StatLifeFromObj
-	raw := s.Mem.Read(player+layout.NPCPositionX, 8)
+	fromLife := func(off int) uint32 { return uint32(int(live.LifeAddr) + off) } //nolint:gosec // a field near statLife
+	raw := s.Mem.Read(fromLife(entry.Player.PositionFromLife), 8)
 	if len(raw) < 8 {
 		return Spawn{}, &Error{Message: "the player's position is not readable"}
 	}
 	px := math.Float32frombits(binary.LittleEndian.Uint32(raw))
 	py := math.Float32frombits(binary.LittleEndian.Uint32(raw[4:]))
-	facing, _ := s.Mem.ReadI32(player + playerDirection)
+	facing, _ := s.Mem.ReadI32(fromLife(entry.Spawn.PlayerDirectionFromLife))
 	if facing == 0 {
 		facing = 1
 	}
@@ -177,14 +162,15 @@ func (s *Service) SpawnNPC(netID int32, distanceTiles int) (Spawn, error) {
 	*/
 	x := math.Max(100.0*16, float64(px)-float64(facing)*float64(distanceTiles)*16.0)
 
-	for _, span := range layout.NPCCopySpans {
-		s.Mem.Write(obj+uint32(span[0]), block[span[0]:span[1]]) //nolint:gosec // an offset in an object
+	at := func(off int) uint32 { return obj + uint32(off) } //nolint:gosec // an offset in an object
+	for _, span := range entry.Spawn.CopySpans {
+		s.Mem.Write(at(span[0]), block[span[0]:span[1]])
 	}
-	s.Mem.Write(obj+layout.NPCWhoAmI, i32Bytes(int32(slot))) //nolint:gosec // a slot index
-	s.Mem.Write(obj+layout.NPCPositionX, f32Pair(float32(x), py))
-	s.Mem.Write(obj+layout.NPCOldPositionX, f32Pair(float32(x), py))
-	s.Mem.Write(obj+layout.NPCVelocityX, make([]byte, 16))
-	s.Mem.Write(obj+layout.NPCActive, []byte{1})
+	s.Mem.Write(at(entry.Spawn.WhoAmI), i32Bytes(int32(slot))) //nolint:gosec // a slot index
+	s.Mem.Write(at(entry.Spawn.Position), f32Pair(float32(x), py))
+	s.Mem.Write(at(entry.Spawn.Velocity), make([]byte, 8))
+	s.Mem.Write(at(entry.Spawn.OldPosition), f32Pair(float32(x), py))
+	s.Mem.Write(at(entry.NPC.Active), []byte{1})
 
 	return Spawn{
 		Slot: slot, ID: netID, Name: names.Label(int(netID)),

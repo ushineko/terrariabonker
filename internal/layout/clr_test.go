@@ -119,44 +119,114 @@ MethodTable's BaseSize, 0x148 on the live game (2026-10-08), less the 4-byte syn
 block in front of the object pointer.
 */
 func TestTheCLRCopySpanHoldsNoReference(t *testing.T) {
-	type fieldAt struct {
-		off int
-		et  int
-	}
-	var fields []fieldAt
-	f, err := os.Open("../../docs/clr-fields-1.4.5.8.txt") //nolint:gosec // a checked-in measurement
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-	inItem := false
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if strings.HasPrefix(line, "== Terraria.") {
-			inItem = strings.HasPrefix(line, "== Terraria.Item:")
-			continue
-		}
-		p := strings.Fields(line)
-		if !inItem || len(p) != 4 || p[0] != "inst" {
-			continue
-		}
-		off, err := strconv.ParseUint(strings.TrimPrefix(p[1], "0x"), 16, 32)
-		require.NoError(t, err)
-		et, err := strconv.ParseUint(strings.TrimPrefix(p[2], "et=0x"), 16, 8)
-		require.NoError(t, err)
-		fields = append(fields, fieldAt{int(off), int(et)})
-	}
-	require.NotEmpty(t, fields)
-
-	// CorElementType values that are references: string, class, var, generic
-	// instance (conservatively), array, object, szarray.
-	isRef := map[int]bool{0x0E: true, 0x12: true, 0x13: true, 0x14: true, 0x15: true, 0x1C: true, 0x1D: true}
+	fields := measuredInstanceFields(t, "Item")
 	lastRefEnd := 0
 	for _, fa := range fields {
-		if isRef[fa.et] {
+		if isCLRReference[fa.et] {
 			lastRefEnd = max(lastRefEnd, fa.off+4)
 		}
 		require.Less(t, fa.off, clrEntry.Item.CopyHi, "a field starts past the copy span's end")
 	}
 	require.Equal(t, lastRefEnd, clrEntry.Item.CopyLo, "the span does not start right after the last reference")
 	require.Equal(t, 0x148-4, clrEntry.Item.CopyHi, "the span does not end with the object")
+}
+
+// measuredField is one instance field of the measurement: its name, offset and
+// CorElementType.
+type measuredField struct {
+	name string
+	off  int
+	et   int
+}
+
+// isCLRReference is the CorElementType values that are references: string,
+// class, var, generic instance (conservatively), array, object, szarray.
+var isCLRReference = map[int]bool{0x0E: true, 0x12: true, 0x13: true, 0x14: true, 0x15: true, 0x1C: true, 0x1D: true}
+
+// measuredInstanceFields is every instance field the measurement lists under the
+// given classes.
+func measuredInstanceFields(t *testing.T, classes ...string) []measuredField {
+	t.Helper()
+	f, err := os.Open("../../docs/clr-fields-1.4.5.8.txt") //nolint:gosec // a checked-in measurement
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	var fields []measuredField
+	wanted := false
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if rest, ok := strings.CutPrefix(line, "== Terraria."); ok {
+			class, _, _ := strings.Cut(rest, ":")
+			wanted = false
+			for _, c := range classes {
+				wanted = wanted || c == class
+			}
+			continue
+		}
+		p := strings.Fields(line)
+		if !wanted || len(p) != 4 || p[0] != "inst" {
+			continue
+		}
+		off, err := strconv.ParseUint(strings.TrimPrefix(p[1], "0x"), 16, 32)
+		require.NoError(t, err)
+		et, err := strconv.ParseUint(strings.TrimPrefix(p[2], "et=0x"), 16, 8)
+		require.NoError(t, err)
+		fields = append(fields, measuredField{p[3], int(off), int(et)})
+	}
+	require.NoError(t, sc.Err())
+	require.NotEmpty(t, fields)
+	return fields
+}
+
+/*
+The CLR spawn spans hold no reference, leave the slot what is its own, and carry
+everything else.
+
+A spawn copies each span out of the game's template of an NPC over a Main.npc
+slot. A reference inside a span would hand the slot the template's own array, and
+the two would share it from then on. So, against the measured Entity and NPC
+layouts: no reference field starts inside a span; whoAmI and the four Vector2s
+from position to oldVelocity -- which the spawn writes itself or leaves -- are
+outside every span; every other instance field is inside one, so nothing of the
+template is left behind; and the last span ends where the object does, the NPC
+MethodTable's BaseSize 0x210 on the live game (2026-10-11) less the 4-byte sync
+block.
+*/
+func TestTheCLRSpawnSpansHoldNoReference(t *testing.T) {
+	spans := clrEntry.Spawn.CopySpans
+	require.NotEmpty(t, spans)
+	inSpan := func(off int) bool {
+		for _, s := range spans {
+			if off >= s[0] && off < s[1] {
+				return true
+			}
+		}
+		return false
+	}
+	own := map[string]bool{"whoAmI": true, "position": true, "velocity": true,
+		"oldPosition": true, "oldVelocity": true}
+	refs := 0
+	for _, f := range measuredInstanceFields(t, "Entity", "NPC") {
+		switch {
+		case isCLRReference[f.et]:
+			refs++
+			require.Falsef(t, inSpan(f.off), "the reference %s (%#x) is inside a copy span", f.name, f.off)
+		case own[f.name]:
+			require.Falsef(t, inSpan(f.off), "%s (%#x) is the slot's own and is inside a copy span", f.name, f.off)
+			delete(own, f.name)
+		default:
+			require.Truef(t, inSpan(f.off), "%s (%#x) is in no copy span", f.name, f.off)
+		}
+	}
+	require.Empty(t, own, "an Entity field the spawn keeps was not in the measurement")
+	require.Equal(t, 14, refs, "the measurement lists a different number of NPC references")
+
+	prev := 4 // past the MethodTable pointer
+	for _, s := range spans {
+		require.GreaterOrEqual(t, s[0], prev, "the spans overlap, are out of order, or reach the header")
+		require.Greater(t, s[1], s[0])
+		prev = s[1]
+	}
+	require.Equal(t, 0x210-4, prev, "the last span does not end with the object")
+	require.Equal(t, clrEntry.NPC.Size, prev, "the spans and the NPC shape disagree about the object's end")
 }

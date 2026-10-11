@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/projectile"
 )
 
@@ -71,7 +72,7 @@ as a pair, so writing one alone leaves it accounting inconsistently.
 */
 func TestThePierceIsWrittenAsAPair(t *testing.T) {
 	mem := plantFlying()
-	projectile.NewEditor().Sweep(mem, arr, map[int32]map[string]float64{
+	projectile.NewEditor().Sweep(mem, layout.Mono(), arr, map[int32]map[string]float64{
 		985: {"penetrate": 7},
 	})
 
@@ -88,17 +89,17 @@ func TestAnEmptySweep(t *testing.T) {
 	before := mem.Hex()
 	ed := projectile.NewEditor()
 
-	got := ed.Sweep(mem, arr, nil)
+	got := ed.Sweep(mem, layout.Mono(), arr, nil)
 	require.Zero(t, got.Patched)
 	require.Empty(t, got.Types)
 	require.Equal(t, before, mem.Hex(), "an empty sweep wrote something")
 
 	// And what it had seen is gone, so the next real sweep applies the once-only
 	// fields again.
-	ed.Sweep(mem, arr, overrides)
-	full := ed.Sweep(mem, arr, overrides)
-	ed.Sweep(mem, arr, nil)
-	again := ed.Sweep(mem, arr, overrides)
+	ed.Sweep(mem, layout.Mono(), arr, overrides)
+	full := ed.Sweep(mem, layout.Mono(), arr, overrides)
+	ed.Sweep(mem, layout.Mono(), arr, nil)
+	again := ed.Sweep(mem, layout.Mono(), arr, overrides)
 	require.Greater(t, again.Patched, full.Patched,
 		"an empty sweep did not drop what it had seen")
 }
@@ -113,7 +114,7 @@ recognisable is there to be clobbered.
 */
 func TestAFlagIsWrittenAtItsOwnWidth(t *testing.T) {
 	mem := plantFlying()
-	projectile.NewEditor().Sweep(mem, arr, map[int32]map[string]float64{
+	projectile.NewEditor().Sweep(mem, layout.Mono(), arr, map[int32]map[string]float64{
 		985: {"tileCollide": 0},
 	})
 

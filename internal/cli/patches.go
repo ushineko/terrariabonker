@@ -387,7 +387,7 @@ func (a *App) spawnNPCCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteNPCSpawn, force)
 			if err != nil {
 				return err
 			}

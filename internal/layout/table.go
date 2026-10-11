@@ -116,6 +116,13 @@ const (
 	// inventory, then the sold stack cleared. It reads an item's value and reaches
 	// the bank through the player, which are the entry's SellFields.
 	WriteSelling Feature = "selling"
+	// WriteProjectiles is the projectile editor: per-type overrides written onto
+	// whatever is in flight, at the entry's ProjectileShape offsets. It covers the
+	// lookup of which projectile an item fires, which serves nothing else.
+	WriteProjectiles Feature = "projectile-edit"
+	// WriteNPCSpawn is spawning an NPC: a template's fields copied over a free
+	// Main.npc slot, at the entry's NPCShape and SpawnFields.
+	WriteNPCSpawn Feature = "npc-spawn"
 )
 
 /*
@@ -127,6 +134,7 @@ type ItemFields struct {
 	Type, Stack, UseTime, UseAnim, Pick, TileBoost, Damage int
 	Rare, Defense, BuffType, Mana, Crit                    int
 	Knockback, Scale, ShootSpeed                           int // floats
+	Shoot                                                  int // the projectile type fired
 	FishingPole, Bait, Prefix                              int // bytes
 	AutoReuse, Accessory, Favorited, Consumable            int // bools
 	Melee, Magic, Ranged, Summon                           int // bools
@@ -168,6 +176,27 @@ type NPCShape struct {
 	// be trusted: to the end of the furthest field.
 	Size     int
 	Resolver string // "mono" | "clr": how the array and the frame counts are found
+}
+
+/*
+SpawnFields is what spawning an NPC writes beyond NPCShape: the Entity fields a
+slot is given of its own, where the player faces, and which parts of a template
+are copied.
+
+CopySpans are half-open [lo, hi) ranges of an NPC object. Together they are the
+whole object less its header, whoAmI, the four Vector2s from position to
+oldVelocity, and every field holding a reference -- handing a slot the
+template's arrays would make the two share them.
+*/
+type SpawnFields struct {
+	// WhoAmI is Entity.whoAmI: the slot's own index in Main.npc.
+	WhoAmI int
+	// Position, Velocity and OldPosition are Entity's Vector2s, object-relative.
+	Position, Velocity, OldPosition int
+	// PlayerDirectionFromLife is the player's Entity.direction, -1 or 1, from
+	// statLife.
+	PlayerDirectionFromLife int
+	CopySpans               [][2]int
 }
 
 /*
@@ -265,16 +294,23 @@ type TileShape struct {
 /*
 ProjectileShape is how one runtime lays a Projectile out and finds the projectile
 array: the object-relative offsets of the two float-array references the bite
-condition reads (ai, localAI) and the two one-byte flags (active, bobber), how
-many projectiles the game keeps, and which resolver (projectile package) finds
-the array. The szarray offsets (length, first element) are the entry's Shapes.
-Only these numbers and the resolver differ between runtimes.
+condition reads (ai, localAI) and the two one-byte flags (active, bobber), the
+fields the projectile editor writes, how many projectiles the game keeps, and
+which resolver (projectile package) finds the array. The szarray offsets (length,
+first element) are the entry's Shapes. Only these numbers and the resolver differ
+between runtimes.
 */
 type ProjectileShape struct {
 	AIOff, LocalAIOff    int    // -> float[3] field references, object-relative
 	ActiveOff, BobberOff int    // one-byte bools, object-relative
 	Len                  int    // how many projectiles the array holds
 	Resolver             string // "mono" | "clr": how the array is found
+	// What the editor reads and writes: type, timeLeft, penetrate, maxPenetrate
+	// and extraUpdates are 4-byte ints, scale a float, tileCollide a one-byte bool
+	// with other bools packed against it.
+	TypeOff, TimeLeftOff, PenetrateOff, MaxPenetrateOff, ExtraUpdatesOff int
+	ScaleOff                                                             int
+	TileCollideOff                                                       int
 }
 
 /*
@@ -316,6 +352,8 @@ type Entry struct {
 	Content ContentFields
 	// NPC is how NPC objects are laid out and Main.npc found.
 	NPC NPCShape
+	// Spawn is what spawning an NPC writes beyond NPC.
+	Spawn SpawnFields
 	// Selling is what auto-sell reaches beyond Item.
 	Selling SellFields
 	// LocalPlayer is how ReadLocalPlayer is done, and Statics its numbers when it

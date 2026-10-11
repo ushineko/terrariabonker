@@ -202,7 +202,7 @@ func (a *App) projectileTickCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteProjectiles, force)
 			if err != nil {
 				return err
 			}
@@ -254,7 +254,7 @@ func (a *App) projectileStopCmd() *cobra.Command {
 		Short: "drop the projectile editor state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteProjectiles, force)
 			if err != nil {
 				return err
 			}
@@ -282,7 +282,7 @@ func (a *App) projectileOfCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.WriteProjectiles, force)
 			if err != nil {
 				return err
 			}
