@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ushineko/terrariabonker/internal/game"
+	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/projectile"
 	"github.com/ushineko/terrariabonker/internal/service"
 )
@@ -43,7 +44,7 @@ func (a *App) catchCmd() *cobra.Command {
 		Short: "reel in every bite for you (needs the auto-use cheat on)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.CheatFeature("auto_use"), force)
 			if err != nil {
 				return err
 			}
@@ -89,7 +90,7 @@ func (a *App) catchTickCmd() *cobra.Command {
 		Short: "one slice of auto-catch (GUI)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.CheatFeature("auto_use"), force)
 			if err != nil {
 				return err
 			}
@@ -122,7 +123,7 @@ func (a *App) catchStopCmd() *cobra.Command {
 		Short: "drop the auto-catch watcher",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.CheatFeature("auto_use"), force)
 			if err != nil {
 				return err
 			}

@@ -55,14 +55,33 @@ func TestTheCLRPotionCheckFindsItsFields(t *testing.T) {
 }
 
 /*
-With no measurement of the held slot, the inventory says it cannot tell.
-
-The CLR entry has none (no selectedItem field; spec 052). Reading offset 0 would
-read statLife itself, and a player on 9 life or less would be "holding" a slot.
+The CLR held slot is the `selected` word of the inlined SelectedItemState struct,
+read as an offset from statLife (spec 052): an in-range slot reads back, and a
+fishing rod in that slot reads as holding a rod -- the guard auto-catch recast
+needs before it presses the use button at empty water.
 */
-func TestTheHeldSlotIsUnknownWithoutAMeasurement(t *testing.T) {
+func TestTheCLRHeldSlotReadsSelectedItemState(t *testing.T) {
+	e := clrEntry(t)
+	mem, inv := clrInventory(t, []memtest.CLRItem{{Slot: 3, Type: 2294, Stack: 1}})
+	rod := uint32(cBase + 0xD000 + 3*memtest.CLRItemSize) // slot 3's item object
+	mem.PokeI32(rod+uint32(e.Item.FishingPole), 50)
+	mem.PokeI32(cLife+uint32(e.Player.SelectedItemFromLife), 3) //nolint:gosec // a positive offset
+
+	slot, ok := inv.SelectedSlot()
+	require.True(t, ok)
+	require.Equal(t, 3, slot)
+	require.True(t, inv.HoldingRod())
+}
+
+/*
+A selected word outside the hotbar (0..9) says the held slot cannot be told, so a
+stray value never names a slot and auto-catch does not press against it.
+*/
+func TestTheCLRHeldSlotRejectsOutOfRange(t *testing.T) {
+	e := clrEntry(t)
 	mem, inv := clrInventory(t, nil)
-	mem.PokeI32(cLife, 7) // a statLife that looks like a hotbar index
+	mem.PokeI32(cLife+uint32(e.Player.SelectedItemFromLife), 42) //nolint:gosec // a positive offset
 	_, ok := inv.SelectedSlot()
 	require.False(t, ok)
+	require.False(t, inv.HoldingRod())
 }

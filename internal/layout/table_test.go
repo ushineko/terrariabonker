@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "79a5b0ded60c48fe27663767fabdfb17ca5fbdb8a60c2fa9bda9f51790969f38",
+	require.Equal(t, "56dffcfceb1ceaea810b6a9a8ffbcf6996c2629f102414ce889af8ae2d1113a0",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -244,7 +244,16 @@ func TestTheCLRItemFieldsAreTheTable(t *testing.T) {
 		require.True(t, ok, "Item.%s is not in the CLR table", name)
 		require.Equal(t, want, got, "Item.%s", name)
 	}
-	require.Zero(t, clrEntry.Player.SelectedItemFromLife, "the CLR selected-item field is unmeasured")
+	// The CLR selected-item offset is the `selected` word (struct+0x04) of the
+	// inlined SelectedItemState, as a difference from statLife.
+	player := map[string]int{}
+	for _, f := range CLRFields["Player"] {
+		player[f.Name] = int(f.Offset)
+	}
+	wantSel := (player["selectedItemState"] + 0x04) - player["statLife"]
+	require.NotZero(t, wantSel)
+	require.Equal(t, wantSel, clrEntry.Player.SelectedItemFromLife,
+		"the CLR selected-item offset is the SelectedItemState `selected` word")
 	require.Equal(t, SelectedItemOff, monoEntry.Player.SelectedItemFromLife)
 	require.Equal(t, ItemType, monoEntry.Item.Type)
 	require.Equal(t, ItemSummon, monoEntry.Item.Summon)

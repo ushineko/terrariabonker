@@ -174,3 +174,30 @@ func TestTeleportCallBody(t *testing.T) {
 		0x56, 0x83, 0xEC, 0x0C, 0x33, 0xC0, // the displaced prologue
 	}, body)
 }
+
+/*
+The CLR auto-use stub consumes the armed flag, reads the player from ecx (the
+entry convention), sets controlUseItem (+0x7E4) and releaseUseItem (+0x7F1),
+counts the press, and reproduces the displaced entry bytes. Both the inner and
+outer skips land on popfd. The arena is at 0x10000000, so armed is 0x10000600
+and count 0x10000604.
+*/
+func TestNetfxAutoUseBody(t *testing.T) {
+	over := []byte{0x55, 0x8B, 0xEC, 0x57, 0x56}
+	body := NetfxAutoUseBody(0x10000000, over)
+	require.Equal(t, []byte{
+		0x60, 0x9C, // pushad; pushfd
+		0x83, 0x3D, 0x00, 0x06, 0x00, 0x10, 0x00, // cmp dword [armed], 0
+		0x74, 0x1F, // jz popfd (skip the 31-byte press)
+		// press:
+		0x83, 0x25, 0x00, 0x06, 0x00, 0x10, 0x00, // and dword [armed], 0 -- consume
+		0x85, 0xC9, // test ecx, ecx -- the player
+		0x74, 0x14, // jz popfd (skip the 20-byte tail)
+		// tail:
+		0xC6, 0x81, 0xE4, 0x07, 0x00, 0x00, 0x01, // mov byte [ecx+7E4], 1 -- controlUseItem
+		0xC6, 0x81, 0xF1, 0x07, 0x00, 0x00, 0x01, // mov byte [ecx+7F1], 1 -- releaseUseItem
+		0xFF, 0x05, 0x04, 0x06, 0x00, 0x10, // inc dword [count]
+		0x9D, 0x61, // popfd; popad -- where both skips land
+		0x55, 0x8B, 0xEC, 0x57, 0x56, // the displaced entry bytes
+	}, body)
+}

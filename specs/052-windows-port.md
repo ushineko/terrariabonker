@@ -757,7 +757,7 @@ Slice 12 â€” Cheat Engine as a scriptable .NET resolver; map-ping teleport:
       the x16 tile->pixel scale, then the newPos stack slot); disabled, and the hook
       read back as its original prologue.
 
-Slice 13 — inventory accessories on the CLR:
+Slice 13 ï¿½ inventory accessories on the CLR:
 - [x] The mono design, ported faithfully: hook UpdateEquips' 58-slot inventory loop
       (`inventory_scan`) where the Item is in eax, and for each item that is an
       accessory call GrantPrefixBenefits, GrantArmorBenefits and ApplyEquipFunctional
@@ -773,7 +773,7 @@ Slice 13 — inventory accessories on the CLR:
       confirmed by the maintainer; disabled, and the loop read back as its original
       bytes.
 
-Slice 14 — the ore extractor on the CLR; all fifteen cheats done:
+Slice 14 ï¿½ the ore extractor on the CLR; all fifteen cheats done:
 - [x] Read side (earlier): `internal/tiles` entry-aware; CLR Tile[,] layout; the vein
       dry-run works on Windows.
 - [x] Write side: a drain at `Player.GrabItems`' entry (once per frame) breaks the
@@ -786,8 +786,29 @@ Slice 14 — the ore extractor on the CLR; all fifteen cheats done:
 
 Done: all fifteen cheats work under .NET Framework.
 
+Slice 15 ï¿½ auto-fishing (auto_use plus the bobber reads it needs):
+- [x] Read side (2026-10-10, committed 9937efd): `internal/projectile` entry-aware;
+      the CLR `Projectile[]` is `Main.projectile`'s reference static (a slot off
+      `Main.player`'s), objects read by shape (ai +0x40, localAI +0x44, active +0x102,
+      bobber +0x104); the bite condition is the game's own. Offline-tested against a
+      planted 1001-slot array.
+- [x] Write side: the auto_use stub at `Player.ItemCheck`'s entry -- not
+      `Player.Update`'s. A write at Update's entry is latched over by the game's own
+      input handling before the use control is read, so it never reeled; ItemCheck is
+      where the control is read (it compares controlUseItem at +0x3D9), so a write at
+      its entry is the last word. `this` is in ecx; the stub sets controlUseItem
+      (+0x7E4) and releaseUseItem (+0x7F1) once when armed. No managed call, no GC risk.
+      Recast needs the held slot, which this build keeps in the inlined
+      `SelectedItemState.selected` word (Player+0x9F4, the plain `selectedItem` int
+      having been replaced); measured from metadata and added to the table.
+- [x] Live on Windows (2026-10-10): reeled a run of fish (Flounder, Oyster, Rock
+      Lobster, Mythril/Mirage/Titanium crates) and auto-recast the line after each --
+      reel -> cast -> reel confirmed by the maintainer; disabled and the ItemCheck
+      prologue read back.
+
+Done: auto-fishing works under .NET Framework.
+
 Next slices:
-- [ ] auto_use (paired with auto-fishing, which needs its own reads ported first).
 - [ ] Then NPCs, projectiles, recipes and content, selling, buffs; then writes
       (phase 4), each with characterization tests pinned first.
 

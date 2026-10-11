@@ -25,10 +25,14 @@ var clrEntry = Entry{
 	Player: PlayerFields{NameFromLife: -0x3E4, InventoryFromLife: -0x39C,
 		LifeMaxFromLife: -0x08, LifeMax2FromLife: -0x04,
 		ManaFromLife: 0x04, ManaMaxFromLife: 0x08, ManaMax2FromLife: 0x0C,
-		PositionFromLife: 0x20 - 0x470},
-	// Item: CLRFields["Item"], by name (TestTheCLRItemFieldsAreTheTable). No
-	// SelectedItemFromLife: the CLR has no selectedItem field, only a
-	// selectedItemState struct, and which word of it is the index is unmeasured.
+		PositionFromLife: 0x20 - 0x470,
+		// The CLR has no plain selectedItem field: it is the `selected` word of
+		// the inlined SelectedItemState struct (Player+0x9F0), which holds the
+		// hotbar index 0..9. The struct's own fields are player, selected, hotbar,
+		// buffered, overridden; `selected` is the committed slot. Measured from
+		// metadata 2026-10-10 (SelectedItemState +0x04; struct at Player+0x9F0).
+		SelectedItemFromLife: 0x9F4 - 0x470},
+	// Item: CLRFields["Item"], by name (TestTheCLRItemFieldsAreTheTable).
 	Item: ItemFields{
 		Type: 0x050, Stack: 0x064, UseTime: 0x060, UseAnim: 0x05C,
 		Pick: 0x06C, TileBoost: 0x078, Damage: 0x088, Rare: 0x0B8,
@@ -56,7 +60,8 @@ var clrEntry = Entry{
 		CheatFeature("max_minions"), CheatFeature("fast_place"), CheatFeature("pylons"),
 		CheatFeature("pickup"), CheatFeature("spawn_rate"), CheatFeature("loot"),
 		CheatFeature("tool_reach"), CheatFeature("smart_cursor"), CheatFeature("vanity_accs"),
-		CheatFeature("teleport"), CheatFeature("inventory_accs"), CheatFeature("ore_extract")},
+		CheatFeature("teleport"), CheatFeature("inventory_accs"), CheatFeature("ore_extract"),
+		CheatFeature("auto_use")},
 	Writes:       false,
 	PlayerValues: map[string]int{"pickSpeed": 0xA4, "blockRange": 0x100},
 	Anchors:      netfxAnchors,

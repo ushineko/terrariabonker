@@ -129,6 +129,9 @@ var CLRFields = map[string][]CLRField{
 		{"blockRange", 0x0570, false},
 		{"itemAnimation", 0x068c, false},
 		{"active", 0x070e, false},
+		// SelectedItemState struct, inlined: its `selected` word (struct+0x04) is
+		// the hotbar index 0..9 that stands in for the old plain selectedItem int.
+		{"selectedItemState", 0x09f0, false},
 	},
 	"Main": {
 		{"worldName", 0x05f8, true},

@@ -180,6 +180,26 @@ var netfxInjectionAnchors = map[string]Anchor{
 		"55 8B EC 57 56 53 ?? ?? ?? ?? ?? 8B 4D ?? 39 09 E8 ?? ?? ?? ?? " +
 			"3B 46 18 7D 30 8B 7D 08 8B 5E 08 8B 56 10 8B 46 14"),
 		Verified: netfxVerified},
+	/*
+		Player.ItemCheck's entry: the per-frame item tick, where the auto-use stub
+		presses the use button. `this` is in ecx (the CLR instance convention); the
+		five displaced prologue bytes (push ebp; mov ebp,esp; push edi; push esi)
+		are wildcarded. The frame (sub esp,0x35C) and the rep-stosd of 0xCB dwords
+		zeroing it make it unique -- Player.Update, the closest twin by first bytes,
+		has a 0xCAC frame and a stosd of 0x320, and GrabItems a 0x68 frame and 9.
+
+		Why here and not Player.Update's entry (where this hook first lived): the
+		control byte is set once per frame and read later the same frame, and
+		anything written before the read is overwritten by the game's own input
+		latching in between. ItemCheck is where the use control is read -- it
+		compares controlUseItem at +0x3D9, having touched nothing that clears it
+		since entry -- so a write at this entry is the last word before the read.
+		A write at Update's entry, ~50 IL earlier, was latched over and never reeled.
+	*/
+	"item_check": {Pattern: MustParse(
+		"?? ?? ?? ?? ?? 53 81 EC 5C 03 00 00 8B F1 8D BD C8 FC FF FF " +
+			"B9 CB 00 00 00 33 C0 F3 AB 8B CE"),
+		Verified: netfxVerified},
 }
 
 // netfxVerified is the builds the CLR set's confirmed stubs were confirmed on.
@@ -267,6 +287,22 @@ var netfxInjections = map[string]Injection{
 		Overwrite: []byte{0x55, 0x8B, 0xEC, 0x57, 0x56},
 		BuildBody: func(b *Builder, inj Injection) ([]byte, error) {
 			return OreExtractBodyCLR(b, inj.Overwrite)
+		},
+		RerunOverwrite: false, Arena: true,
+	},
+	/*
+		Auto-use: a per-frame stub at Player.ItemCheck's entry that presses the use
+		button once when the trainer arms it. No call into the game -- it sets two
+		control bytes on the player (in ecx) and returns -- so it carries none of
+		teleport's GC risk. ItemCheck is the point where the use control is read, so
+		the press lands in time to reel (see the item_check anchor). Ships off;
+		auto-catch is what arms it.
+	*/
+	"auto_use": {
+		Name: "auto_use", Anchor: "item_check", InjectOff: 0,
+		Overwrite: []byte{0x55, 0x8B, 0xEC, 0x57, 0x56},
+		BuildBody: func(b *Builder, inj Injection) ([]byte, error) {
+			return NetfxAutoUseBody(b.Arena, inj.Overwrite), nil
 		},
 		RerunOverwrite: false, Arena: true,
 	},
@@ -439,6 +475,66 @@ func InvAccsBodyCLR(b *Builder, overwrite []byte) ([]byte, error) {
 	out = append(out, guarded...)
 	out = append(out, 0x61) // popad
 	return append(out, overwrite...), nil
+}
+
+/*
+CLR Player control offsets for auto-use, object-relative (CLRFields, 2026-10-08):
+controlUseItem at +0x7E4 and releaseUseItem at +0x7F1. Setting the control alone
+reels a bobber in; starting a use (a fresh cast) needs the release flag too, the
+same pair mono's auto-use sets.
+*/
+const (
+	netfxControlUseItemOff = 0x7E4
+	netfxReleaseUseItemOff = 0x7F1
+)
+
+/*
+NetfxAutoUseBody presses the use button once, on the next frame, when the trainer
+arms it -- the CLR's auto-use stub.
+
+It hooks Player.Update's entry, where `this` is in ecx (the CLR instance
+convention) and the frame is not set up yet, so the player is read straight from
+ecx rather than from [ebp+8] as mono's stub does mid-method. pushad/pushfd leave
+ecx untouched, so it is still the player when the press runs.
+
+**Consume before acting**, the same ordering the extractor and mono's auto-use
+use: the armed flag is cleared before the two field writes, so a stub that dies
+between them presses nothing rather than forever. Both control bytes are set --
+controlUseItem to reel, releaseUseItem so a cast reads as a fresh press rather
+than a hold -- baked from the measured offsets (no arena indirection; the CLR
+knows both). The counter is the trainer's own tally, for the arm/read test.
+
+The arena words it reads (armed, count) are the shared arena layout mono uses, so
+the AutoUse view drives it unchanged. The displaced entry bytes follow.
+*/
+func NetfxAutoUseBody(arena uint32, overwrite []byte) []byte {
+	armed := arena + AutoUseArmedOff
+	count := arena + AutoUseCountOff
+
+	tail := []byte{0xC6, 0x81} // mov byte [ecx+controlUseItem], 1
+	tail = append(tail, u32(netfxControlUseItemOff)...)
+	tail = append(tail, 0x01)
+	tail = append(tail, 0xC6, 0x81) // mov byte [ecx+releaseUseItem], 1
+	tail = append(tail, u32(netfxReleaseUseItemOff)...)
+	tail = append(tail, 0x01)
+	tail = append(tail, 0xFF, 0x05) // inc dword [count]
+	tail = append(tail, u32(count)...)
+
+	press := []byte{0x83, 0x25} // and dword [armed], 0 -- consume the flag first
+	press = append(press, u32(armed)...)
+	press = append(press, 0x00)
+	press = append(press, 0x85, 0xC9)            // test ecx, ecx -- the player
+	press = append(press, 0x74, byte(len(tail))) //nolint:gosec // a fixed, short body
+	press = append(press, tail...)
+
+	out := []byte{0x60, 0x9C} // pushad; pushfd
+	out = append(out, 0x83, 0x3D)
+	out = append(out, u32(armed)...)
+	out = append(out, 0x00)                   // cmp dword [armed], 0
+	out = append(out, 0x74, byte(len(press))) //nolint:gosec // a fixed, short body
+	out = append(out, press...)
+	out = append(out, 0x9D, 0x61) // popfd; popad -- where both skips land
+	return append(out, overwrite...)
 }
 
 /*

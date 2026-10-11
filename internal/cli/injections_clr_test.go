@@ -63,6 +63,14 @@ var (
 		0xC7, 0x83, 0xA4, 0x06, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
 		0xC7, 0x83, 0x54, 0x03, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
 	}
+	// Player.ItemCheck's entry, as found on the live game: a frame (sub esp,0x35C)
+	// and a rep-stosd of 0xCB dwords that zero it. `this` lands in esi via `mov
+	// esi,ecx`. The auto-use hook overwrites the first five bytes.
+	clrItemCheck = []byte{
+		0x55, 0x8B, 0xEC, 0x57, 0x56, 0x53, 0x81, 0xEC, 0x5C, 0x03, 0x00, 0x00,
+		0x8B, 0xF1, 0x8D, 0xBD, 0xC8, 0xFC, 0xFF, 0xFF, 0xB9, 0xCB, 0x00, 0x00, 0x00,
+		0x33, 0xC0, 0xF3, 0xAB, 0x8B, 0xCE, 0x89, 0x8D, 0xC4, 0xFC, 0xFF, 0xFF,
+	}
 	clrTryDrop = func(arg byte) []byte {
 		return []byte{0x55, 0x8B, 0xEC, 0x57, 0x56, 0x53, 0x8B, 0xF1, 0x8B, 0x56, 0x0C, 0x8B, 0x4D, arg,
 			0x39, 0x09, 0xE8, 0, 0, 0, 0, 0x3B, 0x46, 0x18, 0x7D, 0x30, 0x8B, 0x7D, 0x08,
@@ -124,7 +132,8 @@ const (
 	clrArmorFn   = clrCode + 0xB00
 	clrGrabEntry = clrCode + 0xB80
 	clrKillTile  = clrCode + 0xC00
-	clrHookTo    = clrCode + 0xC80
+	clrItemChk   = clrCode + 0xC80 // Player.ItemCheck entry (auto-use)
+	clrHookTo    = clrCode + 0xD00
 )
 
 // clrStubbed is the CLR coder with the three hooks' code planted, and memory
@@ -149,6 +158,7 @@ func clrStubbed() *execMem {
 	mem.PokeBytes(clrArmorFn, clrGrantArmorEntry)
 	mem.PokeBytes(clrGrabEntry, clrGrabItemsEntry)
 	mem.PokeBytes(clrKillTile, clrKillTileEntry)
+	mem.PokeBytes(clrItemChk, clrItemCheck)
 	return mem
 }
 
@@ -253,6 +263,31 @@ func TestUnderTheCLROreExtractorIsInstalled(t *testing.T) {
 	code, _, errOut = runUnder(t, runtime, mem, "patch", "disable", "ore_extract")
 	require.Zero(t, code, errOut)
 	require.Equal(t, clrGrabItemsEntry, mem.Read(clrGrabEntry, len(clrGrabItemsEntry)))
+}
+
+/*
+Under .NET Framework auto-use hooks Player.ItemCheck's entry and its stub sets
+both control bytes on the player (controlUseItem +0x7E4 and releaseUseItem +0x7F1)
+when the arena's armed flag is set. Disabling restores the prologue.
+*/
+func TestUnderTheCLRAutoUseIsInstalled(t *testing.T) {
+	const runtime = "netfx-4.8.9345.0"
+	mem := clrStubbed()
+	code, _, errOut := runUnder(t, runtime, mem, "patch", "enable", "auto_use")
+	require.Zero(t, code, errOut)
+
+	jmp := mem.Read(clrItemChk, 5)
+	require.Equal(t, byte(0xE9), jmp[0], "no jump at Player.ItemCheck's entry")
+	stub := clrItemChk + 5 + binary.LittleEndian.Uint32(jmp[1:])
+	body := mem.Read(stub, 64)
+	require.True(t, bytes.Contains(body, []byte{0xC6, 0x81, 0xE4, 0x07, 0x00, 0x00, 0x01}),
+		"the stub does not set controlUseItem (+0x7E4)")
+	require.True(t, bytes.Contains(body, []byte{0xC6, 0x81, 0xF1, 0x07, 0x00, 0x00, 0x01}),
+		"the stub does not set releaseUseItem (+0x7F1)")
+
+	code, _, errOut = runUnder(t, runtime, mem, "patch", "disable", "auto_use")
+	require.Zero(t, code, errOut)
+	require.Equal(t, clrItemCheck, mem.Read(clrItemChk, len(clrItemCheck)))
 }
 
 /*

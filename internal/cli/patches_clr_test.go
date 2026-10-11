@@ -155,20 +155,23 @@ func TestUnderTheCLRMiningAndReachArePatched(t *testing.T) {
 }
 
 /*
-A cheat with no CLR site is reported as missing under the CLR, not as broken,
-and turning it on is refused without touching the game.
+Every catalog cheat now has a CLR site: `patch status` reports none as "no code
+site under netfx-4.8.1", the last of the fifteen (auto_use) having landed. A cheat
+whose anchor does not resolve on the running game is still refused without writing
+to it -- here the minimal fixture plants no anchors, so enabling one is refused and
+the game is left untouched.
 */
-func TestUnderTheCLRACheatWithoutASiteIsRefused(t *testing.T) {
+func TestUnderTheCLREveryCheatHasASite(t *testing.T) {
 	const runtime = "netfx-4.8.9345.0"
 	mem := clrCoder()
 	before := mem.Read(clrBase, 0x20000)
 
 	code, out, errOut := runUnder(t, runtime, mem, "patch", "status")
 	require.Zero(t, code, errOut)
-	require.Contains(t, out, "auto_use has no code site under netfx-4.8.1 yet")
+	require.NotContains(t, out, "no code site under netfx-4.8.1",
+		"a catalog cheat still has no CLR site")
 
-	code, _, errOut = runUnder(t, runtime, mem, "patch", "enable", "auto_use")
-	require.NotZero(t, code)
-	require.Contains(t, errOut, "nothing was changed")
+	code, _, _ = runUnder(t, runtime, mem, "patch", "enable", "auto_use")
+	require.NotZero(t, code, "enabling an unresolvable cheat was not refused")
 	require.Equal(t, before, mem.Read(clrBase, 0x20000), "the game was written to")
 }
