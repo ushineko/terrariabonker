@@ -135,7 +135,7 @@ func (a *App) versionCmd() *cobra.Command {
 		Short: "report the game version and compatibility",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(false, false)
+			got, err := a.game()
 			if err != nil {
 				return err
 			}

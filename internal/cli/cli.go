@@ -212,17 +212,11 @@ func attachToGame() (*Game, error) {
 /*
 game attaches, elevating first unless something already has.
 
-`guard` is the build gate, which is a gate on *writing*: a read against a build
-whose offsets moved finds no player, because the locator validates every match,
-while a write against one puts numbers into the wrong fields of a live save.
+It gates nothing. What a command may do with the game is its own to ask:
+gameReading for a read of one feature, gameWriting for one kind of write.
 */
-func (a *App) game(guard, force bool) (*Game, error) {
+func (a *App) game() (*Game, error) {
 	if a.warm != nil {
-		if guard {
-			if err := a.warm.Svc.RequireCompatible(force); err != nil {
-				return nil, err
-			}
-		}
 		a.warm.Svc.Equip(a.warm.Patcher)
 		return a.warm, nil
 	}
@@ -234,11 +228,6 @@ func (a *App) game(guard, force bool) (*Game, error) {
 		return nil, err
 	}
 	got.Svc.Equip(got.Patcher)
-	if guard {
-		if err := got.Svc.RequireCompatible(force); err != nil {
-			return nil, err
-		}
-	}
 	return got, nil
 }
 
@@ -282,7 +271,7 @@ and then read everything else about them with the wrong numbers, which prints
 confident garbage. So a read says what it reads.
 */
 func (a *App) gameReading(f layout.Feature) (*Game, error) {
-	got, err := a.game(false, false)
+	got, err := a.game()
 	if err != nil {
 		return nil, err
 	}
@@ -296,11 +285,11 @@ func (a *App) gameReading(f layout.Feature) (*Game, error) {
 
 /*
 gameWriting attaches for one kind of write, and refuses under an entry that does
-not allow it -- the per-feature counterpart of game(true, force), for writes whose
-paths take their numbers from the entry.
+not allow it, or on a build whose offsets have moved unless forced. Every write
+path takes its numbers from the entry, so each says which write it is.
 */
 func (a *App) gameWriting(f layout.Feature, force bool) (*Game, error) {
-	got, err := a.game(false, false)
+	got, err := a.game()
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +306,7 @@ any entry that can make at least one write, so on a runtime whose write paths
 land one feature at a time it restores what it can and the report names the rest.
 */
 func (a *App) gameWritingAny(force bool) (*Game, error) {
-	got, err := a.game(false, false)
+	got, err := a.game()
 	if err != nil {
 		return nil, err
 	}

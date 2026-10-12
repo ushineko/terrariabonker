@@ -74,14 +74,14 @@ func TestUnderTheCLRThePlayerAndInventoryAreRead(t *testing.T) {
 }
 
 /*
-Under .NET Framework, the stat writes run and land in the CLR's fields; a write
-whose path still uses mono's numbers is refused.
+Under .NET Framework, the stat writes run and land in the CLR's fields.
 
 set-max-hp writes both caps, and the CLR stores them where clrfields says:
 statLifeMax at statLife-8, statLifeMax2 at statLife-4. The debug write pokes an
-address the caller names, which belongs to no feature the CLR entry allows.
+address the caller names with no number of this program's, so it runs under any
+entry that may write at all, and is refused where none may.
 */
-func TestUnderTheCLRTheStatWritesRunAndOthersAreRefused(t *testing.T) {
+func TestUnderTheCLRTheStatWritesAndTheDebugWriteRun(t *testing.T) {
 	const runtime, life = "netfx-4.8.9345.0", 0x10000800
 	mem := clrGame()
 
@@ -97,11 +97,82 @@ func TestUnderTheCLRTheStatWritesRunAndOthersAreRefused(t *testing.T) {
 		require.EqualValues(t, 460, v, "the cap at statLife-%d", off)
 	}
 
-	before := mem.Hex()
 	code, _, errOut = runUnder(t, runtime, mem, "write", "10000900", "5")
-	require.NotZero(t, code, "a write outside every allowed feature ran under the CLR entry")
-	require.Contains(t, errOut, runtime)
+	require.Zero(t, code, errOut)
+	got, _ = mem.ReadI32(0x10000900)
+	require.EqualValues(t, 5, got, "the debug write did not land where it was pointed")
+
+	const unknown = "coreclr-8.0.0"
+	before := mem.Hex()
+	code, _, errOut = runUnder(t, unknown, mem, "write", "10000900", "9")
+	require.NotZero(t, code, "a write ran under a runtime no entry covers")
+	require.Contains(t, errOut, unknown)
 	require.Equal(t, before, mem.Hex(), "the refused write changed something")
+}
+
+/*
+Under .NET Framework godmode holds the live character's life at the cap in
+effect, through the CLR's player numbers.
+
+clrGame's player has 390 of 420. The freeze finds them by the CLR's name offset:
+the mono locator, which the freeze used to ask, finds nobody in this memory.
+*/
+func TestUnderTheCLRGodmodeHoldsLife(t *testing.T) {
+	const runtime, life = "netfx-4.8.9345.0", 0x10000800
+	mem := clrGame()
+
+	code, out, errOut := runUnder(t, runtime, mem, "godmode", "--seconds", "0.05")
+	require.Zero(t, code, errOut)
+	require.Contains(t, out, "on 1 copy(ies)")
+	got, _ := mem.ReadI32(life)
+	require.EqualValues(t, 420, got, "life was not held at the cap in effect")
+}
+
+/*
+With two characters in memory and no telling which is played, a freeze holds
+neither and says why.
+
+The selection screen keeps every character as a Player object. clrGame has no
+Main.player to settle which is live, so the freeze is refused as every other
+write is, where it used to hold every copy it found.
+*/
+func TestAFreezeWithTwoCharactersAndNoGroundTruthIsRefused(t *testing.T) {
+	const runtime = "netfx-4.8.9345.0"
+	mem := clrGame()
+	mem.PlantCLRString(0x10000080, "someone else")
+	mem.PlantCLRPlayer(0x10001800, []int32{300, 300, 120, 100, 100, 100}, 0x10000080)
+	before := mem.Hex()
+
+	code, _, errOut := runUnder(t, runtime, mem, "freeze", "--godmode", "--mana", "--seconds", "0.05")
+	require.NotZero(t, code, "a freeze ran with nobody to say which character is played")
+	require.Contains(t, errOut, "cannot be told")
+	require.Equal(t, before, mem.Hex(), "the refused freeze wrote something")
+}
+
+/*
+Under .NET Framework the window's vein watcher runs behind the ore extractor's
+own write feature, as `extract` does, where it was refused with every unported
+write.
+
+clrGame has no world, so extract-tick gets as far as looking for the tile map and
+says what it could not find -- the command running; the refusal names the runtime
+and never looks. extract-stop has no watcher to drop and says so.
+*/
+func TestUnderTheCLRTheVeinWatcherRuns(t *testing.T) {
+	const runtime = "netfx-4.8.9345.0"
+	mem := clrGame()
+	before := mem.Hex()
+
+	code, _, errOut := runUnder(t, runtime, mem, "extract-tick", "--budget", "0")
+	require.NotZero(t, code)
+	require.NotEmpty(t, errOut)
+	require.NotContains(t, errOut, runtime, "extract-tick was refused for the runtime")
+
+	code, out, errOut := runUnder(t, runtime, mem, "extract-stop", "--json")
+	require.Zero(t, code, errOut)
+	require.Contains(t, out, `"stopped":false`)
+
+	require.Equal(t, before, mem.Hex(), "something was written")
 }
 
 /*
@@ -171,4 +242,30 @@ func TestUnderTheCLRSpawningAndTheProjectileEditorRun(t *testing.T) {
 	require.Contains(t, out, "item 757 shoots projectile 132")
 
 	require.Equal(t, before, mem.Hex(), "something was written")
+}
+
+/*
+Under .NET Framework extract-recipes runs as a read of its own, where it sat
+behind the every-write gate.
+
+clrGame has no Main.player slot, so the command gets as far as looking for the
+statics and says they are not there -- before it would write the book into the
+working directory. Under a runtime no entry covers it is refused by name.
+*/
+func TestUnderTheCLRExtractRecipesRuns(t *testing.T) {
+	const runtime = "netfx-4.8.9345.0"
+	t.Chdir(t.TempDir())
+
+	code, _, errOut := runUnder(t, runtime, clrGame(), "extract-recipes")
+	require.NotZero(t, code)
+	require.Contains(t, errOut, "Main's statics")
+	require.NotContains(t, errOut, runtime, "extract-recipes was refused for the runtime")
+
+	const unknown = "coreclr-8.0.0"
+	code, _, errOut = runUnder(t, unknown, clrGame(), "extract-recipes")
+	require.NotZero(t, code)
+	require.Contains(t, errOut, unknown)
+
+	_, err := os.Stat("data")
+	require.ErrorIs(t, err, os.ErrNotExist, "a book was written")
 }

@@ -71,6 +71,8 @@ var CLRFields = map[string][]CLRField{
 		{"axe", 0x0070, false},
 		{"hammer", 0x0074, false},
 		{"tileBoost", 0x0078, false},
+		{"createTile", 0x007c, false},
+		{"placeStyle", 0x0084, false},
 		{"damage", 0x0088, false},
 		{"knockBack", 0x008c, false},
 		{"healLife", 0x0090, false},
@@ -103,6 +105,20 @@ var CLRFields = map[string][]CLRField{
 	// Measured 2026-10-11 (cmd/clrfields Terraria.Chest), for selling.
 	"Chest": {
 		{"item", 0x0004, false},
+	},
+	"Recipe": {
+		{"createItem", 0x0004, false},
+		{"requiredItem", 0x0008, false},
+		{"requiredTile", 0x0018, false},
+	},
+	"Lang": {
+		{"_mapLegendCache", 0x00bc, true},
+	},
+	"Map.MapHelper": {
+		{"tileLookup", 0x10d4, true},
+	},
+	"Localization.LocalizedText": {
+		{"_value", 0x0008, false},
 	},
 	"NPC": {
 		{"type", 0x00f4, false},

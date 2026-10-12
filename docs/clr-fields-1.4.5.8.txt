@@ -2931,3 +2931,83 @@
   static 0x00028  et=0x12  _particlePool
   static 0x0002c  et=0x12  _chestInUse
   MethodTable 0x081d1208, 17 records; isStatic agrees with metadata 17/17
+# Terraria.Recipe, Terraria.Lang, Terraria.Map.MapHelper and Terraria.Localization.LocalizedText, measured 2026-10-11 by cmd/clrfields against the same build and runtime (spec 052, extract-recipes).
+== Terraria.Lang: 21 fields declared, 21 stored, 1 complete FieldDesc list(s)
+  static 0x00094  et=0x12  menu
+  static 0x00098  et=0x12  gen
+  static 0x0009c  et=0x12  misc
+  static 0x000a0  et=0x12  inter
+  static 0x000a4  et=0x12  tip
+  static 0x000a8  et=0x12  mp
+  static 0x000ac  et=0x12  chestType
+  static 0x000b0  et=0x12  dresserType
+  static 0x000b4  et=0x12  chestType2
+  static 0x000b8  et=0x12  prefix
+  static 0x000bc  et=0x12  _mapLegendCache
+  static 0x000c0  et=0x12  _itemNameCache
+  static 0x000c4  et=0x12  _projectileNameCache
+  static 0x000c8  et=0x12  _npcNameCache
+  static 0x000cc  et=0x12  _negativeNpcNameCache
+  static 0x000d0  et=0x12  _buffNameCache
+  static 0x000d4  et=0x12  _buffDescriptionCache
+  static 0x000d8  et=0x12  _itemTooltipCache
+  static 0x000dc  et=0x12  _emojiNameCache
+  static 0x000e0  et=0x12  _globalSubstitutions
+  static 0x000e4  et=0x12  _prefixFormatText
+  MethodTable 0x084e9f8c, 21 records; isStatic agrees with metadata 21/21
+== Terraria.Recipe: 25 fields declared, 25 stored, 1 complete FieldDesc list(s)
+  inst   0x00004  et=0x12  createItem
+  inst   0x00008  et=0x12  requiredItem
+  inst   0x0000c  et=0x12  acceptedGroups
+  inst   0x00010  et=0x12  requiredItemQuickLookup
+  inst   0x00014  et=0x12  customShimmerResults
+  inst   0x00018  et=0x08  requiredTile
+  inst   0x0001c  et=0x02  needHoney
+  inst   0x0001d  et=0x02  needWater
+  inst   0x0001e  et=0x02  needLava
+  inst   0x0001f  et=0x02  needTorchGodsFavor
+  inst   0x00020  et=0x02  alchemy
+  inst   0x00021  et=0x02  needSnowBiome
+  inst   0x00022  et=0x02  needGraveyardBiome
+  inst   0x00023  et=0x02  needMechdusa
+  inst   0x00024  et=0x02  notDecraftable
+  inst   0x00025  et=0x02  crimson
+  inst   0x00026  et=0x02  corruption
+  static 0x00228  et=0x12  TileUsedInRecipes
+  static 0x0022c  et=0x12  TileCountsAs
+  static 0x00230  et=0x12  currentRecipe
+  static 0x00234  et=0x12  _ownedItems
+  static 0x00238  et=0x12  _recipeChests
+  static 0x00de8  et=0x08  maxRequirements
+  static 0x00dec  et=0x08  maxRecipes
+  static 0x00df0  et=0x08  numRecipes
+  MethodTable 0x08ab2958, 25 records; isStatic agrees with metadata 25/25
+== Terraria.Map.MapHelper: 52 fields declared, 20 stored, 1 complete FieldDesc list(s)
+  static 0x010c4  et=0x11  sceneArea
+  static 0x010c8  et=0x12  IOLock
+  static 0x010cc  et=0x12  tileOptionCounts
+  static 0x010d0  et=0x12  wallOptionCounts
+  static 0x010d4  et=0x12  tileLookup
+  static 0x010d8  et=0x12  wallLookup
+  static 0x010dc  et=0x12  colorLookup
+  static 0x010e0  et=0x12  snowTypes
+  static 0x010e4  et=0x12  zlibDecompress
+  static 0x01e38  et=0x0c  sceneSnowiness
+  static 0x01e3c  et=0x07  tilePosition
+  static 0x01e3e  et=0x07  wallPosition
+  static 0x01e40  et=0x07  liquidPosition
+  static 0x01e42  et=0x07  skyPosition
+  static 0x01e44  et=0x07  dirtPosition
+  static 0x01e46  et=0x07  rockPosition
+  static 0x01e48  et=0x07  hellPosition
+  static 0x01e4a  et=0x07  wallRangeStart
+  static 0x01e4c  et=0x07  wallRangeEnd
+  static 0x01e4e  et=0x02  noStatusText
+  MethodTable 0x17129c68, 20 records; isStatic agrees with metadata 20/20
+== Terraria.Localization.LocalizedText: 5 fields declared, 5 stored, 1 complete FieldDesc list(s)
+  inst   0x00004  et=0x12  Key
+  inst   0x00008  et=0x12  _value
+  inst   0x0000c  et=0x12  <EnglishValue>k__BackingField
+  static 0x010fc  et=0x12  Empty
+  static 0x01100  et=0x12  _propertyLookupCache
+  MethodTable 0x084b5e20, 5 records; isStatic agrees with metadata 5/5

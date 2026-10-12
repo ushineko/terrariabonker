@@ -139,7 +139,7 @@ that one cheat, allowed per entry as its site is derived. Status is a read.
 */
 func (a *App) patchGame(cheat string, force bool) (*Game, error) {
 	if cheat == "" {
-		return a.game(false, false)
+		return a.game()
 	}
 	return a.gameWriting(layout.CheatFeature(cheat), force)
 }
@@ -270,7 +270,7 @@ func (a *App) buildCheckCmd() *cobra.Command {
 		Short: "report the running build and whether the cheats resolve on it",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(false, false)
+			got, err := a.game()
 			if err != nil {
 				return err
 			}
@@ -354,7 +354,7 @@ func (a *App) acceptBuildCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			got, err := a.game(false, false)
+			got, err := a.game()
 			if err != nil {
 				return err
 			}
@@ -454,7 +454,7 @@ func (a *App) freeze(cmd *cobra.Command, force, godmode, mana bool,
 	if !godmode && !mana {
 		return usagef("pick at least one of --godmode / --mana")
 	}
-	got, err := a.game(true, force)
+	got, err := a.gameWriting(layout.WritePlayerStats, force)
 	if err != nil {
 		return err
 	}
@@ -476,6 +476,7 @@ func (a *App) freeze(cmd *cobra.Command, force, godmode, mana bool,
 		levers += lever.name
 	}
 	f := trainer.New(mem, godmode, mana, hz)
+	f.Targets = got.Svc.StatTargets
 	stop := "Ctrl-C to stop."
 	if seconds > 0 {
 		stop = fmt.Sprintf("Runs for %gs.", seconds)

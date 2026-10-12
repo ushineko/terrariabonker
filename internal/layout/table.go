@@ -105,6 +105,10 @@ const (
 	// item (and, where the entry allows, NPC) templates and reading their stats.
 	// A read -- a wrong layout reads wrong stats, never a write.
 	ReadContent Feature = "content"
+	// ReadRecipes is walking Main.recipe[] and the two tables a station's name
+	// is read through (extract-recipes, a maintenance command). A read -- a wrong
+	// layout reads a wrong book, which is why the command asks.
+	ReadRecipes Feature = "recipes"
 	// WriteBuffs is renewing the player's active effects: writing a type and a
 	// time into the two buff arrays (potions, fishing-buffs).
 	WriteBuffs Feature = "buffs"
@@ -200,6 +204,23 @@ type SpawnFields struct {
 }
 
 /*
+RecipeFields is what the recipe walk reads beyond ItemFields and ContentFields: a
+Recipe's three fields, the style of the tile an item places, and where a localised
+string keeps its text. Resolver names how Main.recipe and the two tile-name
+statics are found (recipes' resolvers).
+*/
+type RecipeFields struct {
+	// CreateItem and RequiredItem are references (an Item, an Item[]);
+	// RequiredTile is an int. Object-relative.
+	CreateItem, RequiredItem, RequiredTile int
+	// PlaceStyle is Item.placeStyle, object-relative.
+	PlaceStyle int
+	// TextValue is LocalizedText._value, a string reference, object-relative.
+	TextValue int
+	Resolver  string
+}
+
+/*
 SellFields is what selling reaches beyond ItemFields: what an item is worth, and
 the Piggy Bank's item array through the player and its Chest.
 */
@@ -274,6 +295,12 @@ type MainStatics struct {
 	// Main.worldName's static slots relative to Main.player's, on the same terms
 	// as TileFromPlayer: zero when the entry reaches them through a static block.
 	NPCFrameCountFromPlayer, WorldNameFromPlayer int
+	// RecipeFromPlayer is Main.recipe's slot on the same terms. TileLookupFromPlayer
+	// and MapLegendFromPlayer are MapHelper.tileLookup's and Lang._mapLegendCache's:
+	// other classes' statics, which the CLR keeps in the same block as Main's, at
+	// offsets counted across the whole module. Zero when the entry finds them
+	// another way (mono, from the code that loads them).
+	RecipeFromPlayer, TileLookupFromPlayer, MapLegendFromPlayer int
 }
 
 /*
@@ -356,6 +383,8 @@ type Entry struct {
 	Spawn SpawnFields
 	// Selling is what auto-sell reaches beyond Item.
 	Selling SellFields
+	// Recipes is what the recipe walk reaches beyond Item and Content.
+	Recipes RecipeFields
 	// LocalPlayer is how ReadLocalPlayer is done, and Statics its numbers when it
 	// is ByStatics.
 	LocalPlayer LocalPlayerBy

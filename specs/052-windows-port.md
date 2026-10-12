@@ -982,14 +982,82 @@ Findings from slice 23:
   its position instead of (0, 0) until the game's next update. Not watched on
   Linux.
 
+Slice 24 — the window's vein watcher on the CLR (done headless):
+- [x] `extract-tick` and `extract-stop` gate on the ore extractor's own write
+      feature, as `extract` and `extract --watch` already did. The service side
+      (`WatchTick`, `NewVeinWatch`) is the path `extract --watch` ran live in
+      slice 14; only the gate refused it.
+- [ ] Not run live through `extract-tick`: `extract-stop` ran against the live
+      game with no watcher and reported nothing to stop; a tick that mines is a
+      write to the world and is the maintainer's to watch.
+
+Slice 25 — `freeze` and `godmode` on the CLR (done headless):
+- [x] The freeze loop holds whoever its caller names (`trainer.Freezer.Targets`);
+      the CLI names the service's write targets (`Service.StatTargets`): the live
+      character's copies, through the selected entry's player numbers. It used to
+      scan with the mono locator and hold every copy found.
+- [x] `freeze` and `godmode` gate on `WritePlayerStats`, the feature `set-hp`
+      writes the same fields behind.
+- [x] **Behaviour change on both runtimes**: a freeze holds the live character
+      only, and is refused when several characters are in memory and which is
+      played cannot be told -- the rule every other write has followed since
+      slice 4. Under mono the copies a scan finds are one character's, so the
+      same copies are held as before. Not watched on Linux.
+- [ ] Not run live on Windows: it is a write held for as long as it runs.
+
+Slice 26 — the debug `write` (done headless):
+- [x] It pokes an address the caller names and uses no number of this program's,
+      so there was nothing to port. It gates on "any write at all"
+      (`gameWritingAny`): allowed under an entry that may write something,
+      refused under a runtime no entry covers.
+
+Slice 27 — `extract-recipes` on the CLR (done):
+- [x] A new `RecipeFields` block on the entry (Recipe's createItem, requiredItem
+      and requiredTile, Item.placeStyle, LocalizedText._value, and a resolver
+      name) and three more distances in `MainStatics`. `recipes.Extract` takes
+      the entry and a base; item type, stack and createTile come from the
+      entry's `Item` and `Content`, strings from the entry's locator.
+- [x] How the three statics are found is a resolver per runtime in `recipes`
+      ("mono": Main's static block, and the two tile-name statics from the code
+      that loads them, unchanged; "clr": slots at distances from Main.player's).
+      `Service.Recipes` hands the walk the base, as `npcBase` does for NPCs.
+- [x] It is a read: the command gates on a new `ReadRecipes` feature, which both
+      entries have, and keeps the build check (`--force` to override), because
+      the book is written into the checkout.
+- [x] Measured live on Windows (2026-10-11, `cmd/clrfields`, appended to
+      docs/clr-fields-1.4.5.8.txt): Recipe.createItem 0x04, requiredItem 0x08,
+      requiredTile 0x18; LocalizedText._value 0x08; Item.placeStyle 0x084;
+      static offsets Main.recipe 0x870, MapHelper.tileLookup 0x10D4,
+      Lang._mapLegendCache 0x0BC. `clrfields --verify` agrees on every field.
+- [x] Live on Windows (2026-10-11), reads only: the book extracted under .NET
+      Framework into a scratch directory is the checked-in `data/recipes.json`,
+      which was extracted under wine-mono -- 3603 recipes, 35 station names and
+      1923 tile icons, each section equal. Two runtimes, two sets of numbers, one
+      book.
+
+Finding from slice 27:
+- **A reference static's offset is counted across the module, not the class.**
+  Lang's start at 0x094, Chest's at 0x018, Recipe's at 0x228, Main's at 0x5F8,
+  MapHelper's at 0x10C4, LocalizedText's at 0x10FC: one block, and another
+  class's static is a fixed distance from Main.player's slot. The station names
+  matching the mono book is the check that the distances to MapHelper's and
+  Lang's statics are right. Not checked for a class in another assembly, or for
+  primitive statics, which phase 0 measured to be in a block of their own.
+
 Next slices:
-- [ ] The paths still behind the every-write gate: `extract-recipes`,
-      `freeze`/`godmode`, `extract-tick` and `extract-stop`, the debug `write`;
-      then the full `Writes` flip. Each with tests pinned first. Until the flip
-      `build-check` reports `read_only` under the CLR (seen live, 2026-10-11,
-      with all 15 cheats resolving), and the window's build gate treats that as
-      every cheat being off for this build (`gui/buildgate.go`
-      `applyBuildDecision`; read from the code, not watched in the window).
+- [ ] The full `Writes` flip. No command sits behind the every-write gate any
+      more (`game(guard)` is gone from the CLI; `patch status` still asks
+      `RequireCompatible` before allocating the arena early). Flipping it was
+      tried and put back: seven tests in `layout` and `service` pin "the CLR
+      entry is read-only", and they are the only tests of the per-feature
+      mechanism, which no entry would use afterwards -- so the flip is also a
+      decision about whether that mechanism stays, and with what entry to test
+      it. It also turns the window on for Windows: `build-check` stops reporting
+      `read_only`, `accept-build` records decisions, and `gui/buildgate.go` stops
+      treating every cheat as off (read from the code, not watched in the
+      window). To be done with the maintainer watching the window.
+- [ ] The live writes not yet watched on Windows: a freeze, a vein mined through
+      `extract-tick`, the debug `write`.
 
 Findings from slice 1:
 - **A buffed player can be missed by the scan, on both runtimes (pre-existing).**

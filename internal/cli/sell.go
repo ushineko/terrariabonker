@@ -305,7 +305,7 @@ func (a *App) readCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			got, err := a.game(false, false)
+			got, err := a.game()
 			if err != nil {
 				return err
 			}
@@ -331,7 +331,7 @@ func (a *App) writeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			got, err := a.game(true, force)
+			got, err := a.gameWritingAny(force)
 			if err != nil {
 				return err
 			}

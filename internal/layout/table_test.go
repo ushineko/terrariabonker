@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "2eb2db2e1a52569ce1831448a38953d306f585b85f0003404dee99c890293681",
+	require.Equal(t, "6b60e0b190fed88bb1edf9c5753d4d6348a4dad568e899863d576ec5bdd3d50e",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -444,6 +444,46 @@ func TestTheCLRFrameCountAndWorldNameSlotsAreTheTable(t *testing.T) {
 	require.Equal(t, main["worldName"]-main["player"], s.WorldNameFromPlayer)
 	require.Zero(t, monoEntry.Statics.NPCFrameCountFromPlayer)
 	require.Zero(t, monoEntry.Statics.WorldNameFromPlayer)
+}
+
+/*
+The CLR recipe fields are the CLR table's, by name, and the three statics the
+walk starts from are its differences from Main.player's slot -- two of them other
+classes' statics, which is the measurement that one block holds a module's.
+Mono's are the literals the walk has always read, and it reaches the statics
+through its own block and the code that loads them, so those are zero.
+*/
+func TestTheCLRRecipeFieldsAreTheTable(t *testing.T) {
+	at := func(class, name string) int {
+		for _, f := range CLRFields[class] {
+			if f.Name == name {
+				return int(f.Offset)
+			}
+		}
+		t.Fatalf("%s.%s is not in the CLR table", class, name)
+		return 0
+	}
+	require.Equal(t, RecipeFields{
+		CreateItem:   at("Recipe", "createItem"),
+		RequiredItem: at("Recipe", "requiredItem"),
+		RequiredTile: at("Recipe", "requiredTile"),
+		PlaceStyle:   at("Item", "placeStyle"),
+		TextValue:    at("Localization.LocalizedText", "_value"),
+		Resolver:     "clr",
+	}, clrEntry.Recipes)
+	require.Equal(t, at("Item", "createTile"), clrEntry.Content.CreateTile)
+	require.Equal(t, RecipeFields{CreateItem: 0x08, RequiredItem: 0x0C, RequiredTile: 0x1C,
+		PlaceStyle: 0xA8, TextValue: 0x0C, Resolver: "mono"}, monoEntry.Recipes)
+
+	player := at("Main", "player")
+	s := clrEntry.Statics
+	require.Equal(t, at("Main", "recipe")-player, s.RecipeFromPlayer)
+	require.Equal(t, at("Map.MapHelper", "tileLookup")-player, s.TileLookupFromPlayer)
+	require.Equal(t, at("Lang", "_mapLegendCache")-player, s.MapLegendFromPlayer)
+	require.Equal(t, [3]int{-0x08, 0x85C, -0x7BC},
+		[3]int{s.RecipeFromPlayer, s.TileLookupFromPlayer, s.MapLegendFromPlayer})
+	m := monoEntry.Statics
+	require.Zero(t, [3]int{m.RecipeFromPlayer, m.TileLookupFromPlayer, m.MapLegendFromPlayer})
 }
 
 /*

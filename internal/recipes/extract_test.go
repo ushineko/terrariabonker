@@ -32,14 +32,8 @@ const (
 	base = 0x10000000
 	size = 0x80000
 
-	// get_LocalPlayer and the static the base is derived from. Main.player sits
-	// at its own offset inside Main's block, because that is how the base is
-	// worked out: the resolver finds this address and subtracts the offset.
-	code           = base + 0x1000
-	staticAt       = base + 0x10000
-	playerStatic   = staticAt + layout.MainPlayerOff
-	myPlayerStatic = playerStatic + 4
-	playerArray    = base + 0x200
+	// Main's static block, which the caller finds and hands to the walk.
+	staticAt = base + 0x10000
 
 	// The recipe array, the recipe objects, and the item objects they point at.
 	recipeArr     = base + 0x20000
@@ -132,15 +126,6 @@ func plant(t *testing.T) *execMem {
 	mem := memtest.New(base, size)
 	mem.Exec = []proc.Region{{Start: base, End: base + size, Executable: true}}
 
-	// get_LocalPlayer: mov eax,[Main.player]; mov ecx,[Main.myPlayer]; tail.
-	asm := append([]byte{0x8B, 0x05}, u32(playerStatic)...)
-	asm = append(asm, 0x8B, 0x0D)
-	asm = append(asm, u32(myPlayerStatic)...)
-	asm = append(asm, localPlayerTail...)
-	mem.PokeBytes(code, asm)
-	mem.PokeBytes(playerStatic, u32(playerArray))
-	mem.PokeI32(myPlayerStatic, 0)
-
 	mem.PokeBytes(staticAt+layout.MainRecipeOff, u32(recipeArr))
 	mem.PokeI32(recipeArr+layout.ArrLenOff, int32(len(book)))
 	for i, rec := range book {
@@ -213,22 +198,14 @@ func u32(v uint32) []byte {
 	return []byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)}
 }
 
-// localPlayerTail is the pattern the resolver looks for, pinned against the
-// Python by the locate package's own tests.
-var localPlayerTail = []byte{
-	0x39, 0x48, 0x0C, 0x0F, 0x86, 0x07, 0x00, 0x00, 0x00,
-	0x8D, 0x44, 0x88, 0x10, 0x8B, 0x00, 0xC3,
+// extract is the walk over a mono game, from Main's static block.
+func extract(mem recipes.Mem) (game.Recipes, error) {
+	return recipes.Extract(mem, layout.Mono(), staticAt)
 }
 
-/*
-And the book itself is what the fixture planted.
-
-The comparison above only says the two agree, and two walks that both stopped
-after the output item agree perfectly.
-*/
-func TestTheBookIsWhatWasPlanted(t *testing.T) {
-	got, err := recipes.Extract(plant(t))
-	require.NoError(t, err)
+// requireTheBook checks a book against the plan the fixtures plant.
+func requireTheBook(t *testing.T, got game.Recipes) {
+	t.Helper()
 	require.Len(t, got.Recipes, 4, "the unused slots were read as recipes")
 
 	torch := got.Recipes[0]
@@ -240,6 +217,7 @@ func TestTheBookIsWhatWasPlanted(t *testing.T) {
 	sword := got.Recipes[1]
 	require.NotNil(t, sword.Tile, "a recipe made at a station has none")
 	require.Equal(t, 18, *sword.Tile, "a different station")
+	require.Equal(t, [][]int{{9, 7}}, sword.Ing, "a lone ingredient, or how many of it, was lost")
 
 	require.Equal(t, map[string][]int{"35": {16, 2}}, got.TileIcons,
 		"the tile a placeable output draws from was not recorded")
@@ -254,12 +232,24 @@ func TestTheBookIsWhatWasPlanted(t *testing.T) {
 		"the station name was not read out of the game's own table")
 }
 
+/*
+And the book itself is what the fixture planted.
+
+The comparison above only says the two agree, and two walks that both stopped
+after the output item agree perfectly.
+*/
+func TestTheBookIsWhatWasPlanted(t *testing.T) {
+	got, err := extract(plant(t))
+	require.NoError(t, err)
+	requireTheBook(t, got)
+}
+
 // A game with no recipe array says so rather than returning an empty book.
 func TestExtractingWithNoArray(t *testing.T) {
 	mem := plant(t)
 	mem.PokeBytes(staticAt+layout.MainRecipeOff, u32(0))
 
-	_, err := recipes.Extract(mem)
+	_, err := extract(mem)
 	require.ErrorIs(t, err, recipes.ErrNoRecipes)
 }
 
@@ -268,7 +258,7 @@ func TestExtractingAnImplausibleArray(t *testing.T) {
 	mem := plant(t)
 	mem.PokeI32(recipeArr+layout.ArrLenOff, recipes.MaxRecipes+1)
 
-	_, err := recipes.Extract(mem)
+	_, err := extract(mem)
 	require.ErrorIs(t, err, recipes.ErrNoRecipes)
 }
 
@@ -279,7 +269,7 @@ The two halves are in different packages and only the file connects them, so a
 field renamed on one side is a book that loads empty.
 */
 func TestSavingIsReadBack(t *testing.T) {
-	got, err := recipes.Extract(plant(t))
+	got, err := extract(plant(t))
 	require.NoError(t, err)
 
 	path := filepath.Join(t.TempDir(), "recipes.json")
@@ -303,7 +293,7 @@ produces station names read out of unrelated memory.
 */
 func TestASecondMatchGivesUpOnTheNames(t *testing.T) {
 	mem := plant(t)
-	got, err := recipes.Extract(mem)
+	got, err := extract(mem)
 	require.NoError(t, err)
 	require.NotEmpty(t, got.Stations, "the fixture never named a station to begin with")
 
@@ -311,7 +301,7 @@ func TestASecondMatchGivesUpOnTheNames(t *testing.T) {
 	tileCode := twice.Read(tileCodeAt, 24)
 	twice.PokeBytes(tileCodeAt+0x1000, tileCode)
 
-	got, err = recipes.Extract(twice)
+	got, err = extract(twice)
 	require.NoError(t, err)
 	require.Empty(t, got.Stations, "an ambiguous pattern was resolved anyway")
 	require.NotEmpty(t, got.Recipes, "the book itself was lost with the names")
@@ -364,7 +354,7 @@ func TestStationsThatCannotBeNamed(t *testing.T) {
 		mem.PokeI32(obj+layout.RecipeRequiredTile, tile)
 	}
 
-	got, err := recipes.Extract(mem)
+	got, err := extract(mem)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"18": benchName}, got.Stations,
 		"a station was named from memory the lookup does not reach")

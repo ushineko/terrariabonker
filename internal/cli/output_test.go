@@ -272,3 +272,18 @@ func TestStatusNamesTheLoadedWorld(t *testing.T) {
 	require.NotEmpty(t, got.World, "the loaded world was not reported")
 	require.Contains(t, got.World, "Nakama's World", "a different world was reported")
 }
+
+/*
+The crafting book is not read from a build nobody has checked, though it is a
+read: it is written into the checkout, and a book walked with moved offsets
+would replace the bundled one.
+*/
+func TestExtractingRecipesFromAnIncompatibleBuildIsRefused(t *testing.T) {
+	t.Chdir(t.TempDir())
+	mem := plantGame()
+	plantVersionInto(mem, "1.0.0.0")
+
+	code, _, stderr := run(t, mem, "extract-recipes")
+	require.Equal(t, cli.ExitFailure, code, "a book was read from an incompatible build")
+	require.Contains(t, stderr, "force to override")
+}

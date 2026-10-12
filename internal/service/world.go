@@ -1,8 +1,10 @@
 package service
 
 import (
+	"github.com/ushineko/terrariabonker/internal/game"
 	"github.com/ushineko/terrariabonker/internal/layout"
 	"github.com/ushineko/terrariabonker/internal/locate"
+	"github.com/ushineko/terrariabonker/internal/recipes"
 	"github.com/ushineko/terrariabonker/internal/tiles"
 	"github.com/ushineko/terrariabonker/internal/version"
 )
@@ -178,4 +180,31 @@ func (s *Service) WorldID() (World, bool) {
 func (s *Service) BuildKey() string {
 	info := s.BuildInfo()
 	return version.BuildKey(info.Version, info.BuildID)
+}
+
+/*
+recipeBase is the base the entry's recipe resolver reads: Main's static block
+under mono, Main.player's slot under the CLR, where the resolver applies the
+entry's distances itself -- the same shape as npcBase.
+*/
+func (s *Service) recipeBase(entry layout.Entry) (uint32, bool) {
+	if entry.Statics.RecipeFromPlayer == 0 {
+		return s.StaticBase()
+	}
+	return s.mainPlayerSlot()
+}
+
+/*
+Recipes is the crafting book read out of the running game: every recipe, its
+station's name, and the tile a placeable output draws from. A maintenance read --
+the trainer uses the bundled book -- so nothing is kept.
+*/
+func (s *Service) Recipes() (game.Recipes, error) {
+	entry, _, _ := s.Support()
+	base, ok := s.recipeBase(entry)
+	if !ok {
+		return game.Recipes{}, &Error{Message: "could not locate Main's statics. " +
+			"Load into a world and try again"}
+	}
+	return recipes.Extract(s.Mem, entry, base)
 }

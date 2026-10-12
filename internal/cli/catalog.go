@@ -163,15 +163,16 @@ func (a *App) extractRecipesCmd() *cobra.Command {
 		Short: "read Main.recipe[] from the running game -> data/recipes.json",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameReading(layout.ReadRecipes)
 			if err != nil {
 				return err
 			}
-			mem, ok := got.Svc.Mem.(recipes.Mem)
-			if !ok {
-				return usagef("this game's memory cannot be read for recipes")
+			// The book is written into the checkout, so a build whose offsets
+			// have moved is refused as a write to the game would be.
+			if err := got.Svc.RequireBuild(force); err != nil {
+				return err
 			}
-			book, err := recipes.Extract(mem)
+			book, err := got.Svc.Recipes()
 			if err != nil {
 				return err
 			}

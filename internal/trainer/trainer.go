@@ -5,8 +5,9 @@ overwriting them.
 Terraria recomputes many player fields every frame -- life on damage and regen,
 the derived stats from equipment -- so a one-shot write reverts. A value that
 has to stay put is held by a rewrite loop running faster than the game's sixty
-frames a second. Writes go to every matched copy; the live one takes effect and
-the inert snapshots ignore them.
+frames a second. Who it holds is the caller's to say (Targets): the service names
+the live character's copies, with the selected entry's numbers, as it does for
+every other write. With nobody saying, it is every copy the mono locator finds.
 
 Reloading the world makes the player addresses stale and reads start failing.
 The loop notices that and relocates rather than dying.
@@ -47,13 +48,19 @@ var ErrNoPlayer = errors.New("no player found to freeze")
 
 // Freezer holds a chosen set of values against the game until it is stopped.
 type Freezer struct {
-	Mem      Mem
-	Godmode  bool
-	Mana     bool
-	Hz       int
-	Saves    int
-	players  []*player.Player
-	relocate func() int
+	Mem     Mem
+	Godmode bool
+	Mana    bool
+	Hz      int
+	Saves   int
+	/*
+		Targets is who to hold, asked again whenever the addresses die. An error is
+		a refusal -- several characters in memory and no telling which is played --
+		and a run that starts on one reports it rather than "no player".
+	*/
+	Targets func() ([]*player.Player, error)
+	players []*player.Player
+	refused error
 }
 
 // New is a freezer over a running game.
@@ -69,8 +76,9 @@ func (f *Freezer) Players() int { return len(f.players) }
 
 // Locate finds the player copies again, and is how many there are.
 func (f *Freezer) Locate() int {
-	if f.relocate != nil {
-		return f.relocate()
+	if f.Targets != nil {
+		f.players, f.refused = f.Targets()
+		return len(f.players)
 	}
 	blocks := locate.FindPlayers(f.Mem)
 	f.players = make([]*player.Player, 0, len(blocks))
@@ -118,6 +126,9 @@ person asked for a value to be held and it is not being held.
 */
 func (f *Freezer) Run(ctx context.Context, seconds time.Duration, onStart func(int)) error {
 	if len(f.players) == 0 && f.Locate() == 0 {
+		if f.refused != nil {
+			return f.refused
+		}
 		return ErrNoPlayer
 	}
 	if onStart != nil {

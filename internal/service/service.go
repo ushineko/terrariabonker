@@ -297,6 +297,13 @@ func (s *Service) allTargets() ([]*player.Player, error) {
 	return out, nil
 }
 
+/*
+StatTargets is the live character's copies as handles to write life and mana
+through, with the selected entry's numbers -- for a caller that holds them over
+time (the freeze loop) and asks again when they die.
+*/
+func (s *Service) StatTargets() ([]*player.Player, error) { return s.allTargets() }
+
 // liveInventory is the inventory to read from.
 func (s *Service) liveInventory() (*inventory.Inventory, error) {
 	live, err := s.LiveBlock()

@@ -9,8 +9,10 @@ read another process's memory.
 
 Station names come from Terraria's own tile display names rather than from a
 table written here, so they are exact and build-specific. Finding them needs two
-statics that nothing else in the project reaches, so they are resolved from the
-code that reads them.
+statics that nothing else in the project reaches. How those and Main.recipe are
+found differs by runtime, so it is a resolver the entry names: under mono, Main's
+static block and the code that loads the two; under the CLR, slots at measured
+distances from Main.player's (spec 052).
 
 Ported from terrariabonker/recipes.py (spec 051, step 6).
 */
@@ -63,12 +65,58 @@ const MaxRecipes = 50000
 // arrays are longer than any recipe uses.
 const MaxIngredients = 40
 
-// LocalizedTextValue is where a localised string keeps the text itself, which is
-// how a station's name is read rather than its key.
-const LocalizedTextValue = layout.LocalizedTextValue
-
 // ErrNoRecipes is what an extraction reports when the array is not there.
 var ErrNoRecipes = errors.New("cannot find the Main.recipe array, or it is implausible")
+
+/*
+resolver is one runtime's way to the three statics the walk starts from: where
+Main.recipe's reference is kept, and where MapHelper.tileLookup's and
+Lang._mapLegendCache's are. base is whatever that runtime's statics are found
+from -- Main's static block under mono, Main.player's slot under the CLR.
+*/
+type resolver struct {
+	recipes func(e layout.Entry, base uint32) uint32
+	names   func(mem Mem, e layout.Entry, base uint32) (lookupAt, legendAt uint32, ok bool)
+}
+
+// resolvers are the ways, by the name an entry's RecipeFields carries.
+var resolvers = map[string]resolver{
+	"mono": {recipes: monoRecipeSlot, names: monoNameSlots},
+	"clr":  {recipes: clrRecipeSlot, names: clrNameSlots},
+}
+
+// monoRecipeSlot is Main.recipe in Main's static block.
+func monoRecipeSlot(_ layout.Entry, staticBase uint32) uint32 {
+	return staticBase + layout.MainRecipeOff
+}
+
+// monoNameSlots are the two statics as the code that loads them names them.
+func monoNameSlots(mem Mem, _ layout.Entry, _ uint32) (uint32, uint32, bool) {
+	lookupAt, haveLookup := resolveOperand(mem, tileLookupPattern)
+	legendAt, haveLegend := resolveOperand(mem, mapLegendPattern)
+	return lookupAt, legendAt, haveLookup && haveLegend
+}
+
+// clrRecipeSlot is Main.recipe's reference static, a slot off Main.player's.
+func clrRecipeSlot(e layout.Entry, playerSlot uint32) uint32 {
+	return slotFrom(playerSlot, e.Statics.RecipeFromPlayer)
+}
+
+// clrNameSlots are the two statics' slots, at their distances from Main.player's.
+func clrNameSlots(_ Mem, e layout.Entry, playerSlot uint32) (uint32, uint32, bool) {
+	return slotFrom(playerSlot, e.Statics.TileLookupFromPlayer),
+		slotFrom(playerSlot, e.Statics.MapLegendFromPlayer), true
+}
+
+// slotFrom is a static slot at a signed distance from another.
+func slotFrom(slot uint32, distance int) uint32 {
+	return uint32(int(slot) + distance) //nolint:gosec // a slot near the player's
+}
+
+// at is an object's field: a non-negative offset from where the object starts.
+func at(obj uint32, off int) uint32 {
+	return obj + uint32(off) //nolint:gosec // a field offset
+}
 
 /*
 Extract walks Main.recipe[] and is the whole book.
@@ -77,17 +125,17 @@ Every recipe the game has, the stations they are made at, and the tile each
 placeable output draws from -- that last one so a sprite-less item, like a
 trapped chest with no icon file of its own, can still be drawn.
 */
-func Extract(mem Mem) (game.Recipes, error) {
-	base, ok := locate.MainStaticBase(mem)
+func Extract(mem Mem, e layout.Entry, base uint32) (game.Recipes, error) {
+	resolve, ok := resolvers[e.Recipes.Resolver]
 	if !ok {
-		return game.Recipes{}, errors.New(
-			"could not locate Main (the get_LocalPlayer pattern is missing?)")
+		return game.Recipes{}, fmt.Errorf("%s has no way to find Main.recipe", e.Name)
 	}
-	arr, ok := readU32(mem, base+uint32(layout.MainRecipeOff)) //nolint:gosec // a field offset
+	f, arrLen, arrData := e.Recipes, e.Shapes.ArrLenOff, e.Shapes.ArrDataOff
+	arr, ok := readU32(mem, resolve.recipes(e, base))
 	if !ok || arr == 0 {
 		return game.Recipes{}, ErrNoRecipes
 	}
-	count, ok := readI32(mem, arr+layout.ArrLenOff)
+	count, ok := readI32(mem, at(arr, arrLen))
 	if !ok || count <= 0 || count > MaxRecipes {
 		return game.Recipes{}, ErrNoRecipes
 	}
@@ -100,26 +148,26 @@ func Extract(mem Mem) (game.Recipes, error) {
 	var tiles []int32
 	seenTile := map[int32]bool{}
 	for i := range int(count) {
-		obj, ok := readU32(mem, arr+layout.ArrDataOff+uint32(i)*4) //nolint:gosec // an index
+		obj, ok := readU32(mem, at(arr, arrData+i*4))
 		if !ok || obj == 0 {
 			continue
 		}
-		made, ok := readU32(mem, obj+uint32(layout.RecipeCreateItem)) //nolint:gosec // a field offset
+		made, ok := readU32(mem, at(obj, f.CreateItem))
 		if !ok || made == 0 {
 			continue
 		}
-		out, ok := readI32(mem, made+uint32(layout.ItemType)) //nolint:gosec // a field offset
+		out, ok := readI32(mem, at(made, e.Item.Type))
 		if !ok || out == 0 {
 			continue // an empty recipe slot
 		}
-		stack, _ := readI32(mem, made+uint32(layout.ItemStack)) //nolint:gosec // a field offset
+		stack, _ := readI32(mem, at(made, e.Item.Stack))
 		if stack == 0 {
 			stack = 1
 		}
-		items, _ := readU32(mem, obj+uint32(layout.RecipeRequiredItem)) //nolint:gosec // a field offset
-		rec := game.Recipe{Out: int(out), N: int(stack), Ing: ingredients(mem, items)}
+		items, _ := readU32(mem, at(obj, f.RequiredItem))
+		rec := game.Recipe{Out: int(out), N: int(stack), Ing: ingredients(mem, e, items)}
 
-		if tile, ok := readI32(mem, obj+uint32(layout.RecipeRequiredTile)); ok && tile >= 0 { //nolint:gosec // a field offset
+		if tile, ok := readI32(mem, at(obj, f.RequiredTile)); ok && tile >= 0 {
 			at := int(tile)
 			rec.Tile = &at
 			if !seenTile[tile] {
@@ -133,26 +181,26 @@ func Extract(mem Mem) (game.Recipes, error) {
 			sheet. The first recipe to make an item decides, because the later
 			ones say the same thing.
 		*/
-		if ct, ok := readI32(mem, made+uint32(layout.ItemCreateTile)); ok && ct >= 0 { //nolint:gosec // a field offset
+		if ct, ok := readI32(mem, at(made, e.Content.CreateTile)); ok && ct >= 0 {
 			key := fmt.Sprint(out)
 			if _, already := book.TileIcons[key]; !already {
-				style, _ := readI32(mem, made+uint32(layout.ItemPlaceStyle)) //nolint:gosec // a field offset
+				style, _ := readI32(mem, at(made, f.PlaceStyle))
 				book.TileIcons[key] = []int{int(ct), int(style)}
 			}
 		}
 		book.Recipes = append(book.Recipes, rec)
 	}
-	book.Stations = tileNames(mem, tiles)
+	book.Stations = tileNames(mem, e, resolve, base, tiles)
 	return book, nil
 }
 
 // ingredients is what one recipe takes, as [item, count] pairs.
-func ingredients(mem Mem, items uint32) [][]int {
+func ingredients(mem Mem, e layout.Entry, items uint32) [][]int {
 	out := [][]int{}
 	if items == 0 {
 		return out
 	}
-	n, ok := readI32(mem, items+layout.ArrLenOff)
+	n, ok := readI32(mem, at(items, e.Shapes.ArrLenOff))
 	if !ok || n <= 0 {
 		return out
 	}
@@ -160,15 +208,15 @@ func ingredients(mem Mem, items uint32) [][]int {
 		n = MaxIngredients
 	}
 	for j := range int(n) {
-		obj, ok := readU32(mem, items+layout.ArrDataOff+uint32(j)*4) //nolint:gosec // an index
+		obj, ok := readU32(mem, at(items, e.Shapes.ArrDataOff+j*4))
 		if !ok || obj == 0 {
 			continue
 		}
-		itemType, ok := readI32(mem, obj+uint32(layout.ItemType)) //nolint:gosec // a field offset
+		itemType, ok := readI32(mem, at(obj, e.Item.Type))
 		if !ok || itemType == 0 {
 			continue
 		}
-		stack, _ := readI32(mem, obj+uint32(layout.ItemStack)) //nolint:gosec // a field offset
+		stack, _ := readI32(mem, at(obj, e.Item.Stack))
 		if stack == 0 {
 			stack = 1
 		}
@@ -180,14 +228,13 @@ func ingredients(mem Mem, items uint32) [][]int {
 /*
 tileNames is the game's own display name for each station tile.
 
-Empty when the two patterns cannot be found, which a caller reports as "Tile #N"
+Empty when the two statics cannot be found, which a caller reports as "Tile #N"
 rather than failing: a book with unnamed stations is still a book.
 */
-func tileNames(mem Mem, tiles []int32) map[string]string {
+func tileNames(mem Mem, e layout.Entry, resolve resolver, base uint32, tiles []int32) map[string]string {
 	out := map[string]string{}
-	lookupAt, haveLookup := resolveOperand(mem, tileLookupPattern)
-	legendAt, haveLegend := resolveOperand(mem, mapLegendPattern)
-	if !haveLookup || !haveLegend {
+	lookupAt, legendAt, found := resolve.names(mem, e, base)
+	if !found {
 		return out
 	}
 	lookup, _ := readU32(mem, lookupAt)
@@ -195,14 +242,15 @@ func tileNames(mem Mem, tiles []int32) map[string]string {
 	if lookup == 0 || legend == 0 {
 		return out
 	}
-	lookupLen, _ := readI32(mem, lookup+layout.ArrLenOff)
-	legendLen, _ := readI32(mem, legend+layout.ArrLenOff)
+	arrLen, arrData, text := e.Shapes.ArrLenOff, e.Shapes.ArrDataOff, locate.With(e)
+	lookupLen, _ := readI32(mem, at(lookup, arrLen))
+	legendLen, _ := readI32(mem, at(legend, arrLen))
 
 	for _, tile := range tiles {
 		if tile < 0 || tile >= lookupLen {
 			continue
 		}
-		raw := mem.Read(lookup+layout.ArrDataOff+uint32(tile)*2, 2) //nolint:gosec // an index
+		raw := mem.Read(at(lookup, arrData+int(tile)*2), 2)
 		if len(raw) < 2 {
 			continue
 		}
@@ -210,14 +258,14 @@ func tileNames(mem Mem, tiles []int32) map[string]string {
 		if idx < 0 || idx >= legendLen {
 			continue
 		}
-		text, ok := readU32(mem, legend+layout.ArrDataOff+uint32(idx)*4) //nolint:gosec // an index
-		if !ok || text == 0 {
+		localized, ok := readU32(mem, at(legend, arrData+int(idx)*4))
+		if !ok || localized == 0 {
 			continue
 		}
-		str, _ := readU32(mem, text+uint32(LocalizedTextValue)) //nolint:gosec // a field offset
+		str, _ := readU32(mem, at(localized, e.Recipes.TextValue))
 		// A name that cannot be read is no name. The reader already refuses an
 		// empty or non-printable string, so there is nothing more to test here.
-		if name, got := locate.ReadMonoString(mem, str); got {
+		if name, got := text.ReadString(mem, str); got {
 			out[fmt.Sprint(tile)] = name
 		}
 	}

@@ -85,7 +85,12 @@ var clrEntry = Entry{
 	// Item.value 0x0D8 and Player.bank 0x0E0 (less statLife 0x470), measured
 	// 2026-10-08; Chest.item 0x004, measured 2026-10-11 (cmd/clrfields
 	// Terraria.Chest). TestTheCLRSellFieldsAreTheTable.
-	Selling:     SellFields{ItemValue: 0x0D8, BankFromLife: 0x0E0 - 0x470, ChestItem: 0x004},
+	Selling: SellFields{ItemValue: 0x0D8, BankFromLife: 0x0E0 - 0x470, ChestItem: 0x004},
+	// Recipe.createItem, requiredItem and requiredTile, Item.placeStyle and
+	// LocalizedText._value, measured 2026-10-11 (cmd/clrfields Terraria.Recipe
+	// Terraria.Localization.LocalizedText). TestTheCLRRecipeFieldsAreTheTable.
+	Recipes: RecipeFields{CreateItem: 0x004, RequiredItem: 0x008, RequiredTile: 0x018,
+		PlaceStyle: 0x084, TextValue: 0x008, Resolver: "clr"},
 	LocalPlayer: ByStatics,
 	Statics: MainStatics{
 		NPCFromPlayer: -0x54, ProjectileFromPlayer: -0x48,
@@ -94,9 +99,17 @@ var clrEntry = Entry{
 		// Main.npcFrameCount 0x918 and Main.worldName 0x5F8 against Main.player
 		// 0x878 (CLRFields' Main statics).
 		NPCFrameCountFromPlayer: 0x918 - 0x878, WorldNameFromPlayer: 0x5F8 - 0x878,
+		// Main.recipe 0x870, MapHelper.tileLookup 0x10D4 and Lang._mapLegendCache
+		// 0x0BC against Main.player 0x878. The last two are other classes'
+		// statics: the runtime counts a reference static's offset across the
+		// module, not the class (Lang's start at 0x094, Recipe's at 0x228, Main's
+		// at 0x5F8, MapHelper's at 0x10C4), so one block holds them all.
+		RecipeFromPlayer: 0x870 - 0x878, TileLookupFromPlayer: 0x10D4 - 0x878,
+		MapLegendFromPlayer: 0x0BC - 0x878,
 	},
 	Enabled: true,
-	Reads:   []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory, ReadTiles, ReadProjectiles, ReadContent},
+	Reads: []Feature{ReadPlayer, ReadLocalPlayer, ReadInventory, ReadTiles, ReadProjectiles, ReadContent,
+		ReadRecipes},
 	WriteFeatures: []Feature{WritePlayerStats, WriteItemFields, WriteItemTemplates,
 		CheatFeature("mining"), CheatFeature("reach"),
 		CheatFeature("max_minions"), CheatFeature("fast_place"), CheatFeature("pylons"),

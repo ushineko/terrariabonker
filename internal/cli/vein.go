@@ -228,7 +228,7 @@ func (a *App) extractTickCmd() *cobra.Command {
 		Short: "one slice of vein watching (GUI; WRITES to the world)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.CheatFeature("ore_extract"), force)
 			if err != nil {
 				return err
 			}
@@ -264,7 +264,7 @@ func (a *App) extractStopCmd() *cobra.Command {
 		Short: "drop the vein watcher and disarm",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			got, err := a.game(true, force)
+			got, err := a.gameWriting(layout.CheatFeature("ore_extract"), force)
 			if err != nil {
 				return err
 			}

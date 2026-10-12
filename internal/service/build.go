@@ -73,7 +73,7 @@ func (s *Service) RequireCompatible(force bool) error {
 	if entry, support, runtime := s.Support(); !entry.Writes {
 		return &Error{Message: noWrites(support, runtime)}
 	}
-	return s.requireBuild(force)
+	return s.RequireBuild(force)
 }
 
 /*
@@ -85,7 +85,7 @@ func (s *Service) RequireWritable(f layout.Feature, force bool) error {
 	if entry, support, runtime := s.Support(); !entry.CanWrite(f) {
 		return &Error{Message: noWrites(support, runtime)}
 	}
-	return s.requireBuild(force)
+	return s.RequireBuild(force)
 }
 
 /*
@@ -103,11 +103,11 @@ func (s *Service) RequireAnyWrite(force bool) error {
 	if !entry.Writes && len(entry.WriteFeatures) == 0 {
 		return &Error{Message: noWrites(support, runtime)}
 	}
-	return s.requireBuild(force)
+	return s.RequireBuild(force)
 }
 
-// requireBuild refuses an outright incompatible build unless forced.
-func (s *Service) requireBuild(force bool) error {
+// RequireBuild refuses an outright incompatible build unless forced.
+func (s *Service) RequireBuild(force bool) error {
 	level, msg := s.Compatibility()
 	if level == version.Incompatible && !force {
 		return &Error{Message: fmt.Sprintf(

@@ -2,6 +2,7 @@ package trainer
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -168,10 +169,9 @@ func TestRepeatedFailuresRelocate(t *testing.T) {
 	f.players = []*player.Player{player.New(mem, base+0x999999)}
 
 	relocated := 0
-	f.relocate = func() int {
+	f.Targets = func() ([]*player.Player, error) {
 		relocated++
-		f.players = []*player.Player{player.New(mem, life)}
-		return 1
+		return []*player.Player{player.New(mem, life)}, nil
 	}
 	require.NoError(t, f.Run(t.Context(), 50*time.Millisecond, nil))
 	require.Positive(t, relocated, "dead addresses were never looked for again")
@@ -195,4 +195,42 @@ func TestABuffedPlayerIsHeldAtTheCapsInEffect(t *testing.T) {
 	require.EqualValues(t, 480, got, "godmode held life at the permanent cap")
 	mana, _ := player.New(mem, life).StatMana()
 	require.EqualValues(t, 260, mana, "the freeze held mana at the permanent cap")
+}
+
+/*
+A run holds whoever its caller names, not whoever a scan of its own finds.
+
+Two readable players are planted and Targets names one. The other is a different
+character -- the selection screen keeps every one as a Player object -- and a
+held value there would change a save nobody is playing.
+*/
+func TestARunHoldsOnlyTheTargetsItIsGiven(t *testing.T) {
+	const other = base + 0x2000
+	mem := memtest.New(base, 0x4000)
+	mem.PlantMonoString(base+0x40, "Nakama")
+	mem.PlantMonoString(base+0x80, "Other")
+	mem.PlantPlayer(life, []int32{500, 500, 137, 200, 220, 220}, base+0x40)
+	mem.PlantPlayer(other, []int32{400, 400, 90, 200, 220, 220}, base+0x80)
+	f := New(mem, true, false, 1000)
+	f.Targets = func() ([]*player.Player, error) {
+		return []*player.Player{player.New(mem, life)}, nil
+	}
+
+	require.NoError(t, f.Run(t.Context(), 20*time.Millisecond, nil))
+	held, _ := player.New(mem, life).StatLife()
+	require.EqualValues(t, 500, held, "the named player was not held")
+	left, _ := player.New(mem, other).StatLife()
+	require.EqualValues(t, 90, left, "a player nobody named was written to")
+}
+
+// A refusal to name anyone is what the run reports, in the refusal's own words.
+func TestARunReportsWhyNobodyWasNamed(t *testing.T) {
+	mem := fake(t, []int32{100, 100, 50, 20, 20, 20})
+	refusal := errors.New("which character is being played cannot be told")
+	f := New(mem, true, false, 1000)
+	f.Targets = func() ([]*player.Player, error) { return nil, refusal }
+
+	require.ErrorIs(t, f.Run(t.Context(), 20*time.Millisecond, nil), refusal)
+	got, _ := player.New(mem, life).StatLife()
+	require.EqualValues(t, 50, got, "a refused run wrote anyway")
 }
