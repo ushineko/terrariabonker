@@ -108,6 +108,9 @@ type ui struct {
 	// edits on whatever is in flight.
 	pj          projState
 	projectiles *watch
+	// veins is the vein watcher: up while the ore extractor patch is on, because
+	// the patch only gives the game a queue to mine and something has to fill it.
+	veins *watch
 	// rs is auto-restore: which game the profile was last put back into, and
 	// how far the current attempt has got.
 	rs restoreState
@@ -124,7 +127,9 @@ type effectState struct {
 	god, mana                       bool
 	buffPower, buffSonar, buffCrate bool
 	recast                          bool
-	bait, power, stack              int
+	// gems is whether the vein watcher takes gems as well as ore.
+	gems               bool
+	bait, power, stack int
 	// kitDone is set once the kit round has run. After that the service would
 	// find gear and do nothing, so the round trip is not worth making again.
 	kitDone   bool
@@ -410,7 +415,7 @@ func (u *ui) shutdown() {
 	u.freeze.halt()
 	for _, w := range []*watch{
 		u.potions, u.fishing, u.buffs, u.catch, u.sell, u.inventory, u.statusPoll,
-		u.projectiles,
+		u.projectiles, u.veins,
 	} {
 		if w != nil {
 			w.halt()

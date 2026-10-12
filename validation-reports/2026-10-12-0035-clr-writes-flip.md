@@ -114,6 +114,12 @@ Done, with the rebuilt CLI against the running game (PID 2324):
   and stayed up, titled `terrariabonker 0.44.1`. No `accepted-builds.json` was
   written, which is what a recognised build should leave.
 
+Correction (2026-10-12, later the same day): the window above was started
+without `--cli` and drove the installed 0.44.0 CLI from PATH, not the rebuilt
+one. It was restarted with `--cli`. "A vein mined through `extract-tick`" below
+is not a window path either: the window sent `extract-tick` nowhere until the
+change in `2026-10-12-1045-window-vein-watcher.md`.
+
 Not done:
 - What the window shows: whether a build question appears, whether the cheats
   are usable. Not looked at from here.

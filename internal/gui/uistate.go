@@ -30,6 +30,7 @@ type uiState struct {
 	Catch   bool `json:"catch"`
 	Recast  bool `json:"recast"`
 	Sell    bool `json:"sell"`
+	Gems    bool `json:"gems"`
 
 	BuffPower bool `json:"buffPower"`
 	BuffSonar bool `json:"buffSonar"`
@@ -55,6 +56,7 @@ func (u *ui) saveState() {
 		God: u.fx.god, Mana: u.fx.mana,
 		Potions: u.potions.running(), Fishing: u.fishing.running(),
 		Catch: u.catch.running(), Recast: u.fx.recast, Sell: u.sell.running(),
+		Gems:      u.fx.gems,
 		BuffPower: u.fx.buffPower, BuffSonar: u.fx.buffSonar, BuffCrate: u.fx.buffCrate,
 		Bait: u.fx.bait, Power: u.fx.power, Stack: u.fx.stack,
 		Projectiles: u.pj.overrides, Weapon: u.pj.weapon,
@@ -90,7 +92,7 @@ func (u *ui) loadState() {
 	if st.Stack > 0 {
 		u.fx.stack = st.Stack
 	}
-	u.fx.recast = st.Recast
+	u.fx.recast, u.fx.gems = st.Recast, st.Gems
 	u.fx.buffPower, u.fx.buffSonar, u.fx.buffCrate = st.BuffPower, st.BuffSonar, st.BuffCrate
 	u.pj.overrides, u.pj.weapon = st.Projectiles, st.Weapon
 

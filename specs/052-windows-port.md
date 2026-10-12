@@ -1,6 +1,6 @@
 # Spec 052: Native Windows port
 
-**Status**: DRAFT — phases 0 (recon) and 1 (platform layer) complete; phase 2 and phase 3 step 1 (the version table and its gate) done and checked live on both platforms. Phase 3 step 2 (the CLR read path) is under way: on Windows the live player's life, mana and inventory are read, the live copy picked by Main.player's statics; every write is still refused.
+**Status**: COMPLETE (2026-10-12) — every read, write and cheat runs under .NET Framework on Windows, confirmed in play by the maintainer. Packaging (phase 5) is spec 053.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -983,14 +983,17 @@ Findings from slice 23:
   its position instead of (0, 0) until the game's next update. Not watched on
   Linux.
 
-Slice 24 — the window's vein watcher on the CLR (done headless):
+Slice 24 — `extract-tick` and `extract-stop` on the CLR (done headless):
 - [x] `extract-tick` and `extract-stop` gate on the ore extractor's own write
       feature, as `extract` and `extract --watch` already did. The service side
       (`WatchTick`, `NewVeinWatch`) is the path `extract --watch` ran live in
       slice 14; only the gate refused it.
-- [ ] Not run live through `extract-tick`: `extract-stop` ran against the live
-      game with no watcher and reported nothing to stop; a tick that mines is a
-      write to the world and is the maintainer's to watch.
+- [x] Run live through `extract-tick`: confirmed by the maintainer in play on
+      Windows, 2026-10-12, with the window sending it (slice 29). Before that,
+      `extract-stop` ran against the live game with no watcher and reported
+      nothing to stop.
+- Correction (2026-10-12): this slice and its report called `extract-tick` "the
+  path the window uses". It was not: the window sent it nowhere. See slice 29.
 
 Slice 25 — `freeze` and `godmode` on the CLR (done headless):
 - [x] The freeze loop holds whoever its caller names (`trainer.Freezer.Targets`);
@@ -1004,7 +1007,7 @@ Slice 25 — `freeze` and `godmode` on the CLR (done headless):
       played cannot be told -- the rule every other write has followed since
       slice 4. Under mono the copies a scan finds are one character's, so the
       same copies are held as before. Not watched on Linux.
-- [ ] Not run live on Windows: it is a write held for as long as it runs.
+- [x] Run live on Windows: confirmed by the maintainer in play, 2026-10-12.
 
 Slice 26 — the debug `write` (done headless):
 - [x] It pokes an address the caller names and uses no number of this program's,
@@ -1073,11 +1076,40 @@ Slice 28 — the `Writes` flip (done headless; the window is the maintainer's to
       responding. What the window shows, and every write made from it, is not
       checked here.
 
-Next slices:
-- [ ] The maintainer's watch of the window on Windows: that no build question is
-      asked, that the cheats are usable, and a cheat toggled from it.
-- [ ] The live writes not yet watched on Windows: a freeze, a vein mined through
-      `extract-tick`, the debug `write`.
+Slice 29 — the window watches for veins (done headless; both platforms):
+- [x] Found in play on Windows (2026-10-12): with the Ore extractor patch on in
+      the window, breaking tin took one tile at a time. Nothing in `internal/gui`
+      sent `extract-tick`: the Go window (spec 050, phase 2 "vein/extract") had
+      the patch's switch and no loop behind it, so the queue the patch gives the
+      game was never filled. Not a Windows fault and not the whitelist.
+- [x] The mechanism, live on Windows the same day: `extract --watch` from the
+      CLI, with the maintainer mining -- three tin veins, 25, 13 and 29 tiles,
+      each taken whole at a median 0.02 s a tile; the watcher ended on its round
+      limit and disarmed.
+- [x] The window holds a seventh loop, `veins`, sending `extract-tick` every
+      100 ms through the worker and `extract-stop` on the way down. It has no
+      switch: it follows the Ore extractor patch, up when the patches are read
+      back with it on and down when it goes off or they cannot be read. One
+      control in Effects, "Take gems too", remembered with the window's other
+      settings.
+- [x] A vein taken through the window: confirmed by the maintainer in play on
+      Windows, 2026-10-12. Not seen on Linux.
+
+Findings from slice 28's watch:
+- **The window drives the CLI it finds on PATH.** Started from the build tree
+  without `--cli`, it ran the installed 0.44.0 CLI, so the maintainer's first
+  watch of the window after the flip was a watch of 0.44.0. Restarted with
+  `--cli` pointing at the rebuilt binary.
+
+Closing checks (reported by the maintainer, 2026-10-12: the port confirmed
+working in play on Windows; not observed from the build side):
+- [x] The maintainer's watch of the window on Windows with the rebuilt CLI: that
+      no build question is asked, that the cheats are usable, a cheat toggled
+      from it, and a vein taken through it.
+- [x] The live writes on Windows: a freeze, the debug `write`.
+
+Not done under this spec: phase 5's packaging and the README's Windows
+requirements. They are spec 053.
 
 Findings from slice 1:
 - **A buffed player can be missed by the scan, on both runtimes (pre-existing).**

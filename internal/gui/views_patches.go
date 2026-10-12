@@ -485,6 +485,7 @@ func (u *ui) loadPatches() {
 				fyne.Do(func() {
 					u.px.on, u.px.values, u.px.detail = nil, nil, nil
 					u.px.verified = false
+					u.followOreExtractor()
 				})
 			}
 			return nil
@@ -492,6 +493,7 @@ func (u *ui) loadPatches() {
 		fyne.Do(func() {
 			u.px.on, u.px.values, u.px.detail = st.On, st.Values, st.Detail
 			u.px.build, u.px.verified = st.Build, st.BuildVerified
+			u.followOreExtractor()
 			u.sh.Refresh()
 		})
 		return nil

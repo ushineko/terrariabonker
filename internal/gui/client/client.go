@@ -718,6 +718,19 @@ func CatchArgv(recast bool) []string {
 // CatchStopArgv drops the watcher when auto-catch is switched off.
 func CatchStopArgv() []string { return []string{"catch-stop", "--json"} }
 
+// ExtractTickArgv is one slice of vein watching: break one ore by hand and the
+// rest of its vein goes with it.
+func ExtractTickArgv(gems bool) []string {
+	argv := []string{"extract-tick", "--json"}
+	if gems {
+		argv = append(argv, "--gems")
+	}
+	return argv
+}
+
+// ExtractStopArgv drops the vein watcher when the ore extractor goes off.
+func ExtractStopArgv() []string { return []string{"extract-stop", "--json"} }
+
 // SellTickArgv is one auto-sell round.
 func SellTickArgv() []string { return []string{"sell-tick", "--json"} }
 
@@ -837,6 +850,9 @@ func Samples() []Sample {
 		{"CatchArgv", "catch-tick", CatchArgv(false)},
 		{"CatchArgv/recast", "catch-tick", CatchArgv(true)},
 		{"CatchStopArgv", "catch-stop", CatchStopArgv()},
+		{"ExtractTickArgv", "extract-tick", ExtractTickArgv(false)},
+		{"ExtractTickArgv/gems", "extract-tick", ExtractTickArgv(true)},
+		{"ExtractStopArgv", "extract-stop", ExtractStopArgv()},
 		{"SellTickArgv", "sell-tick", SellTickArgv()},
 		{"SellListArgv", "sell-list", SellListArgv(nil, nil)},
 		{"SellListArgv/add", "sell-list", SellListArgv(ptr(29), nil)},

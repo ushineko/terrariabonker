@@ -25,7 +25,14 @@ const (
 	buffEvery    = time.Second
 	catchEvery   = 50 * time.Millisecond
 	sellEvery    = 500 * time.Millisecond
+	// A slice of vein watching runs rounds for most of this, so the ore is being
+	// looked at nearly all the time: the tile the player breaks has to be seen
+	// gone before the watcher next relearns where the ore is.
+	veinEvery = 100 * time.Millisecond
 )
+
+// oreExtractor is the patch the vein watcher follows.
+const oreExtractor = "ore_extract"
 
 // Defaults and bounds for the numbers on this section.
 const (
@@ -54,6 +61,7 @@ func (u *ui) buildEffects() fyne.CanvasObject {
 			u.fishingCard(),
 			u.buffCard(),
 			u.potionCard(),
+			u.veinCard(),
 			u.sellCard(),
 		)))
 }
@@ -202,6 +210,41 @@ func (u *ui) potionCard() fyne.CanvasObject {
 		),
 	)
 }
+
+/*
+veinCard is what the vein watcher takes.
+
+It has no switch of its own. The watcher is up exactly while the Ore extractor
+patch is on -- the patch without it mines nothing, and it without the patch has
+nothing to mine with -- so a second switch here would be two controls for one
+thing, and one of them could be wrong.
+*/
+func (u *ui) veinCard() fyne.CanvasObject {
+	gems := widget.NewCheck("Take gems too", nil)
+	gems.SetChecked(u.fx.gems)
+	gems.OnChanged = func(on bool) {
+		u.fx.gems = on
+		// The watcher in the worker was built with the old answer.
+		if u.veins.running() {
+			u.veins.set(false)
+			u.veins.set(true)
+		}
+	}
+	return widgets.Card("Vein mining",
+		widgets.DimWrapped("Break one ore by hand and the rest of its vein goes with it. "+
+			"Runs while Ore extractor is on in the Patches section."),
+		widgets.WithTip(gems, "Gem deposits are taken the same way as ore. Off by default, "+
+			"because some players place gems as decoration."),
+	)
+}
+
+/*
+followOreExtractor brings the vein watcher up or down with the patch.
+
+Called whenever the patches are read back, which is after every change to them
+and at start-up, so a patch restored into a fresh game arms the watcher as well.
+*/
+func (u *ui) followOreExtractor() { u.veins.set(u.px.on[oreExtractor]) }
 
 /*
 sellCard sells whitelisted items as they arrive.
@@ -370,6 +413,11 @@ func (u *ui) startWatches() {
 		func() []string { return client.ProjectileTickArgv(u.pj.overrides) },
 		func(raw string) { u.readProjectiles(raw) }).
 		onStop(client.ProjectileStopArgv)
+
+	u.veins = newWatch(u, "veins", veinEvery,
+		func() []string { return client.ExtractTickArgv(u.fx.gems) },
+		func(raw string) { u.readVeins(raw) }).
+		onStop(client.ExtractStopArgv)
 }
 
 // readPotions reports the buffs that came up, and the ones that had nowhere to go.
@@ -427,6 +475,26 @@ func (u *ui) readCatch(raw string) {
 	for _, got := range client.Replies(raw) {
 		if n, ok := got["caught"].(float64); ok && n > 0 {
 			u.catch.say(fmt.Sprintf("reeled in %d", int(n)))
+		}
+	}
+}
+
+// readVeins reports each vein taken. One line per vein, which is as often as
+// the player breaks into one.
+func (u *ui) readVeins(raw string) {
+	for _, got := range client.Replies(raw) {
+		for _, e := range rows(got, "events") {
+			line := fmt.Sprintf("took %v tiles", e["mined"])
+			if at, ok := e["at"].([]any); ok && len(at) == 2 {
+				line += fmt.Sprintf(" at (%v, %v)", at[0], at[1])
+			}
+			if left, ok := e["left"].(float64); ok && left > 0 {
+				line += fmt.Sprintf(", %d left", int(left))
+			}
+			if reason, ok := e["reason"].(string); ok && reason != "" {
+				line += ": " + reason
+			}
+			u.veins.say(line)
 		}
 	}
 }

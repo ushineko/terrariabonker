@@ -166,7 +166,9 @@ Not done -- each is a write to the game and was not made without the maintainer
 watching:
 - `freeze` / `godmode` on Windows.
 - A vein mined through `extract-tick` (the window's path; `extract --watch` ran
-  live in slice 14 over the same service code).
+  live in slice 14 over the same service code). Correction, 2026-10-12: it was
+  not the window's path -- the window did not send it. See
+  `2026-10-12-1045-window-vein-watcher.md`.
 - The debug `write`.
 
 ## The `Writes` flip, tried and put back
