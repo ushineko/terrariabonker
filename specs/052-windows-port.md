@@ -946,9 +946,31 @@ the maintainer's to make):
       index at 0x004; 0x050..0x087 read as heap pointers or null in the three
       objects sampled and 0x040..0x04F did not; in six active NPCs position less
       velocity was oldPosition; the player's direction read 1 at 0x00C.
-- [ ] A live spawn on Windows, watched in-game.
+- [x] The template is the one the compendium reads -- an NPC object Main.npc
+      does not hold, from the table where each net id appears once
+      (`content.NPCTemplateAddrs`) -- re-read and checked for its class and net
+      id before it is copied, and its active byte is cleared in the copy. See the
+      second finding below.
+- [ ] A live spawn on Windows, watched in-game. Made 2026-10-11: `spawn-npc 443`
+      reported a Gold Bunny in slot 33, and the slot read back active, type and
+      net id 443, life 5/5, whoAmI 33, 400 pixels (25 tiles) from the player at
+      the player's height. Open until the maintainer has seen it.
 
-Finding from slice 23:
+Findings from slice 23:
+- **The first live spawn was refused: "no template for NPC 443" (fixed).** The
+  spawn took "the inactive object with this net id" for the template. On the
+  live game 2402 of the 2405 NPC objects outside Main.npc read active, the
+  templates among them, so no NPC had a template. The headless tests passed
+  because the fixture's template was planted inactive: an assumption written
+  down as a fixture. The fixture now plants it active, as measured. The same
+  rule ran under mono and its `active` offset there has not been re-measured;
+  the new rule does not depend on it.
+- **A copied template would have made the slot live mid-spawn (fixed with the
+  above).** `active` (0x18C) is inside the last CLR copy span, and the template's
+  is 1. The copy's active byte is now cleared, and a test reads the slot's byte
+  after every write.
+- Of the 762 templates the scan chose on the live game, one read as a bestiary
+  icon dummy and one as inactive. Not looked into; neither was the one spawned.
 - **A spawn zeroed the NPC's oldPosition, on mono too (fixed).** The spawn wrote
   position and oldPosition, then cleared sixteen bytes from velocity -- and
   oldPosition is the eight bytes after velocity under both runtimes, so it was

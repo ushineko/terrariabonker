@@ -167,8 +167,8 @@ to seven default-state objects, which made their run fourteen objects for eight
 distinct keys and threw away all seven. Per key, the duplicated key drops out and
 its neighbours survive.
 */
-func templateTable[T any](objects []found[T], key func(T) int32) map[int32]T {
-	out := map[int32]T{}
+func templateTable[T any](objects []found[T], key func(T) int32) map[int32]found[T] {
+	out := map[int32]found[T]{}
 	if len(objects) == 0 {
 		return out
 	}
@@ -193,7 +193,7 @@ func templateTable[T any](objects []found[T], key func(T) int32) map[int32]T {
 				continue
 			}
 			if _, already := out[k]; !already {
-				out[k] = o.stats
+				out[k] = o
 			}
 		}
 	}
@@ -366,6 +366,31 @@ NPC's stats have been scaled by the world's difficulty, so a Blue Slime in an
 expert world reads 60 life where its template says 25.
 */
 func FindNPCTemplates(mem Mem, vtable uint32, exclude map[uint32]bool, o layout.NPCShape) map[int32]NPCStats {
+	out := map[int32]NPCStats{}
+	for netID, tpl := range npcTemplates(mem, vtable, exclude, o) {
+		out[netID] = tpl.stats
+	}
+	return out
+}
+
+/*
+NPCTemplateAddrs is where each of those templates is, keyed by net id: the same
+objects FindNPCTemplates reads, for a caller that wants a template's bytes rather
+than its stats.
+
+An address is good for the read that follows it and no longer -- the heap is
+collected -- so a caller checks what it reads there.
+*/
+func NPCTemplateAddrs(mem Mem, vtable uint32, exclude map[uint32]bool, o layout.NPCShape) map[int32]uint32 {
+	out := map[int32]uint32{}
+	for netID, tpl := range npcTemplates(mem, vtable, exclude, o) {
+		out[netID] = tpl.addr
+	}
+	return out
+}
+
+// npcTemplates is the template table itself: one object per net id.
+func npcTemplates(mem Mem, vtable uint32, exclude map[uint32]bool, o layout.NPCShape) map[int32]found[NPCStats] {
 	objects := scanObjects(mem, vtable, o.Size,
 		func(buf []byte, off int) NPCStats { return readNPCStats(buf, off, o) },
 		func(s NPCStats) bool {

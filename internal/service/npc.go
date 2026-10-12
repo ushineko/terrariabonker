@@ -66,32 +66,35 @@ Rescanned rather than remembered by address, for the same reason the item
 templates are: the managed heap is collected, so an address that held the object
 stops being it. The parsed stats are cached instead, because those are numbers.
 
-A template is inactive, which is what tells it from a live NPC of the same type
-standing in the world with its stats already scaled.
+The template is the one the compendium reads: an object of the NPC class that
+Main.npc does not hold -- a live NPC's stats are already scaled, and a slot an
+NPC has left keeps its fields -- taken from the table where each net id appears
+once. **Not** "the inactive one": that was the rule here, and on .NET Framework
+2402 of the 2405 NPC objects outside Main.npc read active, the templates among
+them (live game, 2026-10-11), so it found no template for anything.
+
+The block's active byte is cleared, whatever the template's was. The byte lies
+inside a copy span, and a slot must not go live until the spawn has finished
+with it.
 */
 func (s *Service) npcTemplateBlock(entry layout.Entry, arr uint32, netID int32) ([]byte, bool) {
 	vt, ok := content.NPCVTableOf(s.Mem, entry, arr)
 	if !ok {
 		return nil, false
 	}
-	span := entry.NPC.Size
-	var best []byte
-	for _, region := range s.Mem.Regions() {
-		buf := s.Mem.Read(region.Start, region.Size())
-		for i := 0; i+4 <= len(buf); i += 4 {
-			if binary.LittleEndian.Uint32(buf[i:]) != vt {
-				continue
-			}
-			if i+span > len(buf) {
-				continue
-			}
-			nid := int32(binary.LittleEndian.Uint32(buf[i+entry.NPC.NetID:])) //nolint:gosec // a signed field
-			if nid == netID && buf[i+entry.NPC.Active] == 0 {
-				best = buf[i : i+span]
-			}
-		}
+	addr, ok := content.NPCTemplateAddrs(s.Mem, vt, s.liveNPCAddrs(), entry.NPC)[netID]
+	if !ok {
+		return nil, false
 	}
-	return best, best != nil
+	block := s.Mem.Read(addr, entry.NPC.Size)
+	if len(block) < entry.NPC.Size || binary.LittleEndian.Uint32(block) != vt {
+		return nil, false
+	}
+	if nid := int32(binary.LittleEndian.Uint32(block[entry.NPC.NetID:])); nid != netID { //nolint:gosec // a signed field
+		return nil, false
+	}
+	block[entry.NPC.Active] = 0
+	return block, true
 }
 
 // freeNPCSlot is the index and object address of an unused Main.npc slot.

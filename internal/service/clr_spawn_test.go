@@ -22,6 +22,9 @@ from internal/layout:
   - NPC: fourteen references at 0x050..0x087; type 0x0F4, damage 0x108, defense
     0x10C, lifeMax 0x120, netID 0x14C, active 0x18C; the object ends at 0x20C
     (BaseSize 0x210 on the live game, 2026-10-11, less the sync block).
+  - The game's NPC templates read active: 761 of the 762 the scan chose on the
+    live game (2026-10-11), the Gold Bunny's among them. So the template here is
+    planted active.
   - Projectile: scale 0x078, type 0x080, penetrate 0x0B4, maxPenetrate 0x0B8,
     active 0x102. Item: shoot 0x0BC.
   - Player: statLife 0x470.
@@ -66,7 +69,7 @@ func csSpawnable(t *testing.T, facing int32) (memtest.CLRWorld, *service.Service
 	w.Mem.PokeI32(csNPCTemplates+0x10C, 2)
 	w.Mem.PokeI32(csNPCTemplates+0x010, 24)
 	w.Mem.PokeI32(csNPCTemplates+0x014, 18)
-	w.Mem.PokeBytes(csNPCTemplates+0x18C, []byte{0})
+	w.Mem.PokeBytes(csNPCTemplates+0x18C, []byte{1})
 	fill(csSlotObj(csSpawnSlot), 0xEE)
 	w.Mem.PokeBytes(csSlotObj(csSpawnSlot)+0x18C, []byte{0})
 
@@ -163,6 +166,101 @@ func TestSpawningUnderTheCLRSetsActiveLast(t *testing.T) {
 		"something was written to the slot after it went live")
 }
 
+// activeWatcher records what the spawned slot's active byte holds after every
+// write.
+type activeWatcher struct {
+	*execMem
+	at   uint32
+	seen []byte
+}
+
+func (m *activeWatcher) Write(addr uint32, data []byte) bool {
+	ok := m.execMem.Write(addr, data)
+	m.seen = append(m.seen, m.Read(m.at, 1)[0])
+	return ok
+}
+
+/*
+The slot does not go live when the template is copied over it, though the
+template reads active and its active byte is inside the last copy span.
+
+Which write came last says nothing about this: a spawn that copies the
+template's active byte across and then writes active again at the end still ends
+on the right address. So the byte is read after every write, and it is zero
+until the last.
+*/
+func TestSpawningUnderTheCLRKeepsTheSlotInactiveUntilTheEnd(t *testing.T) {
+	atHome(t)
+	w, _, _ := csSpawnable(t, 1)
+	watch := &activeWatcher{execMem: &execMem{w.Mem}, at: csSlotObj(csSpawnSlot) + 0x18C}
+
+	got, err := service.New(watch, -1).WithRuntime(csRuntime).SpawnNPC(1, 25)
+	require.NoError(t, err)
+	require.Equal(t, csSpawnSlot, got.Slot)
+	require.Greater(t, len(watch.seen), 4)
+	last := len(watch.seen) - 1
+	require.Equal(t, make([]byte, last), watch.seen[:last], "the slot went live before the spawn had finished")
+	require.EqualValues(t, 1, watch.seen[last])
+}
+
+/*
+A CLR spawn does not take an NPC standing in the world for the template, though
+both read active and share a net id.
+
+The Blue Slime in Main.npc's first slot has the life an expert world scales it
+to. A spawn made from it would start at 60 life where the template says 25.
+*/
+func TestSpawningUnderTheCLRCopiesTheTemplateNotALiveNPC(t *testing.T) {
+	atHome(t)
+	w, svc, _ := csSpawnable(t, 1)
+	require.EqualValues(t, 60, csI32(t, w, csSlotObj(0)+0x120), "the fixture's live slime is not scaled")
+
+	got, err := svc.SpawnNPC(1, 25)
+	require.NoError(t, err)
+	require.EqualValues(t, 25, csI32(t, w, csSlotObj(got.Slot)+0x120))
+}
+
+// movedMem answers the one read of the template's own bytes with something
+// else: the heap as it is after a collection has moved the object away.
+type movedMem struct {
+	*execMem
+	now func([]byte) []byte
+}
+
+func (m *movedMem) Read(addr uint32, size int) []byte {
+	got := m.execMem.Read(addr, size)
+	if addr == csNPCTemplates && size == csNPCEnd {
+		return m.now(got)
+	}
+	return got
+}
+
+/*
+A template that is no longer where the scan found it is not copied.
+
+The heap is collected between the scan and the read. What the read brings back
+is checked for the NPC class and the net id asked for, and for being whole;
+anything else is no template, and nothing is written.
+*/
+func TestSpawningUnderTheCLRChecksTheTemplateItRead(t *testing.T) {
+	for name, now := range map[string]func([]byte) []byte{
+		"another class's object": func(b []byte) []byte { b[0] ^= 0xFF; return b },
+		"another NPC":            func(b []byte) []byte { b[0x14C] = 2; return b },
+		"cut short":              func(b []byte) []byte { return b[:0x100] },
+	} {
+		t.Run(name, func(t *testing.T) {
+			atHome(t)
+			w, _, _ := csSpawnable(t, 1)
+			before := w.Mem.Hex()
+			mem := &movedMem{execMem: &execMem{w.Mem}, now: now}
+
+			_, err := service.New(mem, -1).WithRuntime(csRuntime).SpawnNPC(1, 25)
+			require.ErrorContains(t, err, "no template for NPC 1")
+			require.Equal(t, before, w.Mem.Hex(), "something was written anyway")
+		})
+	}
+}
+
 // With no template of the NPC asked for, or no free slot, a CLR spawn says so
 // and writes nothing.
 func TestSpawningUnderTheCLRRefusesWhatItCannotDo(t *testing.T) {
@@ -195,6 +293,7 @@ func TestACLRTemplateAtTheEndOfMemoryIsFound(t *testing.T) {
 	w, svc, _ := csSpawnable(t, 1)
 	const last = csBase + csSize - csNPCEnd
 	csNPC(w, last, 50, 50, 2000)
+	w.Mem.PokeBytes(last+0x18C, []byte{1})
 
 	got, err := svc.SpawnNPC(50, 25)
 	require.NoError(t, err)

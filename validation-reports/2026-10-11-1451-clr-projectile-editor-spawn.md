@@ -127,12 +127,50 @@ weak):
 Done, reads only: everything in "Measurements"; `projectile-stop` ran through the
 gate; the debug `write` was refused as read-only.
 
-**Not done**: no projectile has been edited and no NPC spawned on the CLR. Both
-write to objects the running game is using, so they were left for the maintainer
-to ask for and watch. Spec 052 keeps those two boxes open.
+## Addendum, 15:40 -- the first live spawn found a bug
+
+The maintainer asked for the live writes. `spawn-npc 443` (commit 199c1d5) was
+refused: "no template for NPC 443 (Gold Bunny)". Nothing was written.
+
+- **Cause, measured**: the spawn took the inactive object with the net id asked
+  for as the template. A read-only scan of the live game found 2405 NPC objects
+  outside `Main.npc` with a plausible type; 2402 read active at 0x18C, every copy
+  of net ids 1, 17, 50 and 443 among them. The compendium, which does not ask for
+  inactive, had a Gold Bunny template (life 5, 18 x 20).
+- **Why the tests passed**: the CLR fixture's template was planted with active 0.
+  That byte was an assumption, not a measurement, and the report above called
+  the suite sufficient. It was not.
+- **Fix**: the template is the object the compendium's table holds for the net id
+  (`content.NPCTemplateAddrs`: not in `Main.npc`, one per net id). It is re-read
+  and checked for the NPC class and the net id before use. The copy's active
+  byte is cleared, because 0x18C is inside the last copy span and the template's
+  is 1 -- copied as it was, the slot would have gone live before its position was
+  written.
+- **Live, after the fix, reads only**: the scan chose 762 templates; 761 read
+  active; whoAmI was 0 in all; the Gold Bunny's was at the low end of the range
+  with the Blue Slime's, Merchant's and King Slime's. One read as a bestiary icon
+  dummy, which was not looked into.
+- **Tests added**: the fixture's templates are active; the slot's active byte is
+  read after every write and is zero until the last; a live NPC sharing the net
+  id is not taken for the template; a template that changed between the scan and
+  the read (another class, another net id, cut short) is refused with nothing
+  written.
+- **Mutation checks**, 5 more: the active byte copied, the live NPCs not excluded,
+  and each of the three re-read checks removed. All killed; the three re-read
+  mutants survived until the last test above was written.
+- `go test -race ./...`: 27 packages `ok`. Lint: 0 issues.
+
+**The live spawn**: `spawn-npc 443` then reported slot 33 at tile (1818, 226).
+Read back from the game: slot 33 active, type and net id 443, life 5/5, whoAmI
+33, position (29089.6, 3622.0) with the player at (29489.6, 3622.0) -- 400 pixels,
+25 tiles -- velocity zero, not a bestiary dummy. Whether it is on screen and
+behaves as a Gold Bunny is the maintainer's to say.
+
+**The live projectile edit**: see the spec; not confirmed at the time of writing.
 
 ## Overall
 
-- All gates passed: YES headless; live writes pending
+- All gates passed: YES headless, after the fix in the addendum; the live spawn
+  was made and read back; the live projectile edit is pending
 - Notes: still behind the every-write gate are `extract-recipes`,
   `freeze`/`godmode`, `extract-tick`/`extract-stop` and the debug `write`.
