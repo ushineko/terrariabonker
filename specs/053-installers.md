@@ -1,6 +1,6 @@
 # Spec 053: Installers, built by fynstall
 
-**Status**: IN PROGRESS — the Windows half is done and checked on Windows 11; the Linux half (the fynstall installer there, and the Arch package it has to live beside) is not started.
+**Status**: IN PROGRESS — the Windows half is done, checked on Windows 11 and in CI, and its wizard run by the maintainer; the Linux half (the fynstall installer there, and the Arch package it has to live beside) is not started.
 
 > **Note**: This work has no associated issue tracker ticket (personal utility).
 
@@ -135,11 +135,15 @@ Windows
       killed).
 - [x] `fynstall.yaml`'s version is held to `.tag` by a test (mutant killed).
 - [x] The README says what Windows needs and how to install, upgrade and remove there.
-- [ ] The wizard run by a person on Windows: an upgrade over 0.44.0, the window started
-      from the last page finding its CLI, and the uninstall from Settings → Apps leaving
-      `%APPDATA%\terrariabonker`. Not run from the build side: it replaces the
-      maintainer's installed copy.
-- [ ] The Windows job in CI green, and a tagged release carrying the two installers.
+- [x] The wizard run by a person on Windows: the maintainer ran the 0.45.0 installer on
+      2026-10-12 and reported that it passes their checks. Not run from the build side.
+      What was meant to be looked at: an upgrade over 0.44.0, the window started from
+      the last page finding its CLI, and the uninstall from Settings → Apps leaving
+      `%APPDATA%\terrariabonker`; which of these the maintainer's checks covered was
+      not recorded.
+- [x] The Windows job in CI green: run 38297166102 on 4eb3d93, tests, `make installer`
+      and the run of each installer. The runner image has `make`.
+- [ ] A tagged release carrying the two installers.
 
 Linux
 - [ ] `make installer` on Linux leaves both installers in `dist/`, and `make release`
