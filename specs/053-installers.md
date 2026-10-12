@@ -136,11 +136,9 @@ Windows
 - [x] `fynstall.yaml`'s version is held to `.tag` by a test (mutant killed).
 - [x] The README says what Windows needs and how to install, upgrade and remove there.
 - [x] The wizard run by a person on Windows: the maintainer ran the 0.45.0 installer on
-      2026-10-12 and reported that it passes their checks. Not run from the build side.
-      What was meant to be looked at: an upgrade over 0.44.0, the window started from
-      the last page finding its CLI, and the uninstall from Settings → Apps leaving
-      `%APPDATA%\terrariabonker`; which of these the maintainer's checks covered was
-      not recorded.
+      2026-10-12 and reported all three good: the upgrade over 0.44.0, the window
+      started from the last page finding its CLI, and the uninstall from Settings →
+      Apps leaving `%APPDATA%\terrariabonker`. Not run from the build side.
 - [x] The Windows job in CI green: run 38297166102 on 4eb3d93, tests, `make installer`
       and the run of each installer. The runner image has `make`.
 - [ ] A tagged release carrying the two installers.
