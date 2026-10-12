@@ -911,8 +911,7 @@ Slice 21 — the fishing gear writes on the CLR (done):
       took the Golden Fishing Rod from 50 to 100 and `--restore` put it back to
       50, each read back by the tool. The rod at 100 was not watched in-game.
 
-Slice 22 — the projectile editor on the CLR (done headless and read live; the live
-write is the maintainer's to make):
+Slice 22 — the projectile editor on the CLR (done):
 - [x] `ProjectileShape` carries the editor's fields -- type, timeLeft, penetrate,
       maxPenetrate, extraUpdates, scale, tileCollide -- and `Editor.Sweep` takes
       the entry: the array's length and first element, the active flag and every
@@ -927,11 +926,14 @@ write is the maintainer's to make):
       Uzi 14, Solar Eruption 611, Golden Fishing Rod 364; the one projectile in
       flight read type 211, penetrate and maxPenetrate -1, extraUpdates 0, scale
       1.00, and the array's objects a BaseSize of 0x140.
-- [ ] A live edit on Windows, watched in-game: an override held on a weapon's
-      projectiles while firing, and the weapon back to normal once it stops.
+- [x] A live edit on Windows (2026-10-11): `projectile-tick --set
+      985:scale=2.5` for two minutes while the maintainer swung the Terra Blade
+      made 6718 writes to type 985 over 11376 sweeps, and the maintainer
+      confirmed it working in-game. An earlier four-minute run with the game
+      paused made 23402 sweeps and no write. Only scale was edited live; the
+      other four fields rest on the runtime's metadata and the headless tests.
 
-Slice 23 — `spawn-npc` on the CLR (done headless and read live; the live spawn is
-the maintainer's to make):
+Slice 23 — `spawn-npc` on the CLR (done):
 - [x] A new `SpawnFields` block on the entry: Entity's whoAmI, position, velocity
       and oldPosition in an NPC, the player's Entity.direction from statLife, and
       the copy spans. The CLR spans are [0x008, 0x020), [0x040, 0x050) and
@@ -951,10 +953,11 @@ the maintainer's to make):
       (`content.NPCTemplateAddrs`) -- re-read and checked for its class and net
       id before it is copied, and its active byte is cleared in the copy. See the
       second finding below.
-- [ ] A live spawn on Windows, watched in-game. Made 2026-10-11: `spawn-npc 443`
-      reported a Gold Bunny in slot 33, and the slot read back active, type and
-      net id 443, life 5/5, whoAmI 33, 400 pixels (25 tiles) from the player at
-      the player's height. Open until the maintainer has seen it.
+- [x] A live spawn on Windows (2026-10-11): `spawn-npc 443` reported a Gold
+      Bunny in slot 33, and the slot read back active, type and net id 443, life
+      5/5, whoAmI 33, 400 pixels (25 tiles) from the player at the player's
+      height. The game was paused at the time; once it was resumed the
+      maintainer confirmed it working in-game.
 
 Findings from slice 23:
 - **The first live spawn was refused: "no template for NPC 443" (fixed).** The

@@ -166,11 +166,18 @@ Read back from the game: slot 33 active, type and net id 443, life 5/5, whoAmI
 25 tiles -- velocity zero, not a bestiary dummy. Whether it is on screen and
 behaves as a Gold Bunny is the maintainer's to say.
 
-**The live projectile edit**: see the spec; not confirmed at the time of writing.
+The game was paused when it was read back; resumed, the maintainer confirmed
+the spawn working.
+
+**The live projectile edit**: `projectile-tick --set 985:scale=2.5 --budget 240`
+with the game paused made 23402 sweeps and no write. Run again for 120 seconds
+with the maintainer swinging the Terra Blade, it made 6718 writes to type 985
+over 11376 sweeps, and the maintainer confirmed it working in-game. Only scale
+was edited live.
 
 ## Overall
 
 - All gates passed: YES headless, after the fix in the addendum; the live spawn
-  was made and read back; the live projectile edit is pending
+  and the live projectile edit were both made and confirmed by the maintainer
 - Notes: still behind the every-write gate are `extract-recipes`,
   `freeze`/`godmode`, `extract-tick`/`extract-stop` and the debug `write`.
