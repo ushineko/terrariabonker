@@ -43,7 +43,7 @@ the same commit, with the measurement that justified it.
 */
 func TestTheTableIsFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%#v", Entries)))
-	require.Equal(t, "6b60e0b190fed88bb1edf9c5753d4d6348a4dad568e899863d576ec5bdd3d50e",
+	require.Equal(t, "b6cd0eeb0e9b0dbf76a96e59c5cd658a1c689db8256b180ab435361ab979ef1c",
 		hex.EncodeToString(sum[:]), "the version table changed:\n%#v", Entries)
 }
 
@@ -125,10 +125,10 @@ func TestTheConfirmedRuntimeIsALedgerNotAGate(t *testing.T) {
 /*
 What each entry may read and whether it may write.
 
-The CLR entry reads the player, which copy is live and the inventory, and writes
-nothing: every other reader still uses the mono constants, and a write with a
-wrong number lands in a live save. The zero entry -- what an unsupported
-runtime gets -- can do neither.
+Both entries read the player, which copy is live and the inventory, and both may
+write: the CLR entry since every one of its write paths took its numbers from
+the entry (spec 052 slice 28). The zero entry -- what an unsupported runtime
+gets -- can do neither.
 */
 func TestReadsAndWritesAreSeparate(t *testing.T) {
 	require.True(t, monoEntry.CanRead(ReadPlayer))
@@ -138,7 +138,7 @@ func TestReadsAndWritesAreSeparate(t *testing.T) {
 	require.True(t, clrEntry.CanRead(ReadPlayer))
 	require.True(t, clrEntry.CanRead(ReadInventory))
 	require.True(t, clrEntry.CanRead(ReadLocalPlayer))
-	require.False(t, clrEntry.Writes, "the CLR entry may write before its write paths exist")
+	require.True(t, clrEntry.Writes)
 
 	var none Entry
 	require.False(t, none.CanRead(ReadPlayer))
@@ -304,14 +304,31 @@ func TestTheCLRStatOffsetsAreTheTable(t *testing.T) {
 	}
 }
 
-// The CLR entry may write player stats and nothing else; mono may write
-// everything; an unsupported runtime nothing.
+/*
+An entry whose write paths are landing one at a time may make the writes it
+names and no other; one that may make every write makes them all; an
+unsupported runtime none.
+
+The entry in the middle of being ported is derived here: the CLR entry was that
+entry until slice 28, and the next runtime will be.
+*/
 func TestWritesArePerFeature(t *testing.T) {
-	require.True(t, clrEntry.CanWrite(WritePlayerStats))
-	require.False(t, clrEntry.CanWrite(ReadInventory), "an inventory write under the CLR")
-	require.False(t, clrEntry.Writes)
-	require.True(t, monoEntry.CanWrite(WritePlayerStats))
-	require.True(t, monoEntry.CanWrite(ReadInventory))
+	porting := Derive(clrEntry, func(e *Entry) {
+		e.Writes, e.WriteFeatures = false, []Feature{WritePlayerStats}
+	})
+	require.True(t, porting.CanWrite(WritePlayerStats))
+	require.False(t, porting.CanWrite(WriteItemFields), "a write the entry does not name")
+	require.False(t, porting.CanWrite(CheatFeature("mining")))
+
+	for _, e := range []Entry{monoEntry, clrEntry} {
+		require.True(t, e.CanWrite(WritePlayerStats), e.Name)
+		require.True(t, e.CanWrite(WriteItemFields), e.Name)
+		require.True(t, e.CanWrite(CheatFeature("mining")), e.Name)
+	}
+
+	// Naming a write is not enough under an entry Select may not choose.
+	off := Derive(porting, func(e *Entry) { e.Enabled = false })
+	require.False(t, off.CanWrite(WritePlayerStats))
 	var none Entry
 	require.False(t, none.CanWrite(WritePlayerStats))
 }

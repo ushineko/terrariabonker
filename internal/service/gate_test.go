@@ -235,8 +235,10 @@ wine-mono are measured not to fit .NET Framework -- not one field offset is
 shared -- so there is nothing for force to be right about (spec 052).
 */
 func TestAnUnsupportedRuntimeIsRefusedEvenWhenForced(t *testing.T) {
-	// netfx: an entry exists and reads the player, but may not write yet.
-	// coreclr: no entry at all. Both refuse, for different stated reasons.
+	// netfx, here: an entry exists and reads the player, but may not make every
+	// write yet. coreclr: no entry at all. Both refuse, for different stated
+	// reasons.
+	stillPorting(t)
 	for runtime, why := range map[string]string{
 		"netfx-4.8.9345.0": "can only read so far",
 		"coreclr-9.0.0":    "has no memory layout for that runtime",
@@ -255,16 +257,19 @@ func TestAnUnsupportedRuntimeIsRefusedEvenWhenForced(t *testing.T) {
 
 /*
 RequireAnyWrite passes under an entry that can make at least one write, so
-restore runs on .NET Framework and applies what it can -- where RequireCompatible
-(every write) still refuses. A runtime with no entry at all is still refused:
-there is nothing to apply.
+restore runs under a runtime still being ported and applies what it can -- where
+RequireCompatible (every write) still refuses. A runtime with no entry at all is
+still refused: there is nothing to apply.
 */
 func TestRequireAnyWriteRunsWhereAnEntryWritesSomething(t *testing.T) {
-	t.Run("netfx writes some features", func(t *testing.T) {
+	t.Run("an entry that writes some features", func(t *testing.T) {
+		stillPorting(t)
 		_, _, svc := gateFixture(t)
 		service.WatchRuntime(t, "netfx-4.8.9345.0")
-		require.Error(t, svc.RequireCompatible(false), "the every-write gate should still refuse netfx")
+		require.Error(t, svc.RequireCompatible(false), "the every-write gate passed an entry still being ported")
 		require.NoError(t, svc.RequireAnyWrite(false), "restore should run under an entry that writes some features")
+		require.NoError(t, svc.RequireWritable(layout.WritePlayerStats, false))
+		require.Error(t, svc.RequireWritable(layout.WriteItemFields, false), "a write the entry does not name")
 	})
 	t.Run("a runtime with no entry is refused", func(t *testing.T) {
 		_, _, svc := gateFixture(t)
@@ -295,6 +300,7 @@ false that follows is the runtime's doing and not a fixture that was never
 recognised.
 */
 func TestAnAcceptedBuildIsNotRecognisedUnderAnUnsupportedRuntime(t *testing.T) {
+	stillPorting(t)
 	_, mem, svc := gateFixture(t)
 	service.WatchRuntime(t, "wine-mono-11.3.0")
 	_, err := svc.AcceptBuild(builds.Accepted, nil)
@@ -303,11 +309,12 @@ func TestAnAcceptedBuildIsNotRecognisedUnderAnUnsupportedRuntime(t *testing.T) {
 	require.True(t, before.Recognised, "the accepted build is not recognised to begin with")
 	require.NotEqual(t, "unsupported", before.Support)
 
-	// The same game and the same recorded decision, under .NET Framework. A
-	// fresh service, because a service keeps the runtime it first read.
+	// The same game and the same recorded decision, under an entry that may not
+	// make every write. A fresh service, because a service keeps the runtime it
+	// first read.
 	service.WatchRuntime(t, "netfx-4.8.9345.0")
 	after := service.New(mem, -1).BuildCheck(patch.NewPatcher(mem, -1))
-	require.True(t, after.ReadOnly, "the CLR entry reported as writable")
+	require.True(t, after.ReadOnly, "an entry still being ported reported as writable")
 	require.False(t, before.ReadOnly)
 	require.False(t, after.Recognised, "an accepted build is recognised under a runtime with no numbers")
 	require.False(t, after.Known)
@@ -317,6 +324,7 @@ func TestAnAcceptedBuildIsNotRecognisedUnderAnUnsupportedRuntime(t *testing.T) {
 // Nothing is recorded about a build running under a runtime with no numbers:
 // a decision there would be a decision about nothing.
 func TestNoDecisionIsRecordedUnderAnUnsupportedRuntime(t *testing.T) {
+	stillPorting(t)
 	home, _, svc := gateFixture(t)
 	service.WatchRuntime(t, "netfx-4.8.9345.0")
 
@@ -324,6 +332,56 @@ func TestNoDecisionIsRecordedUnderAnUnsupportedRuntime(t *testing.T) {
 	require.Error(t, err)
 	_, statErr := os.Stat(filepath.Join(memtest.ConfigUnder(home), "accepted-builds.json"))
 	require.True(t, os.IsNotExist(statErr), "a decision file was written anyway")
+}
+
+/*
+stillPorting puts the CLR entry back to what it was while its write paths were
+landing: one write named, not every write allowed. The mechanism outlives the
+port it was built for, and the next runtime starts in this state.
+*/
+func stillPorting(t *testing.T) {
+	t.Helper()
+	saved := layout.Entries
+	t.Cleanup(func() { layout.Entries = saved })
+	entries := make([]layout.Entry, len(saved))
+	for i, e := range saved {
+		entries[i] = e
+		if e.Family == layout.NetFx {
+			entries[i] = layout.Derive(e, func(e *layout.Entry) {
+				e.Writes, e.WriteFeatures = false, []layout.Feature{layout.WritePlayerStats}
+			})
+		}
+	}
+	layout.Entries = entries
+}
+
+/*
+.NET Framework is a runtime this program writes under (spec 052 slice 28): the
+every-write gate passes, the build check reports the build as what it is rather
+than as read-only, and a decision about it is recorded with the runtime it was
+made under, after which the build is recognised.
+*/
+func TestDotNetFrameworkIsWrittenUnder(t *testing.T) {
+	home, mem, svc := gateFixture(t)
+	service.WatchRuntime(t, "netfx-4.8.9345.0")
+	require.NoError(t, svc.RequireCompatible(false))
+	require.NoError(t, svc.RequireWritable(layout.WriteItemFields, false))
+
+	report := svc.BuildCheck(patch.NewPatcher(mem, -1))
+	require.False(t, report.ReadOnly)
+	require.Equal(t, "netfx-4.8.1", report.RuntimeEntry)
+	require.False(t, report.Recognised, "the fixture's build was recognised before anything was decided")
+	require.NotContains(t, report.Message, "can only read")
+
+	got, err := svc.AcceptBuild(builds.Accepted, nil)
+	require.NoError(t, err)
+	require.Equal(t, builds.Accepted, got.Decision)
+	recorded, err := os.ReadFile(filepath.Join(memtest.ConfigUnder(home), "accepted-builds.json"))
+	require.NoError(t, err)
+	require.Contains(t, string(recorded), "netfx-4.8.9345.0")
+	after := svc.BuildCheck(patch.NewPatcher(mem, -1))
+	require.Equal(t, builds.Accepted, after.Decision)
+	require.True(t, after.Recognised)
 }
 
 /*

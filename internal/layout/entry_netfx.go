@@ -3,10 +3,11 @@ package layout
 /*
 clrEntry is .NET Framework on native Windows, measured in spec 052 phase 0.
 
-Enabled for reading the player, which copy is live and their inventory, and never
-for writing yet: the CLR read path
-lands one feature at a time (spec 052 phase 3 step 2), and every other reader still
-uses the mono constants. A reader not in Reads must not run under this entry.
+Its reads landed one feature at a time (spec 052 phase 3), and a reader not in
+Reads must not run under this entry. Its writes landed the same way, each named
+in WriteFeatures; Writes became true once no write path was left taking its
+numbers from anywhere but the entry (slice 28), and the list stays as the record
+of which were ported.
 
 The player fields are differences of CLRFields: name 0x08C and inventory 0x0D4,
 less statLife 0x470. TestTheCLRPlayerFieldsAreTheTable checks that.
@@ -118,7 +119,7 @@ var clrEntry = Entry{
 		CheatFeature("teleport"), CheatFeature("inventory_accs"), CheatFeature("ore_extract"),
 		CheatFeature("auto_use"), WriteBuffs, WriteFishingGear, WriteSelling,
 		WriteProjectiles, WriteNPCSpawn},
-	Writes:       false,
+	Writes:       true,
 	PlayerValues: map[string]int{"pickSpeed": 0xA4, "blockRange": 0x100},
 	Anchors:      netfxAnchors,
 	Cheats:       netfxCheats,

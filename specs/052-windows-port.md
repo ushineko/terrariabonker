@@ -486,7 +486,8 @@ would open the write gate for every command, including ones whose packages still
 use mono offsets. So an entry declares what it can read (`Reads`, a list of
 features) separately from whether it may write (`Writes`). A reader checks its
 feature; a write checks `Writes`. The CLR entry's reads grow slice by slice, and
-`Writes` stays false until every write path takes its numbers from the entry.
+`Writes` stays false until every write path takes its numbers from the entry. It
+became true in slice 28.
 
 Slice 1 — the player (done):
 - [x] `layout.Entry` gains `Reads`, `Writes` and `Player` (name and inventory
@@ -1044,18 +1045,37 @@ Finding from slice 27:
   Lang's statics are right. Not checked for a class in another assembly, or for
   primitive statics, which phase 0 measured to be in a block of their own.
 
+Slice 28 — the `Writes` flip (done headless; the window is the maintainer's to watch):
+- [x] The CLR entry's `Writes` is true. All fifteen cheats and every other write
+      feature a command asks for were already in its `WriteFeatures`, so no
+      command gains a write it did not have. What changes is what asked `Writes`
+      itself: `build-check` no longer reports `read_only` and calls the build
+      known and recognised (the netfx anchors are verified against it);
+      `accept-build` records a decision, with the runtime; `patch status`
+      allocates the arena early, as it does on Linux, which is a write the
+      window's poll now makes on Windows; and the window stops treating every
+      cheat as off.
+- [x] The per-feature mechanism stays (`WriteFeatures`, `RequireWritable`,
+      `RequireAnyWrite`, the window's read-only branch): it is how the next
+      runtime will be ported. The CLR entry keeps its list as the record of what
+      was ported. The tests of the mechanism now run against an entry derived
+      from the CLR one with `Writes` false and one write named (`layout.Derive`;
+      `stillPorting` in the service tests), not against the shipped entry.
+- [x] New: `TestDotNetFrameworkIsWrittenUnder` -- the every-write gate passes,
+      the report is not read-only, a decision is recorded with the runtime and
+      then recognised. `TestWritesArePerFeature` also checks that a named write
+      is refused under an entry that is not enabled.
+- [x] Live on Windows (2026-10-12), with the rebuilt CLI: `build-check` reports
+      `netfx-4.8.9345.0 (supported)`, `recognised: true  known-good: true`, no
+      decision, all fifteen cheats resolving; `patch status` lists the fifteen,
+      none on; `status` still reads the character. The window was started from
+      the same tree against the running game and stayed up with the game
+      responding. What the window shows, and every write made from it, is not
+      checked here.
+
 Next slices:
-- [ ] The full `Writes` flip. No command sits behind the every-write gate any
-      more (`game(guard)` is gone from the CLI; `patch status` still asks
-      `RequireCompatible` before allocating the arena early). Flipping it was
-      tried and put back: seven tests in `layout` and `service` pin "the CLR
-      entry is read-only", and they are the only tests of the per-feature
-      mechanism, which no entry would use afterwards -- so the flip is also a
-      decision about whether that mechanism stays, and with what entry to test
-      it. It also turns the window on for Windows: `build-check` stops reporting
-      `read_only`, `accept-build` records decisions, and `gui/buildgate.go` stops
-      treating every cheat as off (read from the code, not watched in the
-      window). To be done with the maintainer watching the window.
+- [ ] The maintainer's watch of the window on Windows: that no build question is
+      asked, that the cheats are usable, and a cheat toggled from it.
 - [ ] The live writes not yet watched on Windows: a freeze, a vein mined through
       `extract-tick`, the debug `write`.
 
