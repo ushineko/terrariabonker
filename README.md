@@ -1,12 +1,13 @@
 # terrariabonker
 
 A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8 and
-1.4.5.7** (Steam appid 105600), running under Linux/Proton (wine-mono).
-It finds the player in memory with no hardcoded address, then reads, edits and
-freezes player state and inventory items by reading and writing
-`/proc/<pid>/mem`. A GUI control panel drives the same operations as the CLI.
+1.4.5.7** (Steam appid 105600), on **Linux** (the game running under Proton)
+and on **Windows**. It finds the player in memory with no hardcoded address,
+then reads, edits and freezes player state and inventory items by reading and
+writing the running game's memory. A GUI control panel drives the same
+operations as the CLI.
 
-Discovery, value edits and the *code patches* are all Go, over `/proc`.
+Discovery, value edits and the *code patches* are all Go.
 External debuggers and disassemblers such as Cheat Engine are used off to the
 side in order to re-derive patch offsets after a game update. See
 [Two kinds of cheat](#two-kinds-of-cheat-value-edits-and-code-patches).
@@ -259,6 +260,19 @@ hooks belongs to the ReGrind authors.
 
 ## Requirements
 
+The same Terraria from Steam on both platforms; what differs is what runs it.
+
+### Windows
+
+- Terraria started normally from Steam.
+- Developed and tested on Windows 11 with **.NET Framework 4.8.1**, which Windows 11
+  includes. Under another .NET Framework version the tool behaves as it does for a game
+  version it does not know: it checks every cheat first and tells you what still fits (see
+  [Version safety](#version-safety)).
+- No administrator rights, to install or to run.
+
+### Linux
+
 - Terraria running under **Proton**. Force it in Steam under Properties → Compatibility.
   The cheats are derived against Proton's **wine-mono** runtime and require it.
 - A Go toolchain (1.26 or newer) to build. The CLI needs nothing else; the
@@ -276,6 +290,29 @@ hooks belongs to the ReGrind authors.
   That grants only this program. The CLI works without it, prompting for a password.
 
 ## Installation
+
+### Windows
+
+Download `terrariabonker-<version>-windows-amd64-installer.exe` from the
+[latest release](https://github.com/ushineko/terrariabonker/releases/latest) and run it.
+
+It installs for your user only and asks for no administrator: both programs, a Start Menu
+entry, and `terrariabonker` and `terrariabonker-gui` by name in any terminal opened
+afterwards. The installer is not signed, so Windows SmartScreen may ask before it runs.
+
+- **Upgrading** — close the panel, then run a newer installer. It replaces the installed
+  version and keeps your saved cheats and item edits.
+- **Removing** — Settings → Apps → TerrariaBonker → Uninstall. Your saved cheats and item
+  edits stay, in `%APPDATA%\terrariabonker`; the uninstaller says so.
+- **From a terminal or a script** — the release also carries
+  `terrariabonker-<version>-windows-amd64-cli-installer.exe`, which asks its questions in the
+  terminal. `--yes` accepts the defaults and `--dry-run` lists every change without making
+  one.
+
+To build the installers yourself you need Go (1.26 or newer), `make` and a mingw `gcc`
+(MSYS2 provides both): `make installer` leaves them in `dist\`.
+
+### Linux
 
 ```bash
 git clone https://github.com/ushineko/terrariabonker
@@ -339,8 +376,9 @@ loose on a world you care about.
 
 ## Usage (GUI)
 
-Launch from the application menu, or run `terrariabonker-gui`. It is a separate binary
-and stays unprivileged: it reaches game memory only by running the CLI under sudo.
+Launch from the application menu or the Start Menu, or run `terrariabonker-gui`. It is a
+separate program that does its work by running the CLI installed beside it. On Linux it
+stays unprivileged and runs the CLI under sudo.
 
 - **Auto-restore** — the panel remembers the cheats you want and your item edits, and
   re-applies them whenever a fresh game appears. This is what makes item stat edits survive
@@ -370,7 +408,7 @@ position is remembered too.
 ## Version safety
 
 Developed and tested on **1.4.5.8**, and on **1.4.5.7** before it — except the ore
-extractor and multiple pylons, which are 1.4.5.8 only.
+extractor and multiple pylons, which are 1.4.5.8 only. On Windows, 1.4.5.8 only.
 
 A cheat is tied to the exact version it was built against, so the tool checks what you are
 running:
@@ -404,8 +442,8 @@ update, see [docs/discovery.md](docs/discovery.md).
 
 ```
 terrariabonker/
-├── cmd/terrariabonker/         the command line (runs as root)
-├── cmd/terrariabonker-gui/     the control panel (unprivileged; shells out)
+├── cmd/terrariabonker/         the command line (runs as root on Linux)
+├── cmd/terrariabonker-gui/     the control panel (unprivileged; runs the command line)
 ├── cmd/monofields/             dumps a mono class's field offsets
 ├── cmd/prefixstats/            regenerates the modifier table from the game's IL
 ├── internal/
@@ -434,7 +472,8 @@ terrariabonker/
 ├── tools/                      helpers: screenshots, the KDE window rule
 ├── docs/discovery.md           how the offsets were found, and how to rebuild them
 ├── ce/                         notes from the reverse-engineering work
-└── specs/                      feature specs
+├── specs/                      feature specs
+└── fynstall.yaml               what the installers are built from
 ```
 
 Tests live beside the code they cover, as `_test.go` files.
@@ -447,7 +486,7 @@ make lint     # the pinned golangci-lint
 ```
 
 Tests run against a fake in-memory process, so they need neither the game nor root, and
-the GUI's tests run headless through the Fyne test driver.
+the GUI's tests run headless through the Fyne test driver. They pass on Linux and on Windows.
 
 ## Safety
 

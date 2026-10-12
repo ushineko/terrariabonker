@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,8 +49,9 @@ import (
 // compositors match to the desktop entry of the same basename.
 const appID = "io.ushineko.terrariabonker"
 
-// cliName is the CLI this window drives. install.sh puts it on PATH as a symlink
-// in ~/.local/bin, and that is the one entry point both front ends share.
+// cliName is the CLI this window drives. Every way of installing puts it in the
+// same directory as the window and on PATH, and that is the one entry point both
+// front ends share.
 const cliName = "terrariabonker"
 
 // ui holds the window's state.
@@ -301,18 +303,42 @@ func (u *ui) onCreate(s *shell.Shell, o Options) {
 func (u *ui) resolve(o Options) {
 	u.cli = o.CLI
 	if u.cli == "" {
-		if p, err := exec.LookPath(cliName); err == nil {
-			u.cli = p
-		}
+		u.cli = findCLI(os.Executable, exec.LookPath)
 	}
 	u.sudoOK = privilegeReady()
+}
+
+/*
+findCLI is the CLI this window drives when --cli names none: the one in the
+window's own directory, and only without one there, the one on PATH.
+
+Beside the window first, because the two are built and installed as a pair and
+PATH can hold a CLI from somewhere else. A window started from the build tree
+once drove the installed CLI of the release before (spec 052, slice 28), and a
+machine with both a package and a per-user install has two CLIs on PATH and one
+window from each. It also covers a window started before PATH carries the
+install, as from an installer's last page on Windows.
+
+exec.LookPath is asked about the neighbour too, since it already knows what an
+executable is called on each platform.
+*/
+func findCLI(self func() (string, error), look func(string) (string, error)) string {
+	if exe, err := self(); err == nil {
+		if p, err := look(filepath.Join(filepath.Dir(exe), cliName)); err == nil {
+			return p
+		}
+	}
+	if p, err := look(cliName); err == nil {
+		return p
+	}
+	return ""
 }
 
 // start brings up the privileged worker and the first status read.
 func (u *ui) start() {
 	if u.cli == "" {
 		u.statusMsg = "not installed"
-		u.sh.Flash(cliName+" is not on PATH. Run install.sh, or pass --cli.", fd.StatusBad)
+		u.sh.Flash(cliName+" is not beside this program or on PATH. Install it again, or pass --cli.", fd.StatusBad)
 		return
 	}
 	if !u.sudoOK {

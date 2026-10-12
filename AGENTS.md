@@ -13,11 +13,13 @@ external contributors — see `CONTRIBUTING.md`.
 
 ## What this project is
 
-A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8** (the Windows
-build under Proton/wine-mono). It locates the player in `/proc/<pid>/mem` with no hardcoded
-addresses, then reads and edits player state, inventory, and applies code-patch cheats.
-Everything is Go: a CLI that runs as root and a control panel that does not, over one
-common layer (spec 051). Cheat sites are derived with Cheat Engine's mono dissector (see
+A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8**: the Windows
+build, run by wine-mono under Proton on Linux and by .NET Framework on Windows (spec 052).
+It locates the player in the game's memory (`/proc/<pid>/mem` on Linux, the process API on
+Windows) with no hardcoded addresses, then reads and edits player state, inventory, and
+applies code-patch cheats. Everything is Go: a CLI and a control panel over one common
+layer (spec 051). On Linux the CLI runs as root and the panel does not; on Windows neither
+needs elevation, because a process of the same user can open the game. Cheat sites are derived with Cheat Engine's mono dissector (see
 `ce/README.md`); nothing needs CE at runtime.
 
 Some code-patch cheats are ported from the FearLess Forums "TerrariaReGrind" Cheat Engine
@@ -33,12 +35,18 @@ reverse-engineering credit for those hooks belongs to the ReGrind authors.
   `version`). All game logic lives here so the CLI and GUI cannot drift.
 - **CLI** — `internal/cli`, behind `cmd/terrariabonker`: a thin cobra front end; `--json` is
   the contract the GUI consumes. Memory operations self-elevate via `sudo`
-  (`proc.Elevate`).
+  (`proc.Elevate`); on Windows that is a no-op.
 - **GUI** — `internal/gui`, behind `cmd/terrariabonker-gui`, on fynedesygn (spec 050): runs
   **unprivileged** (a window must not run as root) and reaches the common layer by shelling
   each action to the CLI under sudo, either through a long-lived `serve` worker or a
   one-shot run. `internal/gui/client` builds the argv and parses the JSON. Do not add
-  in-process root memory access to the GUI.
+  in-process root memory access to the GUI. On Windows there is no sudo and the same rule
+  holds: the GUI reaches memory only through the CLI. It drives the CLI in its own
+  directory, and PATH's only without one there (`findCLI`), so two installs on one machine
+  cannot cross.
+- **Where files live is `internal/paths`**: `~/.config/terrariabonker` and
+  `~/.cache/terrariabonker` on Linux, `%APPDATA%\terrariabonker` and
+  `%LOCALAPPDATA%\terrariabonker` on Windows. The paths below are the Linux spellings.
 - **State** — per-pid live patch state (`~/.config/terrariabonker/patches.json`) is
   concurrency-safe (flock + atomic write). The pid-independent desired-config profile
   (`~/.config/terrariabonker/profile.json`) drives auto-restore. Sprite icons cache under
@@ -273,12 +281,18 @@ deliberately: it is two group boxes of buttons and shows nothing a reader needs.
   (maintainer confirms the number). Semver-ish: features → minor, fixes → patch.
 - Release tags are annotated, unscoped `vX.Y.Z`, pushed after the version-bump commit lands on
   `main` (`git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`). The build workflow refuses a
-  tag that does not match `.tag`, then publishes the `make release` tarball.
+  tag that does not match `.tag`, then publishes the `make release` tarball and the Windows
+  installers.
+- **The installers are built by fynstall from `fynstall.yaml`** (`make installer`, spec
+  053). Its `app.version` is `.tag` without the `v`; bump both in the same commit — a test
+  fails when they differ. The fynstall version is pinned in the `Makefile`, as the linter's
+  is. The manifest is one file for both platforms: a key means the same on each, so check a
+  change to it on both.
 
 ## Running
 
 - CLI: `terrariabonker <command>`, or `go run ./cmd/terrariabonker <command>` (memory
-  commands self-elevate via sudo). The GUI needs **passwordless sudo** for its memory actions
+  commands self-elevate via sudo on Linux). There the GUI needs **passwordless sudo** for its memory actions
   (it can't answer a prompt in a subprocess); without it the GUI degrades with a warning and
   the recipe browser/icons still work. See the README "Requirements".
 - Before running a background/GUI instance for debugging, kill stale ones so logs are
@@ -291,3 +305,6 @@ deliberately: it is two group boxes of buttons and shows nothing a reader needs.
   ```
 
   The same trap applies to `pgrep -f` when hunting for the game or a worker.
+- On Windows a running program's file cannot be replaced: `make build` fails while the
+  panel or its worker runs from `bin\`, and so does an installer over a running install.
+  Close them first, or build in a copy of the tree.

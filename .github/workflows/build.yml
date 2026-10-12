@@ -1,8 +1,11 @@
 name: Build
 
-# Linux only, deliberately: the cheats are x86 stubs written into a Windows
-# Terraria running under Proton, and the memory side is /proc and ptrace. There
-# is nothing to build for macOS or Windows.
+# Linux and Windows: the game is the same Windows build on both, run by
+# wine-mono under Proton on one and by .NET Framework on the other (spec 052).
+# There is nothing to build for macOS.
+#
+# A release carries the Linux tarball and the Windows installers, which fynstall
+# builds from fynstall.yaml (spec 053).
 #
 # The version is .tag, which the Makefile stamps into internal/buildinfo.
 
@@ -66,9 +69,48 @@ jobs:
         name: linux-amd64
         path: dist/*
 
+  windows:
+    name: Test + installers (Windows)
+    runs-on: windows-latest
+    # Git's bash, for the Makefile's recipes. The runner image carries make and
+    # a mingw gcc, which the race detector and the window's cgo both need.
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        check-latest: true
+    - name: Test
+      run: make test
+    - name: Build the installers
+      # Both binaries, then the installer with the wizard and the
+      # command-line-only one, with the fynstall the Makefile pins.
+      run: make installer
+    - name: Smoke-test the CLI and the installers
+      # Run, not only built: each says the version it was stamped with, and the
+      # command-line installer lists its whole plan and changes nothing.
+      run: |
+        WANT=$(tr -d 'v[:space:]' < .tag)
+        GOT=$(./bin/terrariabonker.exe --version | awk '{print $3}')
+        [ "$WANT" = "$GOT" ] || { echo "::error::the CLI reports $GOT, .tag says $WANT"; exit 1; }
+        ./bin/terrariabonker.exe --help > /dev/null
+        "dist/terrariabonker-$WANT-windows-amd64-cli-installer.exe" --version | grep -F "TerrariaBonker $WANT installer"
+        "dist/terrariabonker-$WANT-windows-amd64-cli-installer.exe" --dry-run --yes
+        "dist/terrariabonker-$WANT-windows-amd64-installer.exe" --version | grep -F "TerrariaBonker $WANT installer"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-amd64
+        path: |
+          dist/*-windows-amd64-installer.exe
+          dist/*-windows-amd64-cli-installer.exe
+        if-no-files-found: error
+
   release:
     name: Create Release
-    needs: [test, build]
+    needs: [test, build, windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -84,6 +126,13 @@ jobs:
       with:
         path: dist
         merge-multiple: true
+    - name: One checksum file for everything attached
+      # The tarball's job wrote one for the tarball alone.
+      run: |
+        cd dist
+        rm -f SHA256SUMS
+        sha256sum * > SHA256SUMS
+        cat SHA256SUMS
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:

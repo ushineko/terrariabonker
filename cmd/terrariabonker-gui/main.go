@@ -8,7 +8,7 @@ window must not run as root. See AGENTS.md's architecture rule and spec 050.
 	terrariabonker-gui                     open on the first section
 	terrariabonker-gui --section Inventory open on one directly
 	terrariabonker-gui --scheme "Breeze Dark"
-	terrariabonker-gui --cli /path/to/terrariabonker  drive a CLI that is not on PATH
+	terrariabonker-gui --cli /path/to/terrariabonker  drive another CLI than the one beside it
 	terrariabonker-gui --pprof 127.0.0.1:6060         serve a profile while debugging
 */
 package main
@@ -36,7 +36,7 @@ func main() {
 	var (
 		section = flag.String("section", "", "open on this section: "+strings.Join(gui.SectionNames(), ", "))
 		scheme  = flag.String("scheme", "", "colour scheme for this run, not saved: "+strings.Join(theme.SchemeNames(), ", "))
-		cli     = flag.String("cli", "", "path to the terrariabonker CLI (default: found on PATH)")
+		cli     = flag.String("cli", "", "path to the terrariabonker CLI (default: the one beside this program, else on PATH)")
 		showVer = flag.Bool("version", false, "print the version and exit")
 		pprofAt = flag.String("pprof", "", "serve net/http/pprof on this address (debugging)")
 	)

@@ -25,7 +25,7 @@ conventions are enforced on a PR.
   approaches, no framework names as features — see `AGENTS.md` "Writing style". Depth
   belongs in `specs/` and `docs/`.
 - **Tests must pass headless** (`make test` against the synthetic memory image — no game,
-  no root). Run `make lint`.
+  no root), on Linux and on Windows. Run `make lint`.
 - **Security review is mandatory** on every code change (no hardcoded secrets,
   explicit-argv subprocess, no new network calls). Run `govulncheck ./...` when
   dependencies change.

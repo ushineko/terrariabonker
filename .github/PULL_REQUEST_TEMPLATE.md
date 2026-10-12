@@ -43,7 +43,7 @@ Required for any change to an offset, a signature, a cheat hook, or the memory w
 
 | | |
 | --- | --- |
-| Terraria build and Proton / wine-mono version | |
+| Platform, Terraria build, and Proton / wine-mono or .NET Framework version | |
 | OS / distribution and kernel | |
 | Relevant software versions | |
 | terrariabonker version or commit | |

@@ -81,7 +81,8 @@ from a real running game.
 
 Paste, at minimum:
 
-- the Terraria build and the Proton / wine-mono version;
+- the platform, the Terraria build, and the Proton / wine-mono version or, on
+  Windows, the .NET Framework version;
 - the `terrariabonker` command you ran and its real output, including the
   anchor or signature resolution step;
 - **confirmation the effect was observed in game**, not merely that a write
@@ -89,7 +90,8 @@ Paste, at minimum:
 - for a new or changed signature: evidence it resolved, and evidence it fails
   safe (no write) when the anchor is not found;
 - for the GUI: confirmation the unprivileged GUI reached the effect through the
-  CLI under sudo, since the GUI must never gain in-process root memory access.
+  CLI (under sudo on Linux), since the GUI must never gain in-process memory
+  access.
 
 A reading against the synthetic image (`internal/memtest`) is a test, not an
 e2e reading. Single-player only.
@@ -104,9 +106,9 @@ contributor's future PRs declined on sight.
 
 ## Scope
 
-A live-memory trainer and item editor for Terraria on Linux (the Windows build
-under Proton/wine-mono). It edits your own single-player game's memory over a
-sudo `/proc` path and ships no game assets.
+A live-memory trainer and item editor for Terraria: the Windows build, under
+Proton/wine-mono on Linux and under .NET Framework on Windows. It edits your
+own single-player game's memory and ships no game assets.
 
 In scope: single-player quality-of-life editing and cheats. Out of scope, and
 will not be merged: anti-cheat evasion, multiplayer or server exploitation, and
@@ -116,8 +118,11 @@ Architecture constraints that are not negotiable in a PR:
 
 - Game logic lives in the common layer (`internal/service` and what it uses) so
   the CLI and the GUI stay in step.
-- The GUI runs unprivileged and shells to the CLI under sudo. Do not add
-  in-process root memory access to the GUI.
+- The GUI runs unprivileged and shells to the CLI (under sudo on Linux). Do not
+  add in-process memory access to the GUI.
+- The two runtimes compile the game into different layouts. A number belongs to
+  one runtime's entry (`internal/layout`), and shared code does not branch on
+  the runtime. A change to one entry needs a reading on that platform.
 - Offsets are build-specific. Locate by signature/AOB, never hardcode a JIT
   address, and fail safe — no write — when an anchor is not found.
 - Keep the FearLess "TerrariaReGrind" attribution on any cheat hook derived
@@ -140,11 +145,15 @@ make test         # headless: no game, no root needed
 make lint         # the pinned golangci-lint, downloaded on first use
 make build        # CLI
 make build-gui    # control panel (needs CGO, OpenGL and X11/Wayland headers)
+make installer    # both, and the installers for this platform, into dist/
 ```
+
+On Windows the same targets run under MSYS2, which provides `make` and the mingw
+`gcc` the panel and the race detector need.
 
 Go 1.26 or newer. The full test suite runs against a synthetic in-memory image
 (`internal/memtest`), so you can develop and test with no Terraria installed
-and no root. Runtime memory operations self-elevate via `sudo`; the GUI needs
+and no root. On Linux, runtime memory operations self-elevate via `sudo`; the GUI needs
 passwordless sudo for its memory actions (see the README "Requirements"). That
 is only needed for live testing, not for the tests.
 

@@ -25,12 +25,31 @@ FYNE_TAGS?=migrated_fynedo
 # console window that sits behind the Fyne window for its whole life. -H
 # windowsgui sets the PE subsystem to GUI; it is a PE-only flag, so it is added
 # only for a Windows build (it is not a valid header type for an ELF link).
+#
+# EXE is the suffix a program has there. `go build -o` writes exactly the name it
+# is given, so without it a Windows build leaves bin/terrariabonker, which
+# Windows will not run and the installer's manifest does not name.
 GUI_LDFLAGS=$(LDFLAGS)
+EXE=
+FYNSTALL_FLAGS?=--with-cli-only
 ifeq ($(shell go env GOOS),windows)
 GUI_LDFLAGS+= -H windowsgui
+EXE=.exe
+# --windowed: the wizard's installer and the uninstaller never show a console,
+# on any Windows. The command-line installer beside it is the one for a terminal.
+FYNSTALL_FLAGS+= --windowed
 endif
 
-BINDIR=$(shell go env GOPATH)
+# Forward slashes: on Windows GOPATH is C:\Users\..., and a recipe's shell reads
+# a backslash as an escape.
+BINDIR=$(subst \,/,$(shell go env GOPATH))
+
+# The installer is built by fynstall (github.com/ushineko/fynstall) from
+# fynstall.yaml, and an installer is pinned to the fynstall that built it. The
+# pin lives here, as the linter's does: fynstall is a build tool, not a
+# dependency of either binary, so go.mod does not name it.
+FYNSTALL_VERSION?=v0.2.2
+FYNSTALL?=$(BINDIR)/bin/fynstall-$(FYNSTALL_VERSION)$(EXE)
 LINT_NAME?=golangci-lint
 LINT_VERSION?=v2.12.2
 LINT_PROGRAM=$(LINT_NAME)-$(LINT_VERSION)
@@ -82,12 +101,12 @@ coverage: ## Run the tests and open a coverage report
 .PHONY: build
 build: ## Build the CLI (no CGO: it needs no display)
 	@mkdir -p bin
-	CGO_ENABLED=0 go build -ldflags='$(LDFLAGS)' -trimpath -o bin/terrariabonker ./cmd/terrariabonker
+	CGO_ENABLED=0 go build -ldflags='$(LDFLAGS)' -trimpath -o bin/terrariabonker$(EXE) ./cmd/terrariabonker
 
 .PHONY: build-gui
 build-gui: ## Build the window (needs CGO, OpenGL and X11/Wayland headers)
 	@mkdir -p bin
-	CGO_ENABLED=1 go build -tags $(FYNE_TAGS) -ldflags='$(GUI_LDFLAGS)' -trimpath -o bin/terrariabonker-gui ./cmd/terrariabonker-gui
+	CGO_ENABLED=1 go build -tags $(FYNE_TAGS) -ldflags='$(GUI_LDFLAGS)' -trimpath -o bin/terrariabonker-gui$(EXE) ./cmd/terrariabonker-gui
 
 .PHONY: release
 release: build build-gui ## Package both binaries into dist/ with a checksum file
@@ -102,6 +121,25 @@ release: build build-gui ## Package both binaries into dist/ with a checksum fil
 	tar -C "$$stage" -czf "dist/terrariabonker-$(VERSION)-linux-amd64.tar.gz" \
 		"terrariabonker-$(VERSION)-linux-amd64"; \
 	cd dist && (sha256sum *.tar.gz 2>/dev/null || shasum -a 256 *.tar.gz) > SHA256SUMS
+	@ls -l dist/
+
+.PHONY: install-fynstall
+install-fynstall: $(FYNSTALL) ## Install the pinned installer builder
+
+$(FYNSTALL):
+	@echo "Setting up fynstall $(FYNSTALL_VERSION) ..."
+	@set -e; \
+	mkdir -p bin "$(BINDIR)/bin"; \
+	rm -rf bin/.fynstall; \
+	GOBIN="$(CURDIR)/bin/.fynstall" GOFLAGS= go install github.com/ushineko/fynstall/cmd/fynstall@$(FYNSTALL_VERSION); \
+	mv -v "bin/.fynstall/fynstall$(EXE)" "$(FYNSTALL)"; \
+	rmdir bin/.fynstall
+
+.PHONY: installer
+installer: build build-gui install-fynstall ## Build the installers for this platform into dist/
+	@mkdir -p dist
+	$(FYNSTALL) validate
+	$(FYNSTALL) build $(FYNSTALL_FLAGS)
 	@ls -l dist/
 
 .PHONY: install
