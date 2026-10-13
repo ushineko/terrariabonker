@@ -50,6 +50,8 @@ redrawn only when its slot changed.
   and spawn distance; a boss confirmation; a modifier dot; "writes nothing to disk"). A
   table of supported environments is added. The GUI section follows the window's real
   sections.
+- The About dialog in the window: names both platforms, says where settings are kept, and
+  no longer describes how cheat sites are derived. The FearLess credit is unchanged.
 - `docs/discovery.md`: names the Go tools and `internal/layout` in place of retired Python
   files.
 - `ce/README.md`, `docs/item-fields.md`: marked as dated records, with the Python tool names
@@ -69,6 +71,7 @@ redrawn only when its slot changed.
 - [x] The dialog has no sell-list control.
 - [x] A cell's border follows the sell list when the list changes.
 - [x] The README states the supported game versions and operating systems.
+- [x] The About dialog names Linux under Proton and Windows, and keeps the FearLess credit.
 - [x] `make test` and `make lint` pass on Windows.
 - [ ] `make test` and `make lint` on Linux — not run; CI runs them on push.
 - [ ] The menu and the editor driven against the running game — not done.

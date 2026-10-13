@@ -56,6 +56,18 @@ func TestAboutNamesTheRunningGame(t *testing.T) {
 	require.Equal(t, "Terraria an unreadable build", u.aboutBuild())
 }
 
+// About says where the program runs and keeps the credit for the ported patches.
+func TestAboutNamesBothPlatformsAndTheCredit(t *testing.T) {
+	u := testUI(t)
+	u.version = "9.9.9"
+	said := strings.Join(fynetest.Texts(u.aboutBody()), " ")
+	require.Contains(t, said, "9.9.9")
+	require.Contains(t, said, "Windows")
+	require.Contains(t, said, "Proton")
+	require.Contains(t, said, "TerrariaReGrind")
+	require.Contains(t, said, "no game found")
+}
+
 /*
 The output pane is divided by a bar the user can drag.
 

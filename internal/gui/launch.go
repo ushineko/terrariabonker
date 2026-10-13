@@ -80,20 +80,26 @@ const (
 // showAbout says what this is and who is owed credit for parts of it.
 func (u *ui) showAbout() {
 	dialogs.ShowDetail(u.sh.Window, "About "+cliName,
-		container.NewVScroll(container.NewVBox(
-			widgets.Heading(cliName+" "+widgets.OrNone(u.version, "dev"),
-				"A live-memory trainer and item editor for Terraria under Proton."),
-			widgets.Wrapped("It finds the player in the running game and edits what it "+
-				"finds. No addresses are hardcoded, and nothing is written to the save."),
-			widgets.DimWrapped("Cheat sites are derived with Cheat Engine's mono "+
-				"dissector. Nothing needs Cheat Engine at runtime."),
-			widgets.DimWrapped("Several code patches -- pickup range, spawn rate, the "+
-				"drop-chance floor and map-ping teleport -- are ported from the FearLess "+
-				"Forums \"TerrariaReGrind\" Cheat Engine table. The reverse-engineering "+
-				"credit for those hooks belongs to its authors. The sites used here were "+
-				"re-derived against this game build."),
-			widgets.PlainRow("Running", u.aboutBuild()),
-		)), aboutWidth, aboutHeight)
+		container.NewVScroll(u.aboutBody()), aboutWidth, aboutHeight)
+}
+
+// aboutBody is what the About dialog says.
+func (u *ui) aboutBody() fyne.CanvasObject {
+	return container.NewVBox(
+		widgets.Heading(cliName+" "+widgets.OrNone(u.version, "dev"),
+			"A live-memory trainer and item editor for Terraria, on Linux under "+
+				"Proton and on Windows."),
+		widgets.Wrapped("It finds the player in the running single-player game and "+
+			"edits what it finds. It never opens your character or world files. The "+
+			"cheats you leave on, your item edits and the sell list are kept in its "+
+			"own settings folder."),
+		widgets.DimWrapped("Several code patches -- pickup range, spawn rate, the "+
+			"drop-chance floor and map-ping teleport -- are ported from the FearLess "+
+			"Forums \"TerrariaReGrind\" Cheat Engine table. The reverse-engineering "+
+			"credit for those hooks belongs to its authors. The sites used here were "+
+			"re-derived against this game build."),
+		widgets.PlainRow("Running", u.aboutBuild()),
+	)
 }
 
 // aboutBuild is the game this window is looking at, or what is missing.
