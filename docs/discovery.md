@@ -1,9 +1,16 @@
 # How the offsets were found, and how to re-derive them
 
-Everything the trainer knows about Terraria is a handful of memory offsets in
-`terrariabonker/locate.py` and `terrariabonker/player.py`. They were derived
-live, from scratch, with no pre-existing address list. This document records the
-method so the offsets can be rebuilt after a game update moves them.
+Everything the trainer knows about Terraria is a table of memory offsets in
+`internal/layout`. They were derived live, from scratch, with no pre-existing
+address list. This document records the method so the offsets can be rebuilt
+after a game update moves them.
+
+The first half is a record of how the Linux (Proton, wine-mono) offsets were first
+found, in 2026-08, with a Python prototype that has since been replaced by the Go
+programs in `cmd/`. The method stands; where a step names a tool, the current one
+is given in [Re-deriving after an update](#re-deriving-after-an-update). Windows
+runs the same game on .NET Framework, where every number is different: see the
+last section.
 
 ## Contents
 
@@ -142,23 +149,26 @@ offset is in doubt or after a game update.
 
 ## Re-deriving after an update
 
-**Start with `tools/monofields.py --verify`.** It reads field offsets by name out of mono's
-own metadata and checks every constant this project holds, exiting non-zero on any
-disagreement. Most of the methods described below exist because that tool did not, and they
-should now be a fallback for what the metadata cannot answer (behaviour, AOB anchors, code
-layout) rather than the first resort.
+**Start by asking the runtime.** On Linux, `sudo go run ./cmd/monofields --verify` reads
+field offsets by name out of mono's own metadata and checks every constant this project
+holds, exiting non-zero on any disagreement. On Windows, `go run ./cmd/clrfields Terraria.Item` reads the
+same from the .NET Framework runtime. Most of the methods described above exist because
+those tools did not, and they should now be a fallback for what the metadata cannot answer
+(behaviour, AOB anchors, code layout) rather than the first resort.
 
-`version.py` gates the trainer on the exact build (`1.4.5.7`, Steam buildid
-`24825745`). If the game updates:
+`internal/version` reads the exact build and the runtime under it, and `internal/layout`
+holds one entry per supported pair (`entry_mono.go`, `entry_netfx.go`), each listing the
+builds its numbers fit. If the game updates:
 
-1. Run `terrariabonker version` to see the detected build.
-2. If the layout still matches, `terrariabonker status` finds the player and the
-   offsets are still good; bump `KNOWN_VERSION` / `KNOWN_BUILDID`.
-3. If `status` finds nothing, the offsets moved. Repeat "Finding health" above
-   with the scratch scanner, re-dump the block to confirm the six-int layout is
-   unchanged (it may not be), and re-measure the name offset by dereferencing
-   pointer fields for the character name. Update the offsets in `locate.py` and
-   `player.py`.
+1. Run `terrariabonker version` to see the detected build, and `terrariabonker
+   build-check` to test every cheat against it without writing anything.
+2. If everything still fits, add the build to `internal/layout/builds.go` and to the
+   `Builds` and `Verified` lists of the entry it was checked under, once each cheat has
+   been seen working.
+3. If `status` finds nothing, the offsets moved. Re-read them with the tool for that
+   runtime and update the entry; fall back to "Finding health" above only for what the
+   metadata cannot give. A version that differs in a few places is `layout.Derive`d from
+   the one it differs from (see `AGENTS.md`).
 
 The locator fails safe: on a shifted layout it matches nothing rather than
 writing to a wrong address, which is why the version gate is a warning aid rather

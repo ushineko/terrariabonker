@@ -2,7 +2,6 @@ package gui
 
 import (
 	"fmt"
-	"sort"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -519,13 +518,7 @@ func (u *ui) loadSellList() {
 		if !ok {
 			return
 		}
-		sort.Ints(list)
-		fyne.Do(func() {
-			u.fx.whitelist = list
-			if u.fx.sellList != nil {
-				u.fx.sellList.Refresh()
-			}
-		})
+		fyne.Do(func() { u.takeSellList(list) })
 	}()
 }
 

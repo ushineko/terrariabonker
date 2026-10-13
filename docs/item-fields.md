@@ -1,5 +1,10 @@
 # What an item actually knows about itself
 
+> **A dated recon record.** The offsets are the Linux (Proton, wine-mono) ones; Windows
+> has its own, in `docs/clr-fields-1.4.5.8.txt`. The Python tools it names have been
+> replaced: `tools/monofields.py` is `cmd/monofields`, and `content.py` is
+> `internal/content`. `tools/projectile_probe.py` was retired with no successor.
+
 Recon, 2026-08-25, on Terraria 1.4.5.8+24893155. The question: are per-item behaviours —
 the Book of Skulls passing through blocks, Hermes Boots making you run faster — visible as
 data the trainer can read and edit?

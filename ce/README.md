@@ -1,5 +1,12 @@
 # CE-table spike — code-patch cheats for the frame-reset fields
 
+> **A record from 2026-08, kept as written.** It describes the Linux (Proton, wine-mono)
+> spike on Terraria 1.4.5.7 and names the Python prototype of the time (`patcher.py`,
+> `recipes.py`, a PyQt panel). The trainer is Go now: the cheats live in `internal/patch`
+> and `internal/layout`, the panel in `internal/gui`, and nothing uses Cheat Engine at
+> run time. The `poc_*.lua` scripts here are still how a mono anchor is re-derived after a
+> game update. Windows (.NET Framework) sites were found with `cmd/winrecon` instead.
+
 Some Terraria cheats can't be done by an external `/proc` value-writer: the game
 recomputes certain player fields every frame in `Player.ResetEffects()` and reads
 them within that same frame, so any external write loses the race (the same reason

@@ -1,19 +1,15 @@
 # terrariabonker
 
-A from-scratch live-memory trainer and item editor for **Terraria 1.4.5.8 and
-1.4.5.7** (Steam appid 105600), on **Linux** (the game running under Proton)
-and on **Windows**. It finds the player in memory with no hardcoded address,
-then reads, edits and freezes player state and inventory items by reading and
-writing the running game's memory. A GUI control panel drives the same
-operations as the CLI.
+A live-memory trainer and item editor for **Terraria 1.4.5.8** (Steam appid
+105600), on **Linux** (the game running under Proton) and on **Windows**. It
+finds your character in the running game, then reads, edits and holds player
+stats and inventory items, and switches on cheats that change how the game
+behaves. A command line and a GUI control panel do the same things; see
+[Requirements](#requirements) for exactly what is supported.
 
-Discovery, value edits and the *code patches* are all Go.
-External debuggers and disassemblers such as Cheat Engine are used off to the
-side in order to re-derive patch offsets after a game update. See
-[Two kinds of cheat](#two-kinds-of-cheat-value-edits-and-code-patches).
-
-*This edits your own single-player game in memory. It writes nothing to disk and
-holds no state.*
+*This edits your own single-player game while it runs. It never opens your
+character or world files. The cheats you leave on, your item edits and the sell
+list are remembered in the trainer's own settings folder.*
 
 ![The Effects section: godmode and infinite mana unticked; a Fishing group with "Rod and bait, and bait that does not run out" ticked, bait kept at 30 and rod power 255, and "Reel in for me" and "and cast" both ticked; Fishing potion effects with Fishing power on and Sonar and Crates off; passive potions on with a minimum stack of 1; and auto-sell on, over a sell list of 156 items. The log below reads "auto-restore: 14 cheats applied"](assets/screenshot-effects.png)
 
@@ -50,19 +46,19 @@ holds no state.*
 **Items**
 
 - **Grid item editor** — an inventory grid mirroring the in-game layout. Click a slot to
-  edit its item, stack, damage, defense, modifier, auto-reuse, use speed, pickaxe power
-  and placement reach; click an empty slot to place a fully-statted item. Modifiers are a
-  named dropdown filtered to the item's damage class, and a modified item shows its
-  modifier in its name and a colour-coded dot in the grid.
-- **Give items by name** — type-ahead over all 6,195 item names.
+  edit its stack, damage, defense, modifier, auto-reuse, use time, use animation, pickaxe
+  power and placement reach. Modifiers are a named dropdown holding only the ones that
+  item can take, and a modified item shows its modifier in its name.
+- **Place items by name** — click an empty slot, or replace what is in one, by typing an
+  item's name or number. All 6,195 items are known, and the item arrives with its own
+  stats.
 - **Recipe browser** — an icon grid of every craftable item with live search. Click one for
   its ingredients and crafting station, and toggle between how an item is made and what it
   can be used to make. Terraria has no such browser of its own.
 - **Compendium** — every item (6,195) and NPC (759) in the game, not just craftable ones.
-  Sort by damage, defense, life or rarity, filter by kind or name, and see each entry's
-  tooltip, sprite and a link to the wiki. Items can be given to you; NPCs can be spawned
-  beside you at a distance you choose. Bosses ask twice — a confirmation naming the boss,
-  then a countdown you can cancel.
+  Filter by kind or name, and see each entry's sprite, damage, defense, life and rarity,
+  with a link to its wiki page. Items can be given to you and NPCs spawned beside you.
+  **A boss is spawned the moment you press the button; nothing asks first.**
 - **Projectile editor** — change what one weapon's shots do while you play: pass
   through blocks, pierce more enemies, travel faster, be bigger, or last longer.
 
@@ -95,10 +91,12 @@ holds no state.*
 
 Pick the items you never want to keep and they turn into coins as you pick them up.
 
-Right-click any item in the **Inventory** tab to put it on the sell list, and right-click
-it again to take it off. The list is by item, not by slot, so it keeps working on
-everything of that kind you find later, and it is remembered between sessions. Items on
-the list are marked in the grid.
+Right-click any item in the **Inventory** section and choose **Add to the sell list**;
+right-click it again to take it off. The list is by item, not by slot, so it keeps
+working on everything of that kind you find later, and it is remembered between
+sessions. Items on the list are marked in the grid with a yellow border. The whole list
+is under **Effects**, where several items can be taken off at once — which is the way to
+remove something that is sold before you can right-click it.
 
 **Favorite anything you want to keep.** A favorited stack is never sold, even when it is
 on the list — alt-click it, the same way you protect a potion. That is the per-stack
@@ -197,8 +195,8 @@ not take both, and it will not wander into a separate deposit nearby.
 
 Silt, slush, desert fossils and obsidian are swept by default — obsidian forms where water
 runs into lava, so expect the lava that made it to still be there. Gems are opt-in: `--gems`
-on the CLI, or the **Ores only / Ores + gems** choice beside the panel toggle. Run it with
-`terrariabonker extract --watch`, or tick **Ore extractor (vein mining)** in the panel.
+on the CLI, or **Take gems too** under **Effects** in the panel. Run it with
+`terrariabonker extract --watch`, or tick **Ore extractor** under **Patches** in the panel.
 
 **This one is not reversible.** Every other cheat is a memory change you undo by switching
 it off; a mined tile is a permanent change to your world.
@@ -261,6 +259,17 @@ hooks belongs to the ReGrind authors.
 ## Requirements
 
 The same Terraria from Steam on both platforms; what differs is what runs it.
+
+| | Windows | Linux |
+| :--- | :--- | :--- |
+| Terraria | 1.4.5.8 | 1.4.5.8 (and 1.4.5.7, see [Version safety](#version-safety)) |
+| The game runs on | .NET Framework 4.8.1 | Proton |
+| Tested on | Windows 11 | Arch-based Linux with KDE Plasma (Wayland) |
+| Privileges | none | root for the command line, through sudo |
+| How to install | a downloaded installer | built from source, or the release tarball |
+
+Single-player only. The game installed natively on Linux (without Proton) is not
+supported, and neither is macOS.
 
 ### Windows
 
@@ -341,6 +350,7 @@ terrariabonker set-max-hp 500
 terrariabonker inventory           # list your inventory
 terrariabonker set-stack 40 9999   # set a slot's quantity
 terrariabonker set-item 0 3507 --damage 200 --auto-reuse 1
+terrariabonker give 757            # put an item in the first free slot, by item number
 terrariabonker fast-mining         # speed + power on all pickaxes
 terrariabonker long-reach --tiles 25
 
@@ -364,6 +374,7 @@ terrariabonker patch enable auto_use
 terrariabonker catch               # reel in every bite; you cast
 terrariabonker catch --recast      # and cast again after each one
 
+terrariabonker sell --dry-run      # what auto-sell would take; sells nothing
 terrariabonker restore             # re-apply your saved cheats and item edits
 terrariabonker extract-recipes     # rebuild the recipe database after a game update
 terrariabonker extract-sprites     # rebuild the icon cache after a game update
@@ -384,17 +395,24 @@ stays unprivileged and runs the CLI under sudo.
   re-applies them whenever a fresh game appears. This is what makes item stat edits survive
   a save and reload.
 - **Launch Terraria** — starts the game through Steam if it is not already running.
-- **Trainer** — godmode and infinite mana, heal and refill, max HP/mana, fast mining, long
-  reach, and the cheat toggles grouped into **Build / Combat / Accessories / Misc**, with a
-  value beside each where one applies.
+- **Player** — set current and maximum HP and mana, fast mining and long reach.
+- **Effects** — the cheats that only work while the panel is open: godmode and infinite
+  mana, fishing, the fishing potion effects, passive potions, gems for the ore extractor,
+  and auto-sell with its list.
+- **Projectiles** — the [projectile editor](#projectile-editor).
+- **Patches** — the cheats that change how the game behaves, grouped into **Build /
+  Combat / Accessories / Misc**, with a value beside each where one applies. These stay on
+  after the panel closes, until the game restarts.
 - **Inventory** — the grid, with each slot showing its sprite, stack count, a border tinted
-  by rarity, and a tooltip. Click a slot to edit it, or an empty one to place an item. The
-  grid follows the game about once a second, and an edit is **refused** if the slot changed
-  underneath it rather than overwriting whatever is really there.
-- **Recipes** — the icon grid and search. **Re-extract from game** rebuilds it after an
-  update.
-- **Compendium** — the item and NPC catalog. Double-click an entry for its stats, a wiki
-  link, and **Give** or **Spawn**.
+  by rarity, and a tooltip. Click a slot to edit it, or an empty one to place an item;
+  right-click an item for the sell list. The grid follows the game about once a second,
+  and an edit is **refused** if the slot changed underneath it rather than overwriting
+  whatever is really there. Only the numbers you change are written.
+- **Recipes** — the icon grid and search. **Re-extract from the game** rebuilds it after
+  an update, and **Extract item icons** rebuilds the icons.
+- **Compendium** — the item and NPC catalog. Pick a row, then **Give one** (which spawns
+  it, for an NPC) or **Open the wiki**.
+- **Appearance** — colour scheme, font and size.
 
 **Persistence note.** Terraria saves an item as only its type, stack and modifier, and
 rebuilds everything else from the type on load — so edits to damage, use speed, pickaxe
@@ -444,10 +462,13 @@ update, see [docs/discovery.md](docs/discovery.md).
 terrariabonker/
 ├── cmd/terrariabonker/         the command line (runs as root on Linux)
 ├── cmd/terrariabonker-gui/     the control panel (unprivileged; runs the command line)
-├── cmd/monofields/             dumps a mono class's field offsets
-├── cmd/prefixstats/            regenerates the modifier table from the game's IL
+├── cmd/monofields/             development: field offsets, read from the game on Linux
+├── cmd/clrfields/              development: the same, on Windows
+├── cmd/winrecon/               development: looks around a running game on Windows
+├── cmd/prefixstats/            development: regenerates the modifier table
 ├── internal/
 │   ├── proc/                   process memory access and privilege elevation
+│   ├── paths/                  where settings and caches live on each platform
 │   ├── locate/                 finds the player in memory
 │   ├── player/                 player stats
 │   ├── inventory/              inventory and item fields
@@ -456,6 +477,7 @@ terrariabonker/
 │   ├── projectile/             projectile edits, and the fishing bobber
 │   ├── tiles/                  world tiles and vein finding
 │   ├── selling/                coins, and what auto-sell will take
+│   ├── buffs/                  the potion effects the Effects cheats hold
 │   ├── service/                shared core behind the CLI and GUI
 │   ├── version/                version detection and the compatibility gate
 │   ├── profile/                your saved cheats and item edits
@@ -469,7 +491,7 @@ terrariabonker/
 │   ├── cli/                    the CLI's commands, and the JSON worker
 │   └── gui/                    the panel's tabs, and the client that drives the CLI
 ├── data/                       name and tooltip tables, extracted from the game
-├── tools/                      helpers: screenshots, the KDE window rule
+├── tools/                      helpers: screenshots, the KDE window rule, data extraction
 ├── docs/discovery.md           how the offsets were found, and how to rebuild them
 ├── ce/                         notes from the reverse-engineering work
 ├── specs/                      feature specs
@@ -490,8 +512,11 @@ the GUI's tests run headless through the Fyne test driver. They pass on Linux an
 
 ## Safety
 
-- Nothing is written to disk and no state is kept. Edited values are ordinary game values
-  the game carries on managing.
+- Your character and world files are never opened. Edited values are ordinary game values
+  the game carries on managing, and it saves them when it next saves, as it would
+  anything else. The trainer's own settings are in `%APPDATA%\terrariabonker` on Windows
+  and `~/.config/terrariabonker` on Linux.
+- **A boss picked in the Compendium is spawned at once**, with no confirmation.
 - Godmode holds your HP rather than making you invulnerable, so a single hit larger than
   your current HP can still land. Raise max HP for headroom.
 - **The ore extractor changes your world permanently.** Try it somewhere you do not mind

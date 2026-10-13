@@ -2,9 +2,12 @@ package gui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"image/color"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -53,6 +56,7 @@ buildInventory is the player's own inventory, slot for slot.
 
 The layout is Terraria's: a hotbar, the bag, the coin slots and the ammo slots.
 Clicking a cell edits that slot; clicking an empty one places something in it.
+Right-clicking a cell opens its menu, which is where the sell list is reached.
 */
 func (u *ui) buildInventory() fyne.CanvasObject {
 	u.iv.cells = map[int]*fyne.Container{}
@@ -74,10 +78,11 @@ func (u *ui) buildInventory() fyne.CanvasObject {
 		body.Add(widgets.Card(sec.Title, container.NewHBox(grid, layout.NewSpacer())))
 	}
 
-	hint := widgets.DimWrapped("Click a slot to edit it, or an empty slot to place an item.")
+	hint := widgets.DimWrapped("Click a slot to edit it, or an empty slot to place an item. " +
+		"Right-click an item to put it on the sell list, or to take it off.")
 	if !u.sprites.ready() {
-		hint = widgets.DimWrapped("Click a slot to edit it. Item icons are not extracted yet, " +
-			"so slots show shortened names.")
+		hint = widgets.DimWrapped("Click a slot to edit it; right-click an item for the sell " +
+			"list. Item icons are not extracted yet, so slots show shortened names.")
 	}
 
 	return u.logSplit(container.NewBorder(
@@ -148,10 +153,9 @@ func (u *ui) drawCell(slot int) {
 		}
 	}
 
-	slotCopy := slot
-	button := widget.NewButton("", func() { u.editSlot(slotCopy) })
-	button.Importance = widget.LowImportance
-	parts = append(parts, button)
+	parts = append(parts, newSlotButton(
+		func() { u.editSlot(slot) },
+		func() *fyne.Menu { return u.cellMenu(slot) }))
 
 	tip := cellTip(s, u.fullName(s), u.listedForSale(s.Type))
 	cell.Objects = []fyne.CanvasObject{widgets.WithTip(container.NewStack(parts...), tip)}
@@ -319,6 +323,127 @@ func (u *ui) redrawAllCells() {
 }
 
 /*
+slotButton is a cell's click target: a button that also answers a right-click.
+
+Fyne's Button is not secondary-tappable, so this adds the one method. It sits
+under the cell's tip, which takes the hover and neither kind of tap, so both
+reach it.
+*/
+type slotButton struct {
+	widget.Button
+	menu func() *fyne.Menu
+}
+
+func newSlotButton(tapped func(), menu func() *fyne.Menu) *slotButton {
+	b := &slotButton{menu: menu}
+	b.OnTapped = tapped
+	b.Importance = widget.LowImportance
+	b.ExtendBaseWidget(b)
+	return b
+}
+
+// TappedSecondary implements fyne.SecondaryTappable: the cell's menu, at the
+// pointer.
+func (b *slotButton) TappedSecondary(e *fyne.PointEvent) {
+	c := fyne.CurrentApp().Driver().CanvasForObject(b)
+	if c == nil || b.menu == nil {
+		return
+	}
+	// The pointer has not left the cell, so nothing else takes its tip down,
+	// and it would sit on top of the menu.
+	widgets.HideTips()
+	widget.ShowPopUpMenuAtPosition(b.menu(), c, e.AbsolutePosition)
+}
+
+/*
+cellMenu is what right-clicking a slot offers.
+
+The sell list is reached from here and not from the editor: the editor is about
+one item in one slot, and the list is about every item of a kind, wherever it
+turns up. An empty slot has no kind to list.
+*/
+func (u *ui) cellMenu(slot int) *fyne.Menu {
+	s := u.slotAt(slot)
+	if s.Empty() {
+		return fyne.NewMenu("",
+			fyne.NewMenuItem("Place an item…", func() { u.editSlot(slot) }))
+	}
+	label := "Add to the sell list"
+	if u.listedForSale(s.Type) {
+		label = "Take off the sell list"
+	}
+	return fyne.NewMenu("",
+		fyne.NewMenuItem("Edit "+u.itemName(s.Type)+"…", func() { u.editSlot(slot) }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem(label, func() { u.toggleSellList(s.Type) }),
+	)
+}
+
+// slotAt is the last reading of a slot, or an empty one when it has not been
+// read yet.
+func (u *ui) slotAt(slot int) client.ItemSlot {
+	if s, ok := u.iv.slots[slot]; ok {
+		return s
+	}
+	return client.ItemSlot{Slot: slot}
+}
+
+/*
+toggleSellList puts an item type on the sell list, or takes it off.
+
+The command that changes the list also answers with it, so the grid is redrawn
+from what the profile now holds rather than from what was asked for.
+*/
+func (u *ui) toggleSellList(itemType int) {
+	name := u.itemName(itemType)
+	argv := client.SellListArgv(&itemType, nil)
+	if u.listedForSale(itemType) {
+		argv = client.SellListArgv(nil, &itemType)
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), onceTimeout)
+		defer cancel()
+		out, err := u.run(ctx, argv)
+		fyne.Do(func() {
+			list, ok := client.ParseSellList(out)
+			if err != nil || !ok {
+				u.note("[sell] the sell list was not changed: " + firstLine(detail(out, err)))
+				return
+			}
+			u.takeSellList(list)
+			if u.listedForSale(itemType) {
+				u.note("[sell] " + name + " is on the sell list")
+			} else {
+				u.note("[sell] " + name + " is off the sell list")
+			}
+		})
+	}()
+}
+
+/*
+takeSellList adopts a freshly read sell list, and redraws the cells it re-marks.
+
+A cell is otherwise redrawn only when its slot changes, and listing an item
+changes no slot.
+*/
+func (u *ui) takeSellList(list []int) {
+	sort.Ints(list)
+	before := map[int]bool{}
+	for _, t := range u.fx.whitelist {
+		before[t] = true
+	}
+	u.fx.whitelist = list
+	if u.fx.sellList != nil {
+		u.fx.sellList.Refresh()
+	}
+	for slot, s := range u.iv.slots {
+		if !s.Empty() && before[s.Type] != u.listedForSale(s.Type) {
+			u.drawCell(slot)
+		}
+	}
+}
+
+/*
 editSlot opens the editor for one slot.
 
 The type the slot held when the editor opened is carried into the write as
@@ -326,89 +451,186 @@ The type the slot held when the editor opened is carried into the write as
 on a snapshot could land on whatever has since replaced the item.
 */
 func (u *ui) editSlot(slot int) {
-	s := u.iv.slots[slot]
+	s := u.slotAt(slot)
+	f := newItemFields(u, s)
 
-	itemType := widget.NewEntry()
-	itemType.SetText(strconv.Itoa(s.Type))
-	itemType.Validator = numberIn(0, 9999)
-
-	stack := widget.NewEntry()
-	stack.SetText(strconv.Itoa(max(s.Stack, 1)))
-	stack.Validator = numberIn(1, 9999)
-
-	names := make([]string, 0, len(u.iv.prefix)+1)
-	names = append(names, "none")
-	byName := map[string]int{"none": 0}
-	ids := make([]int, 0, len(u.iv.prefix))
-	for id := range u.iv.prefix {
-		ids = append(ids, id)
-	}
-	sort.Ints(ids)
-	for _, id := range ids {
-		p := u.iv.prefix[id]
-		label := p.Name + " (" + p.Quality + ")"
-		names = append(names, label)
-		byName[label] = id
-	}
-	prefix := widget.NewSelect(names, nil)
-	prefix.SetSelected("none")
-	if p, ok := u.iv.prefix[s.Prefix]; ok {
-		prefix.SetSelected(p.Name + " (" + p.Quality + ")")
-	}
-
-	/*
-		The sell list is reached from here rather than by right-clicking the cell.
-
-		The Qt panel uses a context menu on the cell. Fyne's Button is not
-		secondary-tappable, and the affordance was undiscoverable anyway -- a
-		whitelisted item is sold on the next round, so it never stays in the grid
-		long enough to right-click a second time to take it off again.
-	*/
-	sell := widget.NewButton("", nil)
-	sell.Hidden = s.Empty()
-	listed := u.listedForSale(s.Type)
-	sell.SetText("Add to the sell list")
-	if listed {
-		sell.SetText("Take off the sell list")
-	}
-	sell.OnTapped = func() {
-		t := s.Type
-		if listed {
-			u.once("Taking "+u.itemName(t)+" off the sell list", client.SellListArgv(nil, &t))
-		} else {
-			u.once("Adding "+u.itemName(t)+" to the sell list", client.SellListArgv(&t, nil))
-		}
-		u.loadSellList()
-	}
-
-	form := container.New(layout.NewFormLayout(),
-		widget.NewLabel("Item"), itemType,
-		widget.NewLabel("Stack"), stack,
-		widget.NewLabel("Modifier"), prefix,
-		widget.NewLabel("Auto-sell"), container.NewHBox(sell),
-	)
 	title := "Slot " + strconv.Itoa(slot)
 	if !s.Empty() {
 		title += " — " + u.fullName(s)
 	}
-
-	u.prompt(title, "Write", form, func() {
-		want, err := strconv.Atoi(itemType.Text)
+	u.prompt(title, "Write", f.body, func() {
+		now, err := f.read()
 		if err != nil {
-			u.sh.Flash("That is not an item number.", fd.StatusWarn)
+			u.sh.Flash(err.Error(), fd.StatusWarn)
 			return
 		}
-		e := client.ItemEdit{}
-		if n, err := strconv.Atoi(stack.Text); err == nil {
-			e.Stack = &n
+		e, write := editOf(s, now)
+		if !write {
+			u.sh.Flash("Nothing was changed.", fd.StatusWarn)
+			return
 		}
-		if id, ok := byName[prefix.Selected]; ok {
-			e.Prefix = &id
-		}
-		if !s.Empty() {
-			had := s.Type
-			e.ExpectType = &had
-		}
-		u.do("Writing slot "+strconv.Itoa(slot), client.SetItemArgv(slot, want, e))
+		u.do("Writing slot "+strconv.Itoa(slot), client.SetItemArgv(slot, now.Type, e))
 	})
+}
+
+// itemFields is the editor's widgets, and how to read them back.
+type itemFields struct {
+	body fyne.CanvasObject
+	read func() (itemForm, error)
+}
+
+// The ranges the editor accepts. Wide: these are the game's own 32-bit fields,
+// and the limits are there to catch a slip of the keyboard, not to judge.
+const (
+	maxItemStack = 9999
+	maxDamage    = 999999
+	maxUseTicks  = 999
+	maxPickPower = 2000
+	maxTileBoost = 100
+)
+
+// errNoSuchItem is what the editor says when the Item field names nothing.
+var errNoSuchItem = errors.New("that is not an item name or number")
+
+/*
+newItemFields builds the editor's form for one slot.
+
+Every field the CLI's set-item writes is here. The stats belong to the item the
+slot holds, so they are switched off while the Item field names a different one:
+that write places the new item with its own stats, and these would be ignored.
+*/
+func newItemFields(u *ui, s client.ItemSlot) itemFields {
+	was := formOf(s)
+	names, _ := game.ItemNames()
+
+	item := widget.NewEntry()
+	item.SetPlaceHolder("item name or number")
+	if !s.Empty() {
+		item.SetText(strconv.Itoa(s.Type))
+	}
+	means := widget.NewLabel("")
+	means.Truncation = fyne.TextTruncateEllipsis
+	typed := func() (int, bool) {
+		if s.Empty() && strings.TrimSpace(item.Text) == "" {
+			return 0, true
+		}
+		return resolveItem(names, item.Text)
+	}
+
+	number := func(v, lo, hi int) *widget.Entry {
+		e := widget.NewEntry()
+		e.SetText(strconv.Itoa(v))
+		e.Validator = numberIn(float64(lo), float64(hi))
+		return e
+	}
+	stack := number(was.Stack, 1, maxItemStack)
+	damage := number(was.Damage, -1, maxDamage)
+	defense := number(was.Defense, 0, maxItemStack)
+	useTime := number(was.UseTime, 0, maxUseTicks)
+	useAnim := number(was.UseAnim, 0, maxUseTicks)
+	pick := number(was.Pick, 0, maxPickPower)
+	tile := number(was.TileBoost, 0, maxTileBoost)
+	auto := widget.NewCheck("swing or fire while the button is held", nil)
+	auto.SetChecked(was.AutoReuse)
+
+	ids := []int{0}
+	labels := []string{"none"}
+	if all, err := game.ItemPrefixes(); err == nil {
+		offered := prefixChoices(all, s)
+		ids = append(ids, offered...)
+		labels = append(labels, prefixLabels(offered, u.iv.prefix)...)
+	}
+	prefix := widget.NewSelect(labels, nil)
+	prefix.SetSelectedIndex(0)
+	for i, id := range ids {
+		if id == was.Prefix {
+			prefix.SetSelectedIndex(i)
+		}
+	}
+	takesModifier := len(ids) > 1
+
+	// The stats of the item in the slot: meaningless for an empty slot, and
+	// for a slot about to hold something else.
+	stats := []fyne.Disableable{damage, defense, useTime, useAnim, pick, tile, auto}
+	sync := func() {
+		t, ok := typed()
+		switch {
+		case !ok:
+			means.SetText("no item by that name or number")
+		case t == 0 && s.Empty():
+			means.SetText("")
+		case t == 0:
+			means.SetText("empties the slot")
+		default:
+			means.SetText(u.itemName(t) + " (#" + strconv.Itoa(t) + ")")
+		}
+		same := ok && t == s.Type && !s.Empty()
+		for _, w := range stats {
+			setEnabled(w, same)
+		}
+		setEnabled(prefix, same && takesModifier)
+		setEnabled(stack, ok && t != 0)
+	}
+	item.OnChanged = func(string) { sync() }
+	sync()
+
+	note := "Type a different item to replace this one. It arrives with its own stats, " +
+		"which can then be edited."
+	if s.Empty() {
+		note = "The item arrives with its own stats, which can then be edited."
+	}
+	form := container.New(layout.NewFormLayout(),
+		widget.NewLabel("Item"), container.NewBorder(nil, means, nil, nil, item),
+		widget.NewLabel("Stack"), stack,
+		widget.NewLabel("Damage"), damage,
+		widget.NewLabel("Defense"), defense,
+		widget.NewLabel("Modifier"), prefix,
+		widget.NewLabel("Auto-reuse"), auto,
+		widget.NewLabel("Use time"), widgets.WithTip(useTime, "Ticks per use. Lower is faster."),
+		widget.NewLabel("Use animation"), widgets.WithTip(useAnim, "Ticks one swing is drawn for."),
+		widget.NewLabel("Pickaxe power %"), pick,
+		widget.NewLabel("Placement reach"), widgets.WithTip(tile, "Extra tiles of reach while this item is held."),
+	)
+
+	read := func() (itemForm, error) {
+		t, ok := typed()
+		if !ok {
+			return itemForm{}, errNoSuchItem
+		}
+		now := itemForm{Type: t, AutoReuse: auto.Checked}
+		if i := prefix.SelectedIndex(); i >= 0 && i < len(ids) {
+			now.Prefix = ids[i]
+		}
+		for _, f := range []struct {
+			name string
+			from *widget.Entry
+			to   *int
+		}{
+			{"stack", stack, &now.Stack}, {"damage", damage, &now.Damage},
+			{"defense", defense, &now.Defense}, {"use time", useTime, &now.UseTime},
+			{"use animation", useAnim, &now.UseAnim}, {"pickaxe power", pick, &now.Pick},
+			{"placement reach", tile, &now.TileBoost},
+		} {
+			if f.from.Disabled() {
+				// Switched off because it does not apply to this write. What
+				// it shows is the old item's, and editOf does not look at it.
+				continue
+			}
+			if err := f.from.Validate(); err != nil {
+				return itemForm{}, fmt.Errorf("%s wants a %w", f.name, err)
+			}
+			*f.to, _ = strconv.Atoi(strings.TrimSpace(f.from.Text))
+		}
+		return now, nil
+	}
+	return itemFields{body: container.NewVBox(form, widgets.DimWrapped(note)), read: read}
+}
+
+// setEnabled switches a control on or off.
+func setEnabled(w fyne.Disableable, on bool) {
+	if on {
+		w.Enable()
+		return
+	}
+	w.Disable()
 }
