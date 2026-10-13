@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -500,11 +501,40 @@ func (u *ui) readVeins(raw string) {
 
 // readSell reports what was sold and where the coins went.
 func (u *ui) readSell(raw string) {
+	for _, line := range soldLines(raw) {
+		u.sell.say(line)
+	}
+}
+
+// soldLines is one line for each stack a selling round took, with its price.
+func soldLines(raw string) []string {
+	var lines []string
 	for _, got := range client.Replies(raw) {
 		for _, e := range rows(got, "sold") {
-			u.sell.say(fmt.Sprintf("sold %v x%v for %v", e["name"], e["stack"], e["value"]))
+			copper, _ := e["copper"].(float64)
+			lines = append(lines, fmt.Sprintf("sold %v x%v for %s",
+				e["name"], e["stack"], coinText(int(copper))))
 		}
 	}
+	return lines
+}
+
+// coinText is copper as the game writes it: 1 platinum 23 gold 45 silver.
+func coinText(copper int) string {
+	if copper <= 0 {
+		return "nothing"
+	}
+	var parts []string
+	for _, coin := range []struct {
+		worth int
+		name  string
+	}{{1000000, "platinum"}, {10000, "gold"}, {100, "silver"}, {1, "copper"}} {
+		if n := copper / coin.worth; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, coin.name))
+			copper -= n * coin.worth
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // loadSellList refreshes the whitelist from the profile, which is its owner.

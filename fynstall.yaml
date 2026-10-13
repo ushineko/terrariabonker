@@ -10,7 +10,7 @@ app:
   id: io.ushineko.terrariabonker
   name: TerrariaBonker
   # .tag's, without the v. A test holds the two together (internal/buildinfo).
-  version: 0.45.1
+  version: 0.45.2
   publisher: ushineko
   icon: assets/terrariabonker.png
 
