@@ -283,6 +283,14 @@ deliberately: it is two group boxes of buttons and shows nothing a reader needs.
   `main` (`git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`). The build workflow refuses a
   tag that does not match `.tag`, then publishes the `make release` tarball and the Windows
   installers.
+- **Every change worth telling a user about adds a line to the README's changelog** under
+  `### Unreleased`, in the same commit as the change. Releasing renames that heading to the
+  version and its date, and those lines are the release notes.
+- **The release notes are those lines, reflowed.** GitHub renders a newline in release notes
+  as a line break, so a changelog wrapped for a plain file arrives as ragged half-lines: send
+  each bullet as one long line and let the browser wrap it. Seven releases here went out with
+  no notes at all before this was written down, and across the sibling repositories a hundred
+  and seventy-seven went out hard-wrapped. Check the rendered page, not the file.
 - **The installers are built by fynstall from `fynstall.yaml`** (`make installer`, spec
   053). Its `app.version` is `.tag` without the `v`; bump both in the same commit — a test
   fails when they differ. The fynstall version is pinned in the `Makefile`, as the linter's
