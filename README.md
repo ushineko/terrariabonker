@@ -525,3 +525,17 @@ the GUI's tests run headless through the Fyne test driver. They pass on Linux an
   game eat it on use.
 - Do not `--force` past an incompatible version. Cheats built for another release can write
   into the wrong place.
+
+## Changelog
+
+Kept from v0.45.2 onwards. Releases before it have no notes and none are
+invented for them: a changelog written afterwards from commit messages says
+what was touched, not what changed for anyone using it, and reads as a
+record when it is a guess.
+
+Every change worth telling a user about adds a line here under
+`### Unreleased`, in the same commit as the change. Releasing renames that
+heading to the version and its date, and those lines become the release
+notes.
+
+### Unreleased
